@@ -28,11 +28,6 @@ public abstract record AgentRequest(CorrelationId CorrelationId);
 public sealed record GetAgentSnapshotRequest(CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
-public sealed record OpenMainWindowRequest(
-    WorkspacePage? Destination,
-    CorrelationId CorrelationId)
-    : AgentRequest(CorrelationId);
-
 public sealed record OpenAgentNativePropertiesRequest(
     StorageObjectId Target,
     int DiskNumber,
@@ -106,48 +101,39 @@ public sealed record DeleteAgentSimulationDocumentRequest(
     : AgentRequest(CorrelationId);
 
 public sealed record CommitAgentSimulationEditRequest(
-    SimulationDocumentPayload Document,
-    string ExpectedPreviousSha256,
-    OperationPlan Plan,
-    IReadOnlyList<ExecutionEvent> Events,
-    CorrelationId CorrelationId,
-    string CommitId = "")
+    SimulationCommitIntent Intent,
+    CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
 public sealed record LookupAgentSimulationCommitRequest(
     string CommitId,
     string DocumentId,
-    string ExpectedBeforeSha256,
-    string ExpectedAfterSha256,
-    long ExpectedRevision,
-    string OperationId,
-    string PlanHash,
+    string IntentHash,
     CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
 public sealed record SimulationCommitReceipt(
     string CommitId,
-    string OperationId,
+    string DocumentId,
+    long BeforeRevision,
+    long AfterRevision,
     string BeforeSha256,
-    string PlanHash,
-    SimulationDocumentPayload Document,
+    string AfterSha256,
+    string IntentHash,
     DateTimeOffset CommittedAtUtc);
+
+public sealed record SimulationEditCommittedResponse(SimulationCommitReceipt Receipt) : AgentResponse;
 
 public sealed record SimulationCommitLookupResponse(
     bool Found,
     SimulationCommitReceipt? Receipt)
     : AgentResponse;
 
-public sealed record CaptureAgentInventoryRequest(
-    bool IncludeLegacyComparison,
-    CorrelationId CorrelationId)
-    : AgentRequest(CorrelationId);
-
 public sealed record CaptureAgentManageInventoryRequest(
     CorrelationId CorrelationId, CollectionPurpose Purpose = CollectionPurpose.Storage)
     : AgentRequest(CorrelationId);
 
-public sealed record LoadAgentManageInventoryRequest(CorrelationId CorrelationId)
+public sealed record LoadAgentInventoryCacheRequest(CorrelationId CorrelationId)
     : AgentRequest(CorrelationId);
 
 public sealed record ExportAgentMonitorCsvRequest(
@@ -253,18 +239,11 @@ public sealed record SimulationDocumentDeletedResponse(
     bool Deleted)
     : AgentResponse;
 
-public sealed record InventoryCaptureResponse(
-    Guid NativeSnapshotId,
-    InventorySnapshot NativeSnapshot,
-    Guid? LegacySnapshotId,
-    InventorySnapshot? LegacySnapshot,
-    Guid? ComparisonId,
-    InventoryComparison? Comparison)
-    : AgentResponse;
-
 public sealed record ManageInventoryCaptureResponse(
     Guid SnapshotId,
-    LocalInventoryDocumentPayload Document)
+    string DocumentId,
+    string Revision,
+    long Generation)
     : AgentResponse;
 
 public sealed record ManageInventoryLoadedResponse(
@@ -335,8 +314,22 @@ public sealed record AgentInventoryFailedEvent(
 public sealed record AgentTaskEvent(ApplicationTaskEvent TaskEvent)
     : AgentEvent(TaskEvent.OccurredAtUtc);
 
-public sealed record AgentMonitorSampleEvent(MonitorSample Sample)
-    : AgentEvent(Sample.SampledAtUtc);
+public sealed record AgentMonitorBatchEvent(
+    AgentInstanceId AgentInstanceId,
+    SessionId SessionId,
+    long FirstSequence,
+    long LastSequence,
+    IReadOnlyList<MonitorSample> Samples,
+    bool HasGap,
+    DateTimeOffset OccurredAtUtc) : AgentEvent(OccurredAtUtc);
+
+public sealed record AgentMonitorStateEvent(
+    AgentInstanceId AgentInstanceId,
+    MonitoringSession? Session,
+    MonitorRuntimeDiagnostics Diagnostics,
+    IReadOnlyList<StorageHealthEvent> StorageHealthEvents,
+    DateTimeOffset OccurredAtUtc,
+    AgentLifecycleState LifecycleState = AgentLifecycleState.Running) : AgentEvent(OccurredAtUtc);
 
 public sealed record AgentProcessStateEvent(
     ProcessRegistration Registration,

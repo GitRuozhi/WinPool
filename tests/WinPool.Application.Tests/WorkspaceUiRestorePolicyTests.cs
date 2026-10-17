@@ -79,7 +79,6 @@ public sealed class WorkspaceUiRestorePolicyTests
     public void WantedObjectKeyPrefersTheCategorySelection()
     {
         var state = new WorkspaceUiState(
-            "Manage",
             "local:machine",
             ManageWorkspaceCategory.Pool,
             new Dictionary<ManageWorkspaceCategory, string>
@@ -91,7 +90,6 @@ public sealed class WorkspaceUiRestorePolicyTests
         Assert.Equal(
             "pool:highlighted",
             WorkspaceUiRestorePolicy.WantedObjectKey(new WorkspaceUiState(
-                "Manage",
                 "local:machine",
                 ManageWorkspaceCategory.Pool,
                 null,
@@ -103,7 +101,6 @@ public sealed class WorkspaceUiRestorePolicyTests
         ManageWorkspaceCategory category,
         string objectKey) =>
         new(
-            "Manage",
             systemId,
             category,
             new Dictionary<ManageWorkspaceCategory, string> { [category] = objectKey },

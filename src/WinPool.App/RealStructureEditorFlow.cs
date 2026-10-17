@@ -2,22 +2,26 @@ using System.Text.Json;
 using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
-using WinPool.Execution;
 
 namespace WinPool_App;
 
 public partial class EditorPageBase
 {
-    private readonly Dictionary<SimulationEditingSession, RealAutomaticLayoutProgress> automaticLayoutProgress = new();
     protected RealStructureDraftPreview BuildRealStructureDraftPreview(SimulationEditingSession session) =>
         RealStructureDraftPlanner.Build(session,
             ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn).Preview;
 
     protected async Task<bool> ApplyRealStructureDraftAsync(SimulationEditingSession session)
     {
-        if (IsRealStructureApplyInProgress || !ViewModel.CanSubmitRealOperation
-            || session.SystemId != ViewModel.ActiveDocument.SystemId) return false;
-        if (ViewModel.RealStructureResults.HasPending(session)) return false;
+        if (IsRealStructureApplyInProgress
+            || session.SystemId != ViewModel.ActiveDocument.SystemId || ViewModel.AgentConnection is not { } connection)
+            return false;
+        if (session.RealStructureResumeJobId is { } previous)
+        {
+            if (!await RestoreRemainingStructureGoalAsync(session, previous, connection)) return false;
+            if (session.RealStructureResumeJobId is null) return true;
+        }
+        if (!ViewModel.CanSubmitRealOperation) return false;
         if (session.BaselineRevision != ViewModel.ActiveDocument.Revision
             || session.Baseline.SnapshotVersion != ViewModel.ActiveDocument.Snapshot.SnapshotVersion)
         {
@@ -31,310 +35,169 @@ public partial class EditorPageBase
             session.RealApplyMessage = string.Join(Environment.NewLine, draft.Preview.BlockingReasons);
             return false;
         }
-        // Retain the planner's complete normalized goal across pool/tier identity
-        // remapping, including drafts saved before per-media goals were explicit.
-        foreach (var creation in draft.Creations)
-            session.PoolIntents[creation.Pool.StableId] = creation.Intent;
-        RealStructureApplyAuthorization authorization;
-        try
-        {
-            authorization = new RealStructureApplyAuthorization(draft, session, ViewModel.RealProductSessionId);
-        }
-        catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or ArgumentException)
-        {
-            session.RealApplyMessage = exception.Message;
-            PublishOperationException(Text("无法确认结构变更", "Cannot confirm structural changes"),
-                "real", exception, "real.structure.confirmation_invalid");
-            return false;
-        }
+        foreach (var creation in draft.Creations) session.PoolIntents[creation.Pool.StableId] = creation.Intent;
+        var generation = session.BindingGeneration;
+        var productSession = ViewModel.RealProductSessionId;
+        var jobId = Guid.NewGuid();
+        var goal = new RealStructureJobGoal(session.SystemId, session.Working,
+            session.PoolIntents.OrderBy(item => item.Key, StringComparer.Ordinal)
+                .Select(item => new RealStructurePoolGoal(item.Key, item.Value)).ToArray(), session.RealStructureResumeJobId);
+        using var subscription = new CancellationTokenSource();
+        await using var events = connection.WatchAsync(subscription.Token).GetAsyncEnumerator(subscription.Token);
+        var next = events.MoveNextAsync().AsTask();
+        AgentRealStructureJobResponse? prepared = null;
+        var accepted = false;
         IsRealStructureApplyInProgress = true;
-        var completed = new List<string>();
         try
         {
-            // Reject known provider/layout limitations before deleting or clearing anything.
-            foreach (var creation in draft.Creations.Where(item => item.CreatePool || item.CreateVirtualDisk || item.CreateTier))
+            ReportRealActivity(Text("正在核对结构目标", "Checking the structural goal"));
+            var preparation = await connection.SendAsync(new PrepareAgentRealStructureJobRequest(
+                goal, jobId, productSession, CorrelationId.New()), CancellationToken.None);
+            if (!preparation.IsSuccess || preparation.Value is not AgentRealStructureJobResponse frozen
+                || frozen.JobId != jobId || frozen.State != RealOperationState.Prepared)
+                throw new InvalidDataException(preparation.Messages.FirstOrDefault()?.DiagnosticText
+                    ?? preparation.Messages.FirstOrDefault()?.Code ?? "The structural job could not be prepared.");
+            prepared = frozen;
+            ViewModel.ObserveStructureJob(frozen, goal.ResumeFromJobId);
+            var description = new RealStructureApplyAuthorization(draft, session, productSession).Describe(
+                draft, session.BaselineSourceFacts, ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn);
+            if (!await ConfirmAsync(Text("确认真实结构变更", "Confirm real structural changes"), description)) return false;
+            if (generation != session.BindingGeneration || session.HasBaselineConflict || session.OutcomeUnknown
+                || ViewModel.ActiveDocument.SystemId != session.SystemId || ViewModel.RealProductSessionId != productSession)
+                return false;
+            ReportRealActivity(Text("正在应用结构目标", "Applying the structural goal"));
+            // Exactly one Accept. A missing reply is resolved by the same job id.
+            accepted = true;
+            session.RealStructureResumeJobId = jobId;
+            var acceptance = await connection.SendAsync(new AcceptAgentRealStructureJobRequest(jobId,
+                frozen.GoalHash, productSession, CorrelationId.New()), CancellationToken.None);
+            var status = acceptance.Value as AgentRealStructureJobResponse;
+            if (status is null)
             {
-                ReportRealActivity(Text("正在核对目标布局支持", "Checking the target layout support"));
-                var tiered = (creation.CreateTier || creation.CreateVirtualDisk) && creation.Intent.Layout == PoolVirtualDiskLayout.HddTiered;
-                foreach (var memberId in creation.PhysicalDiskIds)
+                var query = await connection.SendAsync(new QueryAgentRealStructureJobRequest(jobId, CorrelationId.New()), CancellationToken.None);
+                status = query.Value as AgentRealStructureJobResponse;
+            }
+            if (status is null) throw new IOException("The accepted structural job status is unavailable.");
+            while (status.State is RealOperationState.Accepted or RealOperationState.Running)
+            {
+                session.RealApplyMessage = string.Join(Environment.NewLine, status.Completed);
+                ReportRealActivity(status.Completed.LastOrDefault()
+                    ?? Text("正在执行并核对结构目标", "Executing and verifying the structural goal"));
+                if (!await next) throw new IOException("The structural job event stream was disconnected. The goal is retained.");
+                var item = events.Current;
+                if (item is AgentRealStructureJobStatusEvent changed && changed.Status.JobId == jobId
+                    && changed.Status.Revision >= status.Revision)
+                    status = changed.Status;
+                else if (item is AgentStateReseedEvent)
                 {
-                    var target = Id(StorageObjectKind.PhysicalDisk, memberId);
-                    var support = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealStructureCreationSupportRequest(
-                        target, tiered, ViewModel.RealProductSessionId, CorrelationId.New()), CancellationToken.None);
-                    if (!support.IsSuccess || support.Value is not AgentRealStructureCreationSupportResponse actual
-                        || actual.Support.PhysicalTarget != target || actual.Support.Tiered != tiered)
-                        throw new InvalidDataException(support.Messages.FirstOrDefault()?.DiagnosticText
-                            ?? support.Messages.FirstOrDefault()?.Code ?? "The requested layout is unsupported.");
+                    var query = await connection.SendAsync(new QueryAgentRealStructureJobRequest(jobId, CorrelationId.New()), CancellationToken.None);
+                    if (query.Value is AgentRealStructureJobResponse recovered) status = recovered;
+                }
+                next = events.MoveNextAsync().AsTask();
+            }
+            var terminalRead = await connection.SendAsync(new QueryAgentRealStructureJobRequest(jobId, CorrelationId.New()), CancellationToken.None);
+            if (terminalRead.Value is AgentRealStructureJobResponse terminal) status = terminal;
+            ViewModel.ObserveStructureJob(status);
+            session.RealApplyMessage = string.Join(Environment.NewLine, status.Completed.Append(status.Code ?? ""));
+            if (status.Children.LastOrDefault() is { Value: var childId } && childId != Guid.Empty)
+            {
+                var child = await RealOperationStatusCache.For(connection).QueryAsync(new(childId), CancellationToken.None);
+                if (child is not null)
+                {
+                    LastRealOperationResponse = child;
+                    ViewModel.ObserveRealOperation(child);
+                    if (status.RequiresReconciliation && generation == session.BindingGeneration)
+                        session.MarkOutcomeUnknown(child.Plan.OperationId, child.Plan.PlanHash);
                 }
             }
-            ValidateApplyContext();
-            if (!await ConfirmAsync(Text("确认真实结构变更", "Confirm real structural changes"),
-                authorization.Describe(draft, session.BaselineSourceFacts,
-                    ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn))) return false;
-            ValidateApplyContext();
-            authorization.Confirm();
-            foreach (var pool in draft.RemovedPools)
+            var succeeded = status.State == RealOperationState.Succeeded && !status.RequiresReconciliation;
+            if (generation == session.BindingGeneration && session.SystemId == ViewModel.ActiveDocument.SystemId)
             {
-                var vds = session.Baseline.VirtualDisks.Where(vd => vd.PoolStableId == pool.StableId).ToArray();
-                var tiers = session.Baseline.StorageTiers.Where(tier => tier.PoolStableId == pool.StableId
-                    && tier.VirtualDiskStableId is null).Select(tier => Id(StorageObjectKind.StorageTier, tier.StableId)).ToArray();
-                if (!await Stage(RealOperationProposalFactory.DissolveSingleMemberPool(session.SystemId,
-                    Id(StorageObjectKind.StoragePool, pool.StableId), vds.Length == 0 ? null : Id(StorageObjectKind.VirtualDisk, vds.Single().StableId), tiers,
-                    pool.MemberPhysicalDiskIds.Select(id => Id(StorageObjectKind.PhysicalDisk, id)).ToArray()),
-                    Text($"已解散 {pool.FriendlyName}", $"Dissolved {pool.FriendlyName}"))) return false;
+                LastRealInventoryRefreshSucceeded = await ViewModel.ReadPublishedRealInventoryAsync();
+                if (LastRealInventoryRefreshSucceeded && !status.RequiresReconciliation)
+                {
+                    if (succeeded) session.Bind(ViewModel.ActiveDocument, ViewModel.ActiveSnapshot);
+                    else if (status.RemainingGoal is { } remaining)
+                        session.RebaseVerified(ViewModel.ActiveDocument, new(remaining.Working,
+                            remaining.PoolIntents.ToDictionary(item => item.PoolId, item => item.Intent, StringComparer.Ordinal),
+                            session.MaximumSizeFields.ToHashSet(StringComparer.Ordinal)));
+                    if (!succeeded) session.RealStructureResumeJobId = jobId;
+                    OnRealInventoryRefreshed();
+                }
             }
-            foreach (var vd in draft.RemovedVirtualDisks)
-                if (!await Stage(RealOperationProposalFactory.OneStep(session.SystemId, OperationIntent.DeleteVirtualDisk,
-                    Id(StorageObjectKind.VirtualDisk, vd.StableId),
-                    new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(Id(StorageObjectKind.VirtualDisk, vd.StableId))),
-                    "The exact virtual disk and its children are absent", "All files, partitions and volumes on the exact virtual disk are lost"),
-                    Text($"已删除 VD {vd.FriendlyName}", $"Deleted VD {vd.FriendlyName}"))) return false;
-            foreach (var tier in draft.RemovedTiers)
-                if (!await Stage(RealOperationProposalFactory.DeleteHddTierTemplate(session.SystemId,
-                    Id(StorageObjectKind.StorageTier, tier.StableId)),
-                    Text($"已删除模板 {tier.FriendlyName}", $"Deleted template {tier.FriendlyName}"))) return false;
-
-            foreach (var creation in draft.Creations)
-            {
-                var intent = creation.Intent;
-                var poolId = creation.Pool.StableId;
-                var members = creation.PhysicalDiskIds.Select(id => Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
-                if (creation.CreatePool)
-                {
-                    foreach (var member in members)
-                    {
-                        var snapshot = ViewModel.ActiveDocument.Snapshot;
-                        if (snapshot.StoragePools.Any(pool => !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Contains(member.ProviderKey)))
-                            throw new InvalidDataException("An exact member still belongs to a concrete pool.");
-                        var direct = snapshot.OsDisks.SingleOrDefault(disk => disk.PhysicalDiskStableId == member.ProviderKey
-                            && disk.VirtualDiskStableId is null);
-                        if (direct is not null && (!direct.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase)
-                            || snapshot.Partitions.Any(partition => partition.OsDiskStableId == direct.StableId)))
-                        {
-                            var clear = RealOperationProposalFactory.ClearToRaw(session.SystemId,
-                                Id(StorageObjectKind.OsDisk, direct.StableId));
-                            clear = clear with { Targets = clear.Targets.Concat(members).Distinct().ToArray() };
-                            if (!await Stage(clear, Text("已核对清空至 RAW", "Verified clear to RAW"))) return false;
-                        }
-                    }
-                    var temporaryPoolId = poolId;
-                    if (!await Stage(RealOperationProposalFactory.CreatePoolWithMembers(session.SystemId,
-                        members, creation.Pool.FriendlyName),
-                        Text("已核对新池", "Verified new pool"),
-                        new(StorageObjectKind.StoragePool, temporaryPoolId, "create-pool"))) return false;
-                    poolId = session.PoolIntents.Keys.Single(id => ViewModel.ActiveDocument.Snapshot.StoragePools
-                        .Any(pool => pool.StableId == id && pool.MemberPhysicalDiskIds.ToHashSet(StringComparer.Ordinal)
-                            .SetEquals(creation.PhysicalDiskIds)));
-                }
-                foreach (var goal in intent.MemberUsages ?? [])
-                {
-                    var actual = ViewModel.ActiveDocument.Snapshot.PhysicalDisks.Single(item => item.StableId == goal.PhysicalDiskId);
-                    if (PhysicalDiskUsage.Normalize(actual.Usage) == PhysicalDiskUsage.Normalize(goal.Usage)) continue;
-                    if (!await Stage(RealOperationProposalFactory.SetPhysicalDiskUsage(session.SystemId,
-                        Id(StorageObjectKind.PhysicalDisk, goal.PhysicalDiskId), Id(StorageObjectKind.StoragePool, poolId), members, goal.Usage),
-                        Text("已核对成员角色", "Verified member usage"))) return false;
-                }
-                var tierTargets = new Dictionary<string, StorageObjectId>(StringComparer.Ordinal);
-                if ((creation.CreateTier || creation.CreateVirtualDisk) && intent.Layout == PoolVirtualDiskLayout.HddTiered)
-                {
-                    foreach (var goal in creation.TierGoals)
-                    {
-                        var existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
-                            && tier.VirtualDiskStableId is null && tier.MediaType == goal.MediaType).ToArray();
-                        if (existing.Length == 0)
-                        {
-                            if (!await Stage(RealOperationProposalFactory.CreateTierTemplate(session.SystemId,
-                                Id(StorageObjectKind.StoragePool, poolId), members, creation.Pool.FriendlyName + "_" + goal.MediaType,
-                                goal.MediaType, goal.Layout), Text($"已核对 {goal.MediaType} 层模板", $"Verified {goal.MediaType} tier template"),
-                                new(StorageObjectKind.StorageTier, poolId, "create-tier", goal.MediaType))) return false;
-                            existing = ViewModel.ActiveDocument.Snapshot.StorageTiers.Where(tier => tier.PoolStableId == poolId
-                                && tier.VirtualDiskStableId is null && tier.MediaType == goal.MediaType).ToArray();
-                        }
-                        if (existing.Length != 1 || goal.VerifiedTemplateId is not null && goal.VerifiedTemplateId != existing[0].StableId)
-                            throw new InvalidDataException("One exact unused template is required for each requested media type.");
-                        tierTargets.Add(goal.MediaType, Id(StorageObjectKind.StorageTier, existing[0].StableId));
-                    }
-                }
-                if (!creation.CreateVirtualDisk && !creation.ContinueLayout) continue;
-                string? vdId = intent.VerifiedVirtualDiskId;
-                if (creation.CreateVirtualDisk)
-                {
-                    // In a same-pool replacement this is reached only after the exact
-                    // old VD deletion stage and its scoped refresh have completed.
-                    var freshPool = ViewModel.ActiveDocument.Snapshot.StoragePools.SingleOrDefault(pool => pool.StableId == poolId);
-                    if (freshPool is null || ViewModel.ActiveDocument.SourceFacts?.Objects
-                        .SingleOrDefault(item => item.Id == poolId) is not { HasReliableIdentity: true }
-                        || ViewModel.ActiveDocument.Snapshot.VirtualDisks.Any(vd => vd.PoolStableId == poolId))
-                        throw new InvalidDataException("The fresh exact pool must be empty before preparing its first virtual disk.");
-                    if (intent.VirtualDiskUseMaximum)
-                        ReportRealActivity(Text("正在确定最大可用容量", "Determining maximum available capacity"));
-                    async Task<RealVirtualDiskCreationCapacity> Capacity(StorageObjectId sizeTarget, bool maximum, long? size, bool autoPartition)
-                        => await RealVirtualDiskCreationCapacityResolver.ResolveAsync(maximum, size,
-                        autoPartition, intent.CreateMsr, async () =>
-                        {
-                            ReportRealActivity(Text("正在核对创建容量", "Checking creation capacity"));
-                            var result = await ViewModel.AgentConnection!.SendAsync(new QueryAgentRealVirtualDiskCreationRangeRequest(
-                                sizeTarget, ViewModel.RealProductSessionId, CorrelationId.New()), CancellationToken.None);
-                            if (!result.IsSuccess || result.Value is not AgentRealVirtualDiskCreationRangeResponse sizeResponse
-                                || sizeResponse.Range.Target != sizeTarget)
-                                throw new InvalidDataException(result.Messages.FirstOrDefault()?.DiagnosticText
-                                    ?? result.Messages.FirstOrDefault()?.Code ?? "The exact provider creation range is unavailable.");
-                            return sizeResponse.Range;
-                        });
-                    RealOperationIntentRequest proposal;
-                    if (intent.Layout == PoolVirtualDiskLayout.HddTiered)
-                    {
-                        var inputs = new List<MaximumCapacityTier>();
-                        foreach (var goal in creation.TierGoals)
-                        {
-                            var target = tierTargets[goal.MediaType];
-                            var capacity = await Capacity(target, goal.UseMaximumSize, goal.SizeBytes, false);
-                            inputs.Add(new(RealTargetReference.ForExisting(target), null,
-                                capacity.UseMaximumSize ? null : capacity.SizeBytes, capacity.UseMaximumSize, goal.Layout, goal.MediaType));
-                        }
-                        proposal = RealOperationProposalFactory.CreateTieredVirtualDisk(session.SystemId,
-                            Id(StorageObjectKind.StoragePool, poolId), members, inputs, intent.VirtualDiskName!);
-                    }
-                    else
-                    {
-                        var capacity = await Capacity(Id(StorageObjectKind.StoragePool, poolId), intent.VirtualDiskUseMaximum,
-                            intent.VirtualDiskSizeBytes, intent.AutoCreatePartition);
-                        proposal = RealOperationProposalFactory.CreateFirstVirtualDisk(session.SystemId,
-                            Id(StorageObjectKind.StoragePool, poolId), members, new(intent.VirtualDiskName!, capacity.SizeBytes, false,
-                                intent.CreateMsr, true, intent.VolumeName, intent.DriveLetter, capacity.UseMaximumSize));
-                    }
-                    if (!await Stage(proposal, Text("已核对新 VD", "Verified new VD"),
-                        new(StorageObjectKind.VirtualDisk, poolId,
-                            intent.Layout == PoolVirtualDiskLayout.HddTiered ? "create-tiered-vdisk" : "create-vdisk"))) return false;
-                    vdId = session.PoolIntents[poolId].VerifiedVirtualDiskId;
-                }
-                if (!intent.AutoCreatePartition) continue;
-                if (vdId is null) throw new InvalidDataException("Automatic layout lacks a verified VD identity.");
-                // Partition layout uses the actual OS-disk size only after the MAX search/explicit creation is verified.
-                var osDisk = ViewModel.ActiveDocument.Snapshot.OsDisks.SingleOrDefault(disk => disk.VirtualDiskStableId == vdId)
-                    ?? throw new InvalidDataException("The verified VD has no unique current OS disk.");
-                if (osDisk.PartitionStyle.Equals("RAW", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!await Stage(RealOperationProposalFactory.InitializeGpt(session.SystemId,
-                        Id(StorageObjectKind.OsDisk, osDisk.StableId)), Text("已核对 GPT 初始化", "Verified GPT initialization"))) return false;
-                    osDisk = ViewModel.ActiveDocument.Snapshot.OsDisks.Single(disk => disk.VirtualDiskStableId == vdId);
-                }
-                var currentIntent = session.PoolIntents[poolId];
-                if (!automaticLayoutProgress.TryGetValue(session, out var progress)
-                    || progress.VirtualDiskId != vdId)
-                {
-                    var partitions = ViewModel.ActiveDocument.Snapshot.Partitions
-                        .Where(partition => partition.OsDiskStableId == osDisk.StableId).ToArray();
-                    if (!osDisk.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
-                        || partitions.Length > 1 || partitions.Any(partition => !IsExactProviderMsr(partition)))
-                        throw new InvalidDataException("The automatic layout has no session-verified progression for existing data partitions. The remaining goal is retained.");
-                    var layout = RealOperationProposalFactory.ConfigureInitializedDisk(session.SystemId,
-                        Id(StorageObjectKind.OsDisk, osDisk.StableId), partitions.Length == 0 ? null
-                            : Id(StorageObjectKind.Partition, partitions[0].StableId), intent.CreateMsr,
-                        osDisk.Size, true, intent.VolumeName, intent.DriveLetter,
-                        checked((int)intent.AllocationUnitSize), intent.FileSystem)!;
-                    progress = new RealAutomaticLayoutProgress(layout, vdId, currentIntent);
-                    automaticLayoutProgress[session] = progress;
-                }
-                while (progress.BuildNext(ViewModel.ActiveDocument, currentIntent) is { } next)
-                {
-                    var description = next.Steps[0].Command switch
-                    {
-                        DeletePartitionCommand => Text("已调整保留分区", "Adjusted the reserved partition"),
-                        CreatePartitionCommand { Role: RealPartitionRole.Msr } => Text("已配置 MSR", "Configured the MSR"),
-                        CreatePartitionCommand => Text("已创建数据分区", "Created the data partition"),
-                        FormatVolumeCommand => Text("已格式化数据卷", "Formatted the data volume"),
-                        SetDriveLetterCommand => Text("已设置盘符", "Assigned the drive letter"),
-                        _ => Text("已完成自动分区", "Completed automatic partitioning")
-                    };
-                    if (!await Stage(next, description, layout: progress)) return false;
-                }
-                session.PoolIntents[poolId] = currentIntent with { PendingAutomaticLayout = false };
-                automaticLayoutProgress.Remove(session);
-            }
-            session.RealApplyMessage = string.Join(Environment.NewLine, completed);
-            return true;
+            PublishOperationFeedback(succeeded ? GlobalNotificationSeverity.Info : GlobalNotificationSeverity.Warning,
+                succeeded ? Text("真实结构应用完成", "Structural changes completed")
+                    : Text("结构应用停止，剩余目标已保留", "Structural changes stopped; remaining goals retained"),
+                session.RealApplyMessage, "real", status.Code ?? "agent.structure.result", $"JobId: {jobId:D}");
+            return succeeded && LastRealInventoryRefreshSucceeded;
         }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException or JsonException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException
+            or ArgumentException or NotSupportedException or JsonException or TimeoutException)
         {
-            session.RealApplyMessage = string.Join(Environment.NewLine, completed.Append(
-                Text("剩余目标已保留：", "Remaining target retained: ") + exception.Message));
-            PublishOperationException(Text("应用未完成，已保留目标", "Apply incomplete; target retained"),
-                "real", exception, "real.structure.incomplete");
+            session.RealApplyMessage = Text("剩余目标已保留：", "Remaining goal retained: ") + exception.Message
+                + $" (JobId: {jobId:D})";
+            PublishOperationException(Text("结构应用未完成", "Structural changes incomplete"),
+                "real", exception, "agent.structure.incomplete");
             return false;
         }
         finally
         {
-            authorization.Stop();
+            if (!accepted && prepared is not null)
+                await connection.SendAsync(new StopAgentRealStructureJobRequest(jobId, prepared.GoalHash,
+                    CorrelationId.New()), CancellationToken.None);
+            subscription.Cancel();
+            try { await next; } catch (OperationCanceledException) when (subscription.IsCancellationRequested) { }
             IsRealStructureApplyInProgress = false;
             EndRealActivity();
         }
-
-        StorageObjectId Id(StorageObjectKind kind, string key) => new(session.SystemId, kind, key);
-        void ValidateApplyContext()
+    }
+    protected async Task<bool> RestoreRemainingStructureGoalAsync(SimulationEditingSession session, Guid jobId,
+        IAgentConnection connection, bool emptyDraft = false)
+    {
+        var binding = session.BindingGeneration;
+        var content = session.ContentRevision;
+        try
         {
-            authorization.ValidateContext(ViewModel.ActiveDocument.SystemId, ViewModel.RealProductSessionId,
-                session.BindingGeneration, session.HasBaselineConflict, session.OutcomeUnknown);
-            if (!ViewModel.IsRealMode || !ViewModel.IsLocalSystem
-                || session.BaselineRevision != ViewModel.ActiveDocument.Revision
-                || session.Baseline.SnapshotVersion != ViewModel.ActiveDocument.Snapshot.SnapshotVersion)
-                throw new InvalidOperationException("The structural baseline changed outside this Apply.");
+            if (!emptyDraft && session.RealStructureResumeContentRevision != content)
+                throw new InvalidOperationException(Text("草稿在作业停止后已有新修改，不能用旧剩余目标覆盖。请保留新草稿或明确放弃后再恢复。",
+                    "The draft changed after the job stopped. Its new edits cannot be replaced by the saved remaining goal."));
+            var read = await connection.SendAsync(new QueryAgentRealStructureJobRequest(jobId, CorrelationId.New()), CancellationToken.None);
+            if (read.Value is not AgentRealStructureJobResponse status)
+                throw new InvalidDataException("The durable structural job status is unavailable.");
+            // Apply is an explicit user action. The child may already be terminal and absent from the unfinished list.
+            if (status.RequiresReconciliation && status.Children.LastOrDefault() is { Value: var last } && last != Guid.Empty)
+            {
+                await connection.SendAsync(new ReconcileAgentRealOperationRequest(new(last), CorrelationId.New()), CancellationToken.None);
+                read = await connection.SendAsync(new QueryAgentRealStructureJobRequest(jobId, CorrelationId.New()), CancellationToken.None);
+                if (read.Value is AgentRealStructureJobResponse reconciled) status = reconciled;
+            }
+            if (status.State == RealOperationState.Prepared)
+            {
+                var cancelled = await connection.SendAsync(new StopAgentRealStructureJobRequest(jobId, status.GoalHash,
+                    CorrelationId.New()), CancellationToken.None);
+                if (cancelled.Value is AgentRealStructureJobResponse stopped) status = stopped;
+            }
+            if (status.RequiresReconciliation
+                || status.State is RealOperationState.Accepted or RealOperationState.Running)
+            {
+                session.RealApplyMessage = Text("原结构作业仍待核对；剩余目标已保留。", "The previous structural job still needs reconciliation; its remaining goal is retained.");
+                return false;
+            }
+            if (!await ViewModel.ReadPublishedRealInventoryAsync())
+                throw new IOException("The verified inventory for the remaining structural goal is unavailable.");
+            if (session.SystemId != ViewModel.ActiveDocument.SystemId
+                || !session.TryRestoreStructureJob(status, ViewModel.ActiveDocument, binding, content, emptyDraft))
+                throw new InvalidOperationException("The bound draft changed while its saved goal was being read; it was preserved.");
+            session.RealApplyMessage = string.Join(Environment.NewLine, status.Completed.Append(
+                Text("剩余目标已恢复；请检查后再次点击应用并确认。", "The remaining goal is restored. Review it, then apply and confirm again.")));
+            ViewModel.ObserveStructureJob(status);
+            return true;
         }
-        async Task<bool> Stage(RealOperationIntentRequest proposal, string description,
-            RealStructureResultSynchronization.OutputMapping? mapping = null, RealAutomaticLayoutProgress? layout = null)
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException or TimeoutException)
         {
-            ValidateApplyContext();
-            if (!proposal.Targets.Any(target => target.Kind == StorageObjectKind.PhysicalDisk))
-            {
-                var snapshot = ViewModel.ActiveDocument.Snapshot;
-                IEnumerable<string> PoolMembers(string? id) => snapshot.StoragePools.SingleOrDefault(pool => pool.StableId == id)?.MemberPhysicalDiskIds ?? [];
-                IEnumerable<string> DiskMembers(string? id)
-                {
-                    var disk = snapshot.OsDisks.SingleOrDefault(item => item.StableId == id);
-                    if (disk?.PhysicalDiskStableId is { } physical) return [physical];
-                    var vd = snapshot.VirtualDisks.SingleOrDefault(item => item.StableId == disk?.VirtualDiskStableId);
-                    return PoolMembers(vd?.PoolStableId);
-                }
-                IEnumerable<string> TargetMembers(StorageObjectId target) => target.Kind switch
-                {
-                    StorageObjectKind.StoragePool => PoolMembers(target.ProviderKey),
-                    StorageObjectKind.StorageTier => PoolMembers(snapshot.StorageTiers.SingleOrDefault(item => item.StableId == target.ProviderKey)?.PoolStableId),
-                    StorageObjectKind.VirtualDisk => PoolMembers(snapshot.VirtualDisks.SingleOrDefault(item => item.StableId == target.ProviderKey)?.PoolStableId),
-                    StorageObjectKind.OsDisk => DiskMembers(target.ProviderKey),
-                    StorageObjectKind.Partition => DiskMembers(snapshot.Partitions.SingleOrDefault(item => item.StableId == target.ProviderKey)?.OsDiskStableId),
-                    _ => []
-                };
-                var physicals = proposal.Targets.SelectMany(TargetMembers).Distinct(StringComparer.Ordinal)
-                    .Select(id => Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
-                if (physicals.Length == 0) throw new InvalidDataException("The structural action has no exact physical member closure.");
-                proposal = proposal with { Targets = proposal.Targets.Concat(physicals).Distinct().ToArray() };
-            }
-            var succeeded = await SubmitRealAsync(proposal, authorization, ValidateApplyContext,
-                frozen => ViewModel.RealStructureResults.Register(session, frozen, proposal, mapping, layout));
-            if (LastRealOperationResponse is { } response)
-            {
-                ViewModel.RealStructureResults.ObserveUnresolved(response);
-                if (RealOperationSubmissionState.IsReconciledTerminal(response))
-                {
-                    if (!ViewModel.RealStructureResults.Reconcile(response, ViewModel.ActiveDocument, LastRealInventoryRefreshSucceeded))
-                    {
-                        authorization.Stop();
-                        session.RealApplyMessage = Text("结果同步尚未完成，保留剩余目标并等待只读核对。", "Result synchronization is incomplete; remaining goals are retained for read-only recovery.");
-                        return false;
-                    }
-                    ViewModel.ObserveRealOperation(response);
-                    if (succeeded)
-                    {
-                        authorization.ValidateContext(ViewModel.ActiveDocument.SystemId, ViewModel.RealProductSessionId,
-                            session.BindingGeneration, session.HasBaselineConflict, session.OutcomeUnknown);
-                        authorization.ObserveVerified(proposal, response, ViewModel.ActiveDocument);
-                    }
-                }
-            }
-            if (!succeeded) authorization.Stop();
-            completed.Add(succeeded ? description : Text("应用停止；已完成的更改保留，剩余目标未执行。", "Apply stopped; completed changes remain and the remaining goal was not executed."));
-            session.RealApplyMessage = string.Join(Environment.NewLine, completed);
-            return succeeded;
+            session.RealApplyMessage = Text("剩余目标已保留：", "Remaining goal retained: ") + exception.Message;
+            return false;
         }
     }
+
 }

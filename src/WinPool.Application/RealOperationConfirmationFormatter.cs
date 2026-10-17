@@ -3,7 +3,7 @@ using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 /// <summary>Turns the Agent-frozen typed plan into a concise, human-readable confirmation.</summary>
 public static class RealOperationConfirmationFormatter

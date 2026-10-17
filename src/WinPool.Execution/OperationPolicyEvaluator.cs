@@ -40,7 +40,8 @@ public sealed class OperationPolicyEvaluator : IOperationPolicyEvaluator
             return PolicyDecision.Reject("policy.machine-mismatch", "The current machine does not match the environment binding.");
         }
 
-        if (!StringComparer.Ordinal.Equals(plan.InventoryVersion, context.CurrentInventoryVersion))
+        if (!(context.FrozenRealConfirmation && plan.RealOperation is not null) &&
+            !StringComparer.Ordinal.Equals(plan.InventoryVersion, context.CurrentInventoryVersion))
         {
             return PolicyDecision.Reject("policy.inventory-changed", "The target inventory changed after planning.");
         }
@@ -146,8 +147,9 @@ public sealed class OperationPolicyEvaluator : IOperationPolicyEvaluator
 
             if (!StringComparer.Ordinal.Equals(plan.RealOperation!.MachineBinding, context.CurrentMachineBinding) ||
                 !StringComparer.Ordinal.Equals(plan.RealOperation.SessionBinding, session.Binding) ||
-                !StringComparer.Ordinal.Equals(plan.RealOperation.TargetFingerprint, context.CurrentTargetFingerprint) ||
-                !StringComparer.Ordinal.Equals(plan.RealOperation.PhysicalMemberFingerprint, context.CurrentPhysicalMemberFingerprint))
+                (!context.FrozenRealConfirmation &&
+                 (!StringComparer.Ordinal.Equals(plan.RealOperation.TargetFingerprint, context.CurrentTargetFingerprint) ||
+                  !StringComparer.Ordinal.Equals(plan.RealOperation.PhysicalMemberFingerprint, context.CurrentPhysicalMemberFingerprint))))
             {
                 return PolicyDecision.Reject("policy.real-binding-mismatch", "The machine, session or target facts changed after planning.");
             }

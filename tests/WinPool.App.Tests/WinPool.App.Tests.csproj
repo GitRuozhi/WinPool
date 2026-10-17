@@ -7,6 +7,13 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\..\src\WinPool.App\Services\MonitoringService.cs" Link="MonitoringService.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\MonitorIssueStateTracker.cs" Link="MonitorIssueStateTracker.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\DataLocationSwitchRuntime.cs" Link="DataLocationSwitchRuntime.cs" />
+    <ProjectReference Include="..\..\src\WinPool.Infrastructure.Sqlite\WinPool.Infrastructure.Sqlite.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Ipc\WinPool.Ipc.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Monitoring\WinPool.Monitoring.csproj" />
+    <ProjectReference Include="..\..\src\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
     <PackageReference Include="coverlet.collector" Version="6.0.2" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
@@ -20,10 +27,8 @@
     <Compile Include="..\..\src\WinPool.App\Services\StructurePartitionBaseline.cs" Link="StructurePartitionBaseline.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\StructureColumnSuggestion.cs" Link="StructureColumnSuggestion.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\StructureCreationPolicy.cs" Link="StructureCreationPolicy.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\PendingStructureAction.cs" Link="PendingStructureAction.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\FullStripeCalculator.cs" Link="FullStripeCalculator.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\IntegerInputPolicy.cs" Link="IntegerInputPolicy.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\IRealOperationAuthorization.cs" Link="IRealOperationAuthorization.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealDiskInitializationAuthorization.cs" Link="RealDiskInitializationAuthorization.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealPropertyActionAuthorization.cs" Link="RealPropertyActionAuthorization.cs" />
     <ProjectReference Include="..\..\src\WinPool.Application\WinPool.Application.csproj" />
@@ -31,18 +36,10 @@
     <Compile Include="..\..\src\WinPool.App\Services\AgentRealModeSession.cs" Link="AgentRealModeSession.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\AgentShutdownReceiptPolicy.cs" Link="AgentShutdownReceiptPolicy.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationRequestSession.cs" Link="RealOperationRequestSession.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealOperationSubmissionState.cs" Link="RealOperationSubmissionState.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealOperationRecovery.cs" Link="RealOperationRecovery.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealStructureResultSynchronization.cs" Link="RealStructureResultSynchronization.cs" />
+    <Compile Include="..\..\src\WinPool.App\Services\RealOperationStatusCache.cs" Link="RealOperationStatusCache.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealDriveLetterSelectionRecovery.cs" Link="RealDriveLetterSelectionRecovery.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealOperationConfirmationFormatter.cs" Link="RealOperationConfirmationFormatter.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealOperationFeedback.cs" Link="RealOperationFeedback.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealVirtualDiskCreationCapacityResolver.cs" Link="RealVirtualDiskCreationCapacityResolver.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealPartitionResizeUiRange.cs" Link="RealPartitionResizeUiRange.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealOperationProposalFactory.cs" Link="RealOperationProposalFactory.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealStructureDraftPlanner.cs" Link="RealStructureDraftPlanner.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealStructureApplyAuthorization.cs" Link="RealStructureApplyAuthorization.cs" />
-    <Compile Include="..\..\src\WinPool.App\Services\RealAutomaticLayoutProgress.cs" Link="RealAutomaticLayoutProgress.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\RealScopedInventoryRefreshPolicy.cs" Link="RealScopedInventoryRefreshPolicy.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\EditorInventoryRefreshState.cs" Link="EditorInventoryRefreshState.cs" />
   </ItemGroup>

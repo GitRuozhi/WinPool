@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPool.App.Services;
@@ -22,11 +22,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     private readonly IWorkspaceStateService _workspaceStateService;
     private readonly IAgentConnection? _agentConnection;
     private readonly AgentRealModeSession? _realModeSession;
-    private readonly WinPool.Application.IManageSystemProjector<StorageSystemDocument> _manageProjector;
-    private readonly WinPool.Application.IManageComparisonProjector<StorageSystemDocument> _manageComparisonProjector;
-    private readonly WinPool.Application.IManageDetailsProjector<StorageSystemDocument> _manageDetailsProjector;
-    private readonly WinPool.Application.IManageNavigationProjector<StorageSystemDocument> _manageNavigationProjector;
-    private readonly WinPool.Application.IManageCommandProjector<StorageSystemDocument> _manageCommandProjector;
+    private readonly WinPool.Infrastructure.Windows.ManageSystemProjector _manageProjector;
+    private readonly WinPool.Infrastructure.Windows.ManageComparisonProjector _manageComparisonProjector;
+    private readonly WinPool.Infrastructure.Windows.ManageDetailsProjector _manageDetailsProjector;
+    private readonly WinPool.Infrastructure.Windows.ManageNavigationProjector _manageNavigationProjector;
+    private readonly WinPool.Infrastructure.Windows.ManageCommandProjector _manageCommandProjector;
     private readonly ManualScanRunner _manualScanRunner = new();
     private readonly TaskCompletionSource _workspaceReady = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
@@ -55,11 +55,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         ICommandLogService commandLogService,
         IWorkspaceStateService workspaceStateService,
         IAgentConnection? agentConnection = null,
-        WinPool.Application.IManageSystemProjector<StorageSystemDocument>? manageProjector = null,
-        WinPool.Application.IManageComparisonProjector<StorageSystemDocument>? manageComparisonProjector = null,
-        WinPool.Application.IManageDetailsProjector<StorageSystemDocument>? manageDetailsProjector = null,
-        WinPool.Application.IManageNavigationProjector<StorageSystemDocument>? manageNavigationProjector = null,
-        WinPool.Application.IManageCommandProjector<StorageSystemDocument>? manageCommandProjector = null)
+        WinPool.Infrastructure.Windows.ManageSystemProjector? manageProjector = null,
+        WinPool.Infrastructure.Windows.ManageComparisonProjector? manageComparisonProjector = null,
+        WinPool.Infrastructure.Windows.ManageDetailsProjector? manageDetailsProjector = null,
+        WinPool.Infrastructure.Windows.ManageNavigationProjector? manageNavigationProjector = null,
+        WinPool.Infrastructure.Windows.ManageCommandProjector? manageCommandProjector = null)
     {
         _hardwareInventoryProvider = hardwareInventoryProvider;
         _preferencesCoordinator = new UserPreferencesUpdateCoordinator(
@@ -87,10 +87,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _manageNavigationProjector = manageNavigationProjector ?? new ManageNavigationProjector();
         _manageCommandProjector = manageCommandProjector ?? new ManageCommandProjector();
         _simulationEditCoordinator = new SimulationEditCoordinator(
-            () => EffectiveActiveDocument,
+            () => ActiveDocument,
             CommitSimulationDocumentAsync,
-            _simulationOperations,
-            ResetBuiltInSimulation);
+            _simulationOperations);
         Monitoring = new MonitoringService(agentConnection);
         CommandLog = commandLogService;
         ImportExportService = importExportService;
@@ -168,16 +167,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public StorageSnapshot ActiveSnapshot => SelectedSystem.Snapshot;
 
-    public StorageSystemDocument EffectiveActiveDocument => ActiveDocument;
-
-    public StorageSnapshot EffectiveActiveSnapshot => ActiveSnapshot;
-
     public StorageSnapshot Snapshot =>
         SystemCatalog.Systems.First(x => x.IsLocal).Snapshot;
-
-    public StorageSnapshot SimulatedSnapshot =>
-        SystemCatalog.Systems.FirstOrDefault(x => !x.IsLocal)?.Snapshot
-        ?? Snapshot;
 
     public bool IsUsingSimulatedInventory => SelectedSystem.Kind == StorageSystemKind.Simulation;
 
@@ -339,8 +330,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             : new ManageSelectionKey(related.Id, related.Role, target);
     }
 
-    partial void OnSelectedWorkspaceItemChanged(WorkspaceItem? value)
+    async partial void OnSelectedWorkspaceItemChanged(WorkspaceItem? value)
     {
+        if (value?.StorageSystemId is { } lazyId && SystemCatalog.Find(lazyId) is null && SystemCatalog.Contains(lazyId))
+        {
+            await SelectSystemAsync(lazyId);
+            return;
+        }
         _contextUnit = null;
         if (value?.IsAction == true)
         {
@@ -371,7 +367,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         {
             return;
         }
-        SetSelectionState(selection, ManageSelectionRules.TopologyTargetFor(selection, EffectiveActiveDocument.Snapshot));
+        SetSelectionState(selection, ManageSelectionRules.TopologyTargetFor(selection, ActiveDocument.Snapshot));
         _categorySelections[(selection.Id.System, selection.Category)] = selection;
         BuildDetails();
         RebuildComparisonColumns();
@@ -456,11 +452,26 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             ApplyLocalInventory(cachedLocal);
         }
 
-        var persisted = (await _systemRepository.LoadSimulationsAsync()).ToList();
-        var merged = await MergeBuiltInSimulationsAsync(persisted);
+        var metadata = (await _systemRepository.LoadSimulationsAsync()).ToList();
+        SystemCatalog.ReplaceSimulationMetadata(metadata);
+        if (!CurrentPreferences.BuiltInSimulationCatalogSeeded)
+        {
+            foreach (var builtin in SimulationCatalog.CreateDocuments())
+            {
+                if (SystemCatalog.Contains(builtin.Id)) continue;
+                await _systemRepository.SaveSimulationAsync(builtin);
+                SystemCatalog.CacheSimulation(builtin);
+            }
+            await UpdateCurrentPreferencesAsync(preferences => preferences with { BuiltInSimulationCatalogSeeded = true });
+        }
+        await EnsureWorkspaceUiStateLoadedAsync();
         var previousSystem = SelectedSystem;
-        var selectedId = SelectedSystem.Id;
-        SystemCatalog.ReplaceSimulations(merged);
+        var selectedId = RestoredUiState?.ActiveSystemId ?? SelectedSystem.Id;
+        if (SystemCatalog.Contains(selectedId) && SystemCatalog.Entries.Any(entry => entry.Id == selectedId && !entry.IsLocal))
+        {
+            var selected = await _systemRepository.LoadSimulationAsync(selectedId);
+            if (selected is not null) SystemCatalog.CacheSimulation(selected);
+        }
         SelectedSystem = SystemCatalog.Find(selectedId)
             ?? SystemCatalog.Find(cachedLocal?.Id ?? string.Empty)
             ?? SystemCatalog.Systems.FirstOrDefault(system => system.IsLocal)
@@ -538,7 +549,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
 
         RestoredUiState = new WorkspaceUiState(
-            state.ActivePage.ToString(),
             state.ActiveDocumentId,
             state.ActiveCategory,
             state.RememberedProviderKeys.ToDictionary(pair => pair.Key, pair => pair.Value),
@@ -615,6 +625,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                 }
                 _startupPreviewApplied = false;
             }
+            if (RestoredUiState?.ActiveSystemId is { Length: > 0 } restoredId && SystemCatalog.Contains(restoredId)
+                && SystemCatalog.Find(restoredId) is null)
+                await SelectSystemAsync(restoredId);
             ApplyRestoredUiState();
         }
         finally
@@ -729,9 +742,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     public WorkspaceUiState? RestoredUiState { get; private set; }
 
-    public WorkspaceUiState CaptureUiState(string shellPage) =>
+    public WorkspaceUiState CaptureUiState() =>
         new(
-            shellPage,
             SelectedSystem.Id,
             SelectedCategory,
             _categorySelections
@@ -801,18 +813,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         await UpdateCurrentPreferencesAsync(preferences => preferences with { CreateMsrOnInitialize = create });
     }
 
-    public async Task SetAutoCreateVirtualDiskAsync(bool enabled)
-    {
-        await UpdateCurrentPreferencesAsync(
-            preferences => preferences with { AutoCreateVirtualDisk = enabled });
-    }
-
-    public async Task SetAutoCreatePartitionAsync(bool enabled)
-    {
-        await UpdateCurrentPreferencesAsync(
-            preferences => preferences with { AutoCreatePartition = enabled });
-    }
-
     public async Task SetPartitionIgnoreSizeMibAsync(double mib)
     {
         if (!double.IsFinite(mib))
@@ -878,6 +878,11 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         Localization.Language = defaults.Language;
         RefreshLocalizedContent();
 
+        foreach (var entry in SystemCatalog.Entries.Where(entry => BuiltInSimulationCatalogPolicy.IsBuiltIn(entry.Id)).ToArray())
+        {
+            if (SystemCatalog.Find(entry.Id) is null && await _systemRepository.LoadSimulationAsync(entry.Id, cancellationToken) is { } loaded)
+                SystemCatalog.CacheSimulation(loaded);
+        }
         var resetPlan = BuiltInSimulationCatalogPolicy.PlanReset(
             SystemCatalog.Systems,
             SimulationCatalog.CreateDocuments());
@@ -1043,7 +1048,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return false;
         }
 
-        var snapshot = EffectiveActiveSnapshot;
+        var snapshot = ActiveSnapshot;
         var targetIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { request.TargetProviderKey };
         foreach (var memberId in request.MemberDiskIds ?? [])
         {
@@ -1074,87 +1079,24 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         var document = commit.Document;
         if (_systemRepository is IStructuredSimulationEditRepository structured)
         {
-            await structured.SaveEditAsync(
-                document,
-                commit.Plan,
-                commit.Events,
-                cancellationToken,
-                commit.CommitId);
+            document = await structured.SaveEditAsync(document, commit.Intent, cancellationToken);
         }
         else
         {
             await _systemRepository.SaveSimulationAsync(document, cancellationToken);
         }
-        SelectedSystem = document;
         SystemCatalog.Update(document);
-        OnPropertyChanged(nameof(SelectedSystem));
-        OnPropertyChanged(nameof(ActiveDocument));
-        OnPropertyChanged(nameof(ActiveSnapshot));
+        if (SelectedSystem.Id == document.Id)
+        {
+            SelectedSystem = document;
+            OnPropertyChanged(nameof(SelectedSystem));
+            OnPropertyChanged(nameof(ActiveDocument));
+            OnPropertyChanged(nameof(ActiveSnapshot));
+        }
         RebuildTopology();
         RebuildObjects(_selectedSelection);
         BuildDetails();
         RebuildComparisonColumns();
-    }
-
-    public async Task ResetActiveSimulationAsync()
-    {
-        var result = await ApplySimulationOperationAsync(
-            new WinPool.Application.SimulationEditRequest(
-                WinPool.Application.SimulationEditKind.ResetDocument,
-                ActiveSnapshot.Computer.StableId));
-        if (!result.IsSuccess)
-        {
-            return;
-        }
-
-        RebuildTopology();
-        RebuildObjects(_selectedSelection);
-        BuildDetails();
-        RebuildComparisonColumns();
-    }
-
-    private async Task<List<StorageSystemDocument>> MergeBuiltInSimulationsAsync(
-        List<StorageSystemDocument> persisted)
-    {
-        var plan = BuiltInSimulationCatalogPolicy.PlanLoad(
-            persisted,
-            SimulationCatalog.CreateDocuments(),
-            CurrentPreferences.BuiltInSimulationCatalogSeeded);
-        foreach (var document in plan.DocumentsToPersist)
-        {
-            await _systemRepository.SaveSimulationAsync(document);
-        }
-
-        // Normalize on load: any simulation document saved before free disks
-        // gained OS-disk views is upgraded once so the Disk partition editor
-        // can show every free primordial disk. Idempotent — after the first
-        // run the helper returns the same snapshot and nothing is saved.
-        var normalized = new List<StorageSystemDocument>(plan.Documents.Count);
-        foreach (var document in plan.Documents)
-        {
-            var ensured = EditWorkspace.EnsureFreeDisksHaveOsDisks(document.Snapshot);
-            if (ReferenceEquals(ensured, document.Snapshot))
-            {
-                normalized.Add(document);
-                continue;
-            }
-
-            var updated = document.WithCandidate(ensured) with
-            {
-                Revision = checked(document.Revision + 1),
-                UpdatedAt = DateTimeOffset.Now
-            };
-            await _systemRepository.SaveSimulationAsync(updated);
-            normalized.Add(updated);
-        }
-
-        if (plan.MarkCatalogSeededAfterPersist)
-        {
-            await UpdateCurrentPreferencesAsync(
-                preferences => preferences with { BuiltInSimulationCatalogSeeded = true });
-        }
-
-        return normalized;
     }
 
     /// <summary>
@@ -1170,30 +1112,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         CancellationToken cancellationToken) =>
         _preferencesCoordinator.ReplaceAsync(preferences, cancellationToken);
 
-    private static SimulationOperationResult ResetBuiltInSimulation(
-        StorageSystemDocument document)
-    {
-        var builtin = SimulationCatalog.TryCreateDocument(document.Id);
-        if (builtin is null)
-        {
-            return SimulationOperationResult.Failure(
-                document,
-                "Only a built-in simulation document can be reset.");
-        }
 
-        return new SimulationOperationResult(
-            true,
-            document with
-            {
-                DisplayName = builtin.DisplayName,
-                SourceFacts = builtin.SourceFacts is { } resetFacts ? resetFacts with { SystemId = document.SystemId, Revision = checked((document.SourceFacts?.Revision ?? 0) + 1) } : null,
-
-                Jobs = [],
-                UpdatedAt = DateTimeOffset.Now
-            },
-            string.Empty,
-            ["# Internal action: restore the built-in simulation. No Windows command."]);
-    }
 
     public async Task<string?> EnterRealModeAsync(CancellationToken cancellationToken = default)
     {
@@ -1288,7 +1207,29 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             ? ScanCoreAsync(CollectionPurpose.Hardware, cancellationToken)
             : Task.FromResult(ManualScanOutcome.Skipped);
 
-    public bool SelectSystem(string systemId) => SwitchSystem(systemId);
+    private long _systemSelectionGeneration;
+    public async Task<bool> SelectSystemAsync(string systemId, CancellationToken cancellationToken = default)
+    {
+        var generation = ++_systemSelectionGeneration;
+        if (!SystemCatalog.Contains(systemId)) return false;
+        if (SystemCatalog.Find(systemId) is null)
+        {
+            try
+            {
+                var document = await _systemRepository.LoadSimulationAsync(systemId, cancellationToken);
+                if (generation != _systemSelectionGeneration || document is null) return false;
+                SystemCatalog.CacheSimulation(document);
+            }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException)
+            {
+                if (generation == _systemSelectionGeneration)
+                    _notificationService.PublishError("WinPool", exception.Message, "simulation", "simulation:load-failed");
+                return false;
+            }
+        }
+        if (generation != _systemSelectionGeneration) return false;
+        return SwitchSystem(systemId);
+    }
 
     private async Task<ManualScanOutcome> ScanCoreAsync(CollectionPurpose purpose, CancellationToken cancellationToken)
     {
@@ -1318,7 +1259,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
             }
-            if (!ApplyLocalInventory(localDocument))
+            if (!ApplyLocalInventory(localDocument)
+                && !SystemCatalog.Systems.Any(document => document.IsLocal && document.Id == localDocument.Id
+                    && document.UpdatedAt >= localDocument.UpdatedAt))
             {
                 return false;
             }
@@ -1332,8 +1275,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
                     $"inventory:{snapshot.ScannedAt.UtcTicks}:{warning.Code}:{warning.StableId}");
             }
             PublishStorageFindings(snapshot);
-            BuildDetails();
-            RebuildComparisonColumns();
             completedSnapshot = snapshot;
             return true;
         }, result =>
@@ -1513,7 +1454,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             return null;
         }
         return _manageCommandProjector.Project(
-            EffectiveActiveDocument,
+            ActiveDocument,
             SystemCatalog.Systems.First(document => document.IsLocal),
             item.Projection.Id,
             item.Projection.Role,
@@ -1800,8 +1741,16 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     {
         if (category == ManageWorkspaceCategory.System)
         {
-            foreach (var system in SystemCatalog.Systems)
+            foreach (var entry in SystemCatalog.Entries)
             {
+                var system = SystemCatalog.Find(entry.Id);
+                if (system is null)
+                {
+                    var prefix = Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]";
+                    yield return new WorkspaceItem(entry.Id, $"{prefix} {entry.DisplayName}",
+                        new StorageUnitRef(entry.Id, StorageUnitKind.System, entry.DisplayName), false, entry.Id);
+                    continue;
+                }
                 var projection = _manageProjector.Project(system);
                 var item = projection.WorkspaceObjects.Single(
                     candidate => candidate.Category == WinPool.Application.ManageWorkspaceCategory.System);
@@ -1815,7 +1764,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             yield break;
         }
 
-        var activeProjection = _manageProjector.Project(EffectiveActiveDocument);
+        var activeProjection = _manageProjector.Project(ActiveDocument);
         foreach (var item in activeProjection.WorkspaceObjects
                      .Where(candidate => candidate.Category == category)
                      .OrderBy(candidate => candidate.SortOrder))
@@ -2045,6 +1994,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private bool SwitchSystem(string? systemId, ManageSelectionKey? preferredSelection = null)
     {
+        // Synchronous selections also invalidate an older outstanding body load.
+        _systemSelectionGeneration++;
         if (string.IsNullOrWhiteSpace(systemId))
         {
             return false;

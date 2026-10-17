@@ -6,7 +6,7 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
 {
     // Schemas before 17 contain retired product domains and remain rejected.
     // Schemas 17/18 are verified before their narrow, in-place upgrades.
-    public const int CurrentSchemaVersion = 19;
+    public const int CurrentSchemaVersion = 20;
 
     private readonly string connectionString;
 
@@ -78,6 +78,8 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             }
             if (version.Version is 17 or 18)
                 await Upgrade18To19Async(cancellationToken);
+            if (version.Version is 17 or 18 or 19)
+                await Upgrade19To20Async(cancellationToken);
 
             return;
         }
@@ -136,10 +138,10 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         }
 
         var version = await SqliteSchemaVersionReader.ReadAsync(connection, cancellationToken);
-        if (version?.Version is 17 or 18 or CurrentSchemaVersion)
+        if (version?.Version is 17 or 18 or 19 or CurrentSchemaVersion)
         {
             await CurrentSchemaVerifier.VerifyAsync(connection, cancellationToken,
-                version.Version switch { 17 => Legacy17SchemaDefinition, 18 => Legacy18SchemaDefinition, _ => CurrentSchemaDefinition });
+                version.Version switch { 17 => Legacy17SchemaDefinition, 18 => Legacy18SchemaDefinition, 19 => Legacy19SchemaDefinition, _ => CurrentSchemaDefinition });
         }
 
         return new ExistingDatabaseInspection(true, version);
@@ -217,6 +219,36 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
             throw new InvalidDataException("The capacity journal schema upgrade lost its version CAS.");
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task Upgrade19To20Async(CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT schema_version FROM schema_info WHERE singleton=1;";
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken),
+            System.Globalization.CultureInfo.InvariantCulture) != 19)
+            throw new InvalidDataException("The schema changed while upgrading from 19 to 20.");
+        command.CommandText = """
+            DROP INDEX ix_simulation_edit_commits_document_revision;
+            ALTER TABLE simulation_edit_commits RENAME TO simulation_edit_commits_v19;
+            """ + SimulationReceiptSchema + "\n" + StructureJobSchema + "\n" + """
+            INSERT INTO simulation_edit_commits(commit_id,document_id,before_revision,document_revision,
+                before_sha256,after_sha256,intent_hash,committed_at_utc_ms)
+            SELECT c.commit_id,c.document_id,c.document_revision-1,c.document_revision,
+                c.before_sha256,c.after_sha256,p.plan_hash,c.committed_at_utc_ms
+            FROM simulation_edit_commits_v19 c JOIN operation_plans p ON p.operation_id=c.operation_id;
+            DROP TABLE simulation_edit_commits_v19;
+            CREATE INDEX ix_simulation_edit_commits_document_revision
+                ON simulation_edit_commits(document_id,document_revision DESC);
+            UPDATE schema_info SET schema_version=20,applied_at_utc_ms=$at
+            WHERE singleton=1 AND schema_version=19;
+            """;
+        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        await command.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -564,6 +596,7 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
     }
 
     private static readonly string Legacy17SchemaDefinition = Legacy18SchemaDefinition
+        .ReplaceLineEndings("\n")
         .Replace(",\n    authorization_digest TEXT,\n    accepted_at_utc_ms INTEGER,\n    preparation_id TEXT,\n    preparation_intent_hash TEXT", string.Empty,
             StringComparison.Ordinal)
         .Replace(",\n    target_json TEXT,\n    evidence_json TEXT,\n    updated_at_utc_ms INTEGER", string.Empty,
@@ -571,7 +604,58 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         .Replace("\nCREATE UNIQUE INDEX ix_operation_plans_preparation_id\n    ON operation_plans(preparation_id);", string.Empty,
             StringComparison.Ordinal);
 
-    private const string CurrentSchemaDefinition = Legacy18SchemaDefinition + "\n" + CapacityAttemptSchemaDefinition;
+    private const string Legacy19SchemaDefinition = Legacy18SchemaDefinition + "\n" + CapacityAttemptSchemaDefinition;
+    private static readonly string CurrentSchemaDefinition = Legacy19SchemaDefinition
+        .Replace(LegacySimulationReceiptSchema, SimulationReceiptSchema, StringComparison.Ordinal) + "\n" + StructureJobSchema;
+
+    private const string StructureJobSchema = """
+        CREATE TABLE real_structure_jobs(
+            job_id TEXT PRIMARY KEY,
+            intent_hash TEXT NOT NULL,
+            goal_json TEXT NOT NULL,
+            machine_binding TEXT NOT NULL,
+            session_binding TEXT NOT NULL,
+            state INTEGER NOT NULL,
+            created_utc_ms INTEGER NOT NULL,
+            updated_utc_ms INTEGER NOT NULL,
+            result_json TEXT
+        );
+        CREATE TABLE real_structure_job_children(
+            job_id TEXT NOT NULL REFERENCES real_structure_jobs(job_id),
+            operation_id TEXT NOT NULL REFERENCES operation_plans(operation_id),
+            ordinal INTEGER NOT NULL,
+            PRIMARY KEY(job_id,ordinal),
+            UNIQUE(operation_id)
+        );
+        """;
+
+    private const string LegacySimulationReceiptSchema = """
+        CREATE TABLE IF NOT EXISTS simulation_edit_commits(
+            operation_id TEXT PRIMARY KEY REFERENCES operation_plans(operation_id),
+            commit_id TEXT NOT NULL UNIQUE,
+            document_id TEXT NOT NULL,
+            before_sha256 TEXT NOT NULL,
+            after_sha256 TEXT NOT NULL,
+            document_revision INTEGER NOT NULL,
+            document_schema_version INTEGER NOT NULL,
+            display_name TEXT NOT NULL,
+            sanitized_json TEXT NOT NULL,
+            updated_at_utc_ms INTEGER NOT NULL,
+            committed_at_utc_ms INTEGER NOT NULL
+        );
+        """;
+    private const string SimulationReceiptSchema = """
+        CREATE TABLE IF NOT EXISTS simulation_edit_commits(
+            commit_id TEXT NOT NULL PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            before_revision INTEGER NOT NULL,
+            document_revision INTEGER NOT NULL,
+            before_sha256 TEXT NOT NULL,
+            after_sha256 TEXT NOT NULL,
+            intent_hash TEXT NOT NULL,
+            committed_at_utc_ms INTEGER NOT NULL
+        );
+        """;
 
     private const string CapacityAttemptSchemaDefinition = """
         CREATE TABLE operation_capacity_attempts(

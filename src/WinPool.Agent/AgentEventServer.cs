@@ -166,18 +166,7 @@ public sealed class CurrentUserAgentEventServer
         {
             await foreach (var item in subscription.Reader.ReadAllAsync(cancellationToken))
             {
-                await IpcFrameCodec.WriteAsync(
-                    pipe,
-                    Envelope(
-                        AgentEventMessageTypes.Event,
-                        Guid.NewGuid(),
-                        new AgentEventWirePayload(
-                            item.GetType().Name,
-                            JsonSerializer.SerializeToElement(
-                                item,
-                                item.GetType(),
-                                JsonOptions))),
-                    cancellationToken).ConfigureAwait(false);
+                await WriteEventAsync(pipe, item, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -192,6 +181,39 @@ public sealed class CurrentUserAgentEventServer
             catch (ObjectDisposedException)
             {
             }
+        }
+    }
+
+    private async Task WriteEventAsync(Stream pipe, AgentEvent item, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await IpcFrameCodec.WriteAsync(pipe,
+                Envelope(AgentEventMessageTypes.Event, Guid.NewGuid(),
+                    new AgentEventWirePayload(item.GetType().Name,
+                        JsonSerializer.SerializeToElement(item, item.GetType(), JsonOptions))),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (IpcFrameTooLargeException) when (item is AgentMonitorBatchEvent { Samples.Count: > 1 })
+        {
+            // Split against the actual encoded wire limit, not object counts.
+            var batch = (AgentMonitorBatchEvent)item;
+            var middle = batch.Samples.Count / 2;
+            var first = batch.Samples.Take(middle).ToArray();
+            var second = batch.Samples.Skip(middle).ToArray();
+            var secondGap = second[0].Sequence != first[^1].Sequence + 1
+                || second.Zip(second.Skip(1), (left, right) => right.Sequence != left.Sequence + 1).Any(gap => gap);
+            await WriteEventAsync(pipe, batch with
+            {
+                Samples = first,
+                LastSequence = first[^1].Sequence
+            }, cancellationToken).ConfigureAwait(false);
+            await WriteEventAsync(pipe, batch with
+            {
+                Samples = second,
+                FirstSequence = second[0].Sequence,
+                HasGap = secondGap
+            }, cancellationToken).ConfigureAwait(false);
         }
     }
 

@@ -16,7 +16,7 @@ public sealed partial class WindowsRealStorageBackend
         RealReconciliationResult Unknown(string code) => new(RealOperationState.OutcomeUnknown, [parent], code, false);
         try
         {
-            _ = RequireFrozenStep(plan, step);
+            step = RequireFrozenStep(plan, step);
             if (step.Command is CreateTieredVirtualDiskCommand tieredMacro
                 && (tieredMacro.CapacityTiers is not null || WindowsRealOperationPlanner.UsesExactMemberSet(plan)))
                 return await ReconcileMultiTierMaximumReadOnlyAsync(plan, step with { Command = tieredMacro with { CapacityTiers = WindowsRealOperationPlanner.TierInputs(tieredMacro) } }, parent, attempts, cancellationToken).ConfigureAwait(false);

@@ -29,12 +29,15 @@ public sealed partial class WindowsRealStorageBackend
         }
         RequireMultiMaximumIdentity(plan, topology, closure, expected);
         var request = new RealOperationIntentRequest(plan.Intent, plan.SystemId, plan.Targets, plan.RealOperation.Steps, plan.RealOperation.ExpectedFinalState);
-        _ = await planner.ValidateExactMemberStepAsync(topology, closure, request, step, ct, outputs).ConfigureAwait(false);
+        WindowsRealStorageSafetyEvidence? safety = null;
+        _ = await planner.ValidateExactMemberStepAsync(topology, closure, request, step, ct, outputs,
+            onSafetyVerified: value => safety = value).ConfigureAwait(false);
         var target = WindowsRealOperationPlanner.BuildExactMemberTarget(topology, closure, step.Command, outputs) with
         { CreatedInThisPlan = WindowsRealStorageTargetBuilder.GetReference(step.Command).CreatedByStep is not null };
         operationScopes[plan.OperationId] = StorageInventoryScopeFactory.Create(topology.Facts, plan.OperationId, step.Id,
             plan.Targets.Where(item => item.Kind == StorageObjectKind.PhysicalDisk).ToArray());
-        return new(JsonSerializer.Serialize(target), closure.Fingerprint, closure.Fingerprint, closure.PhysicalMemberFingerprint);
+        return new(JsonSerializer.Serialize(target), closure.Fingerprint, closure.Fingerprint, closure.PhysicalMemberFingerprint)
+        { CallContext = new CallContext(plan.OperationId, step.Id, topology, target, safety) };
     }
 
     private static RealExactPhysicalMemberSetClosure ExactClosureFromTarget(WindowsRealStorageTopology topology, WindowsStorageCommandTarget target)
@@ -52,12 +55,15 @@ public sealed partial class WindowsRealStorageBackend
         WindowsRealStorageSafetyEvidence? safetyEvidence;
         try
         {
-            before = await CaptureOperationTopologyAsync(plan, step.Id + ":exact-before", ct).ConfigureAwait(false);
+            var context = preflight.CallContext as CallContext;
+            if (context is null || context.OperationId != plan.OperationId || context.StepId != step.Id)
+                throw new InvalidDataException("The exact-member call context is unavailable.");
+            before = context.Before;
             closure = ExactClosureFromTarget(before, target);
             RequireMultiMaximumIdentity(plan, before, closure, preflight.TargetFingerprint);
             if (target.ExpectedFingerprint != closure.Fingerprint || preflight.PhysicalMemberFingerprint != closure.PhysicalMemberFingerprint)
                 throw new InvalidDataException("Exact pre-call component changed.");
-            safetyEvidence = await planner.ValidateMultiMaximumSafetyAsync(before, closure, step.Command, ct).ConfigureAwait(false);
+            safetyEvidence = context.Safety;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         { return new(RealStepOutcome.FailedWithoutEffect, "real.exact_pre_call_unverified", JsonSerializer.Serialize(new WindowsNoEffectStepEvidence(true,
@@ -82,7 +88,7 @@ public sealed partial class WindowsRealStorageBackend
         {
             try
             {
-                var after = await CaptureOperationTopologyAsync(plan, step.Id + ":exact-after", CancellationToken.None).ConfigureAwait(false);
+                var after = await CaptureWithinWindowAsync(plan, step.Id + ":exact-after", deadline, ct).ConfigureAwait(false);
                 var observed = ExactClosureFromTarget(after, target);
                 RequireMultiMaximumIdentity(plan, after, observed, observed.Fingerprint);
                 var verified = VerifyAfter(step.Command, target, provider, before, after);
@@ -98,7 +104,8 @@ public sealed partial class WindowsRealStorageBackend
                         provider.LiveCapabilityEvidence, verified.GptInitialization, observedSafety?.NativePartitionAttributes ?? provider.NativeMsrSafetyEvidence,
                         observedSafety?.VolumeSafetyEvidence ?? provider.VolumeSafetyEvidence, observedSafety?.OfflinePartitionAttributes ?? provider.OfflinePartitionAttributes,
                         TieredCreationInput: provider.TieredCreationInput);
-                    return new(RealStepOutcome.Verified, "real.step_verified", JsonSerializer.Serialize(evidence), evidence.CreatedObjectId);
+                    return new(RealStepOutcome.Verified, "real.step_verified", JsonSerializer.Serialize(evidence), evidence.CreatedObjectId)
+                    { VerifiedPostState = PostState(after) };
                 }
             }
             catch (Exception ex) when (ex is not OutOfMemoryException) { diagnostic = ex.Message; }

@@ -1,4 +1,4 @@
-﻿namespace WinPool.Infrastructure.Tests;
+namespace WinPool.Infrastructure.Tests;
 
 public sealed class InfrastructureTests
 {
@@ -63,9 +63,12 @@ public sealed class InfrastructureTests
     {
         var script = WinPool.Infrastructure.Windows.WindowsHardwareInventoryProvider.FixedStorageCommand;
         var forbidden = new System.Text.RegularExpressions.Regex(
-            @"(?im)^\s*(New|Set|Remove|Clear|Initialize|Format)-[A-Za-z]+",
+            @"(?i)\b(?:New|Set|Remove|Clear|Initialize|Format|Resize|Repair|Optimize|Reset)-(?:Disk|Partition|Volume|Storage[A-Za-z]*|PhysicalDisk|VirtualDisk)\b",
             System.Text.RegularExpressions.RegexOptions.CultureInvariant);
         Assert.DoesNotMatch(forbidden, script);
+        foreach (var command in new[] { "New-StoragePool", "Set-PhysicalDisk", "Remove-StorageTier",
+            "Clear-Disk", "Initialize-Disk", "Format-Volume", "Resize-VirtualDisk" })
+            Assert.Matches(forbidden, command);
         Assert.Contains("Get-PhysicalDisk", script);
         Assert.Contains("Get-StoragePool", script);
         Assert.Contains("Get-StorageTier", script);
@@ -148,96 +151,14 @@ public sealed class InfrastructureTests
         Assert.Contains(document.SourceFacts!.Objects, x => x.ObjectType == WinPool.Application.FactObjectType.Processor);
         Assert.Contains(document.SourceFacts.Objects, x => x.ObjectType == WinPool.Application.FactObjectType.Volume);
         var systemId = WinPool.Domain.SystemId.New();
-        var compatibilityProvider =
-            new WinPool.Infrastructure.Windows.EmbeddedPowerShellInventoryProvider(
-                new FixedHardwareProvider(document));
-        var projected = await compatibilityProvider.CaptureAsync(
-            new WinPool.Application.InventoryRequest(
-                systemId,
-                WinPool.Application.InventoryCaptureReason.Comparison),
-            CancellationToken.None);
-        Assert.True(projected.IsSuccess);
-        Assert.Equal(
-            WinPool.Application.InventoryProviderKind.EmbeddedReadOnlyPowerShell,
-            projected.Value!.ProviderKind);
-        Assert.Equal(64, projected.Value.MachineBinding.Length);
-        Assert.Contains(
-            projected.Value.Objects,
-            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk);
-        Assert.Contains(
-            projected.Value.Objects,
-            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Partition);
-        Assert.All(
-            projected.Value.Objects.Where(
-                item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk),
+        var projected = WinPool.Infrastructure.Windows.InventorySnapshotProjection.Project(systemId, snapshot);
+        Assert.Equal(WinPool.Application.InventoryProviderKind.EmbeddedReadOnlyPowerShell, projected.ProviderKind);
+        Assert.Equal(systemId, projected.SystemId);
+        Assert.Equal(64, projected.MachineBinding.Length);
+        Assert.Contains(projected.Objects, item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk);
+        Assert.Contains(projected.Objects, item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Partition);
+        Assert.All(projected.Objects.Where(item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk),
             item => Assert.True(item.Properties.ContainsKey("pnpDeviceId")));
-
-        var stale = await compatibilityProvider.CaptureAsync(
-            new WinPool.Application.InventoryRequest(
-                systemId,
-                WinPool.Application.InventoryCaptureReason.PreExecutionValidation,
-                ExpectedInventoryVersion: "stale-version"),
-            CancellationToken.None);
-        Assert.Equal(WinPool.Application.ApplicationStatus.Rejected, stale.Status);
-        Assert.NotNull(stale.Value);
-    }
-
-    [Fact]
-    public async Task NativeReadOnlyScanReturnsSystemMountedVolumesAndIdentifiers()
-    {
-        var provider =
-            new WinPool.Infrastructure.Windows.NativeWindowsInventoryProvider();
-        var result = await provider.CaptureAsync(
-            new WinPool.Application.InventoryRequest(
-                WinPool.Domain.SystemId.New(),
-                WinPool.Application.InventoryCaptureReason.Comparison),
-            CancellationToken.None);
-
-        Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Value);
-        Assert.Equal(
-            WinPool.Application.InventoryProviderKind.NativeWindows,
-            result.Value.ProviderKind);
-        Assert.Equal(64, result.Value.InventoryVersion.Length);
-        Assert.Equal(64, result.Value.MachineBinding.Length);
-        Assert.Contains(
-            result.Value.Objects,
-            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.System);
-        Assert.Contains(
-            result.Value.Objects,
-            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Volume);
-        Assert.Contains(
-            result.Value.Objects,
-            item => item.Id.Kind == WinPool.Domain.StorageObjectKind.PhysicalDisk
-                    && item.Properties.ContainsKey("physicalDriveNumber")
-                    && item.Properties.ContainsKey("busType"));
-        Assert.All(
-            result.Value.Objects,
-            item => Assert.Equal(64, item.Id.ProviderKey.Length));
-        Assert.All(
-            result.Value.Objects.Where(item => item.Id.Kind == WinPool.Domain.StorageObjectKind.Volume),
-            item => Assert.True(item.Properties.ContainsKey("volumeGuid")));
-        Assert.NotEmpty(result.Value.Relationships ?? []);
-        var objectIds = result.Value.Objects.Select(item => item.Id).ToHashSet();
-        Assert.All(
-            result.Value.Relationships ?? [],
-            relationship =>
-            {
-                Assert.Contains(relationship.FromObjectId, objectIds);
-                Assert.Contains(relationship.ToObjectId, objectIds);
-            });
-    }
-
-    private sealed class FixedHardwareProvider(
-        WinPool.Application.StorageSystemDocument document)
-        : WinPool.Application.IHardwareInventoryProvider
-    {
-        public Task<WinPool.Application.StorageSystemDocument> CollectLocalAsync(
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(document);
-        }
     }
 
 }

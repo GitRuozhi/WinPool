@@ -2,7 +2,7 @@ using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 public sealed record RealOperationFeedbackMessage(string Title, string Message, GlobalNotificationOptions Options);
 

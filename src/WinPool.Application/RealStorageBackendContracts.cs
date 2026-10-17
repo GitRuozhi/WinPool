@@ -95,7 +95,17 @@ public sealed record RealStepPreflight(
     string TargetEvidenceJson,
     string InventoryVersion,
     string TargetFingerprint,
-    string PhysicalMemberFingerprint);
+    string PhysicalMemberFingerprint)
+{
+    /// <summary>Agent-local typed facts. Never serialized or accepted from a pipe peer.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public RealStepCallContext? CallContext { get; init; }
+}
+
+public abstract record RealStepCallContext(OperationId OperationId, string StepId);
+
+public sealed record RealVerifiedPostState(StorageSystemDocument Document,
+    StorageInventoryScope? Scope, DateTimeOffset ObservedAt);
 
 public enum RealStepOutcome
 {
@@ -108,7 +118,11 @@ public sealed record RealStepResult(
     RealStepOutcome Outcome,
     string Code,
     string ResultEvidenceJson,
-    string? CreatedObjectId = null);
+    string? CreatedObjectId = null)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public RealVerifiedPostState? VerifiedPostState { get; init; }
+}
 
 public sealed record RealReconciliationResult(
     RealOperationState State,

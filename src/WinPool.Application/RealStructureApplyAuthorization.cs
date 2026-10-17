@@ -3,7 +3,7 @@ using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 /// <summary>One confirmed structural goal, scoped to one Apply invocation. It is not a general real-mode grant.</summary>
 public sealed class RealStructureApplyAuthorization : IRealOperationAuthorization
@@ -41,6 +41,7 @@ public sealed class RealStructureApplyAuthorization : IRealOperationAuthorizatio
 
     public StorageObjectId PhysicalTarget { get; }
     public IReadOnlyList<StorageObjectId> PhysicalTargets { get; }
+    public IReadOnlyList<IReadOnlyList<StorageObjectId>> PhysicalTargetSets { get; }
 
     public RealStructureApplyAuthorization(RealStructureDraftPlan draft, SimulationEditingSession session, string productSessionId)
     {
@@ -68,10 +69,13 @@ public sealed class RealStructureApplyAuthorization : IRealOperationAuthorizatio
         PhysicalTargets = memberIds.Select(id => Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
         PhysicalTarget = Id(StorageObjectKind.PhysicalDisk, memberIds[0]);
         foreach (var member in PhysicalTargets) known.Add(member);
-        foreach (var pool in draft.RemovedPools) memberScopes.Add(MemberScope(pool.MemberPhysicalDiskIds));
-        foreach (var vd in draft.RemovedVirtualDisks) memberScopes.Add(MemberScope(before.StoragePools.Single(pool => pool.StableId == vd.PoolStableId).MemberPhysicalDiskIds));
-        foreach (var tier in draft.RemovedTiers) memberScopes.Add(MemberScope(before.StoragePools.Single(pool => pool.StableId == tier.PoolStableId).MemberPhysicalDiskIds));
-        foreach (var goal in draft.Creations) memberScopes.Add(MemberScope(goal.Pool.MemberPhysicalDiskIds));
+        PhysicalTargetSets = draft.RemovedPools.Select(pool => pool.MemberPhysicalDiskIds)
+            .Concat(draft.RemovedVirtualDisks.Select(vd => before.StoragePools.Single(pool => pool.StableId == vd.PoolStableId).MemberPhysicalDiskIds))
+            .Concat(draft.RemovedTiers.Select(tier => before.StoragePools.Single(pool => pool.StableId == tier.PoolStableId).MemberPhysicalDiskIds))
+            .Concat(draft.Creations.Select(goal => goal.Pool.MemberPhysicalDiskIds))
+            .DistinctBy(MemberScope).Select(members => (IReadOnlyList<StorageObjectId>)members
+                .Select(id => Id(StorageObjectKind.PhysicalDisk, id)).ToArray()).ToArray();
+        foreach (var members in PhysicalTargetSets) memberScopes.Add(MemberScope(members.Select(member => member.ProviderKey)));
         foreach (var id in removablePools) known.Add(Id(StorageObjectKind.StoragePool, id));
         foreach (var id in removableVds) known.Add(Id(StorageObjectKind.VirtualDisk, id));
         foreach (var id in removableTiers) known.Add(Id(StorageObjectKind.StorageTier, id));
@@ -157,6 +161,20 @@ public sealed class RealStructureApplyAuthorization : IRealOperationAuthorizatio
         }
         lines.Add(T("已完成的更改不会自动回滚；执行失败或结果待核对时停止后续操作。", "Completed changes are not automatically rolled back; failure or an uncertain result stops further operations."));
         return string.Join(Environment.NewLine, lines);
+    }
+
+    public void FreezeBaselineEvidence(IReadOnlyList<StorageObjectId> members, string machine,
+        string sessionBinding, string physicalFingerprint, string topologyFingerprint)
+    {
+        var scope = MemberScope(members.Select(member => member.ProviderKey));
+        if (confirmed || stopped || !memberScopes.Contains(scope)
+            || members.Any(member => !PhysicalTargets.Contains(member))
+            || string.IsNullOrWhiteSpace(physicalFingerprint) || string.IsNullOrWhiteSpace(topologyFingerprint))
+            throw new InvalidDataException("The frozen baseline must belong to one exact confirmed member set.");
+        physicalFingerprints.Add(scope, physicalFingerprint);
+        postFingerprints.Add(scope, topologyFingerprint);
+        machineBinding = machine;
+        agentSessionBinding = sessionBinding;
     }
 
     public void Confirm() => confirmed = !stopped;

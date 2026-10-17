@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Security.Principal;
-using WinPool.Agent.Client;
 using WinPool.Application;
 using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
@@ -46,17 +45,25 @@ internal static class DataLocationSwitchRuntime
             return false;
         }
 
+        using var process = Process.Start(CreateReplacementStartInfo(executable, Environment.ProcessId));
+        return process is not null;
+    }
+
+    internal static ProcessStartInfo CreateReplacementStartInfo(string executable, int previousProcessId)
+    {
         var startInfo = new ProcessStartInfo
         {
             FileName = executable,
+            WorkingDirectory = Path.GetDirectoryName(executable)!,
             UseShellExecute = true
         };
         startInfo.ArgumentList.Add(ApplicationStartupOptions.StorageLocationHandoffArgument);
         startInfo.ArgumentList.Add(ApplicationStartupOptions.WaitForProcessArgument);
-        startInfo.ArgumentList.Add(Environment.ProcessId.ToString(
+        startInfo.ArgumentList.Add(previousProcessId.ToString(
             System.Globalization.CultureInfo.InvariantCulture));
-        using var process = Process.Start(startInfo);
-        return process is not null;
+        startInfo.ArgumentList.Add(ApplicationStartupOptions.PageArgument);
+        startInfo.ArgumentList.Add(nameof(ApplicationStartupTarget.Settings));
+        return startInfo;
     }
 
     public static AgentMigrationExclusion? TryAcquireAgentMigrationExclusion()

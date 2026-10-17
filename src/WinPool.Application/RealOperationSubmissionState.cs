@@ -1,7 +1,7 @@
 using WinPool.Application;
 using WinPool.Domain;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 /// <summary>Retains one real operation across editor, mode and connection changes.</summary>
 public sealed class RealOperationSubmissionState

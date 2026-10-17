@@ -62,8 +62,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (e.Parameter is EditorNavigationParameter parameter)
         {
             ViewModel = parameter.ViewModel;
-            var targetPartition = ViewModel.EffectiveActiveSnapshot.Partitions.FirstOrDefault(item =>
-                item.StableId.Equals(ViewModel.EffectiveActiveSnapshot.ResolvePartitionUnion(parameter.TargetStableId)?.Id ?? parameter.TargetStableId, StringComparison.OrdinalIgnoreCase));
+            var targetPartition = ViewModel.ActiveSnapshot.Partitions.FirstOrDefault(item =>
+                item.StableId.Equals(ViewModel.ActiveSnapshot.ResolvePartitionUnion(parameter.TargetStableId)?.Id ?? parameter.TargetStableId, StringComparison.OrdinalIgnoreCase));
             _selectedPartitionId = targetPartition?.StableId;
             _selectedDiskId = targetPartition?.OsDiskStableId ?? ResolveOsDiskId(parameter.TargetStableId);
         }
@@ -72,7 +72,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             ViewModel = (WorkspaceViewModel)e.Parameter;
         }
 
-        _working = ViewModel.EffectiveActiveSnapshot;
+        _working = ViewModel.ActiveSnapshot;
         _interaction = new TopologyEditInteraction(IsTopologyNodeSelected, OnTopologySelected, false, ContextMenuFactory: CreateTopologyContextMenu);
         LocalizeChrome();
         RefreshAll();
@@ -97,7 +97,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (ViewModel.IsUsingSimulatedInventory)
             return;
 
-        _working = ViewModel.EffectiveActiveSnapshot;
+        _working = ViewModel.ActiveSnapshot;
         var selectedPartition = _selectedPartitionId is null
             ? null
             : _working.Partitions.FirstOrDefault(item =>
@@ -429,7 +429,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return null;
         }
 
-        var snapshot = ViewModel.EffectiveActiveSnapshot;
+        var snapshot = ViewModel.ActiveSnapshot;
         if (snapshot.OsDisks.Any(x => x.StableId == stableId))
         {
             return stableId;
@@ -3023,7 +3023,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 Text("提交结果未知", "Commit outcome unknown"),
                 "disk-partition-editor",
                 showNotification: true);
-            _working = ViewModel.EffectiveActiveSnapshot;
+            _working = ViewModel.ActiveSnapshot;
             RefreshAll();
             return false;
         }
@@ -3040,7 +3040,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return false;
         }
 
-        _working = ViewModel.EffectiveActiveSnapshot;
+        _working = ViewModel.ActiveSnapshot;
         PublishOperationFeedback(
             GlobalNotificationSeverity.Info,
             successTitle,

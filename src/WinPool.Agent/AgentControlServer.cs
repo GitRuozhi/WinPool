@@ -61,8 +61,6 @@ public sealed class AgentControlProtocolCodec
             {
                 AgentControlMessageTypes.GetSnapshot =>
                     Deserialize<GetAgentSnapshotRequest>(envelope),
-                AgentControlMessageTypes.OpenMainWindow =>
-                    Deserialize<OpenMainWindowRequest>(envelope),
                 AgentControlMessageTypes.OpenNativeProperties =>
                     Deserialize<OpenAgentNativePropertiesRequest>(envelope),
                 AgentControlMessageTypes.StartMonitoring =>
@@ -85,12 +83,10 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<CommitAgentSimulationEditRequest>(envelope),
                 AgentControlMessageTypes.LookupSimulationCommit =>
                     Deserialize<LookupAgentSimulationCommitRequest>(envelope),
-                AgentControlMessageTypes.CaptureInventory =>
-                    Deserialize<CaptureAgentInventoryRequest>(envelope),
                 AgentControlMessageTypes.CaptureManageInventory =>
                     Deserialize<CaptureAgentManageInventoryRequest>(envelope),
-                AgentControlMessageTypes.LoadManageInventory =>
-                    Deserialize<LoadAgentManageInventoryRequest>(envelope),
+                AgentControlMessageTypes.LoadInventoryCache =>
+                    Deserialize<LoadAgentInventoryCacheRequest>(envelope),
                 AgentControlMessageTypes.ExportMonitorCsv =>
                     Deserialize<ExportAgentMonitorCsvRequest>(envelope),
                 AgentControlMessageTypes.SetAgentPreference =>
@@ -105,6 +101,14 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<AcceptAgentRealOperationRequest>(envelope),
                 AgentControlMessageTypes.QueryRealOperation =>
                     Deserialize<QueryAgentRealOperationRequest>(envelope),
+                AgentControlMessageTypes.ReconcileRealOperation =>
+                    Deserialize<ReconcileAgentRealOperationRequest>(envelope),
+                AgentControlMessageTypes.LoadRealOperationEvidence =>
+                    Deserialize<LoadAgentRealOperationEvidenceRequest>(envelope),
+                AgentControlMessageTypes.PrepareRealStructureJob => Deserialize<PrepareAgentRealStructureJobRequest>(envelope),
+                AgentControlMessageTypes.AcceptRealStructureJob => Deserialize<AcceptAgentRealStructureJobRequest>(envelope),
+                AgentControlMessageTypes.QueryRealStructureJob => Deserialize<QueryAgentRealStructureJobRequest>(envelope),
+                AgentControlMessageTypes.StopRealStructureJob => Deserialize<StopAgentRealStructureJobRequest>(envelope),
                 AgentControlMessageTypes.QueryRealVirtualDiskCreationRange =>
                     Deserialize<QueryAgentRealVirtualDiskCreationRangeRequest>(envelope),
                 AgentControlMessageTypes.QueryRealStructureCreationSupport =>
@@ -237,6 +241,8 @@ public sealed class CurrentUserAgentControlServer
     private readonly TimeSpan handshakeReadTimeout;
     private readonly Action<string, Exception> reportConnectionFailure;
     private readonly Func<int, bool> verifyClientIntegrity;
+    private readonly int? serverIntegrity;
+    private readonly bool combineClientEvidence;
     private readonly TimeSpan requestTransferTimeout;
 
     public CurrentUserAgentControlServer(
@@ -308,7 +314,8 @@ public sealed class CurrentUserAgentControlServer
         }
         this.reportConnectionFailure = reportConnectionFailure
             ?? ((code, exception) => Trace.TraceError("{0}: {1}", code, exception));
-        var serverIntegrity = WindowsProcessIntegrity.TryRead(Environment.ProcessId);
+        serverIntegrity = WindowsProcessIntegrity.TryRead(Environment.ProcessId);
+        combineClientEvidence = verifyClientIntegrity is null && processIncarnationVerifier is WindowsProcessIncarnationVerifier;
         this.verifyClientIntegrity = verifyClientIntegrity
             ?? (processId => WindowsProcessIntegrity.CanControl(
                 WindowsProcessIntegrity.TryRead(processId), serverIntegrity));
@@ -390,9 +397,8 @@ public sealed class CurrentUserAgentControlServer
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.process_mismatch");
         }
-        var clientWitness = validation.IsAccepted
-            ? processIncarnationVerifier?.TryRead(handshake.ProcessId)
-            : null;
+        var clientEvidence = validation.IsAccepted ? ReadClientEvidence(handshake.ProcessId) : default;
+        var clientWitness = clientEvidence.Witness;
         if (validation.IsAccepted
             && processIncarnationVerifier is not null
             && !ProcessIncarnationMatcher.HasExpectedImage(
@@ -414,7 +420,7 @@ public sealed class CurrentUserAgentControlServer
                 HandshakeRejection.InvalidProcess,
                 "ipc.handshake.client-image-mismatch");
         }
-        if (validation.IsAccepted && !verifyClientIntegrity(handshake.ProcessId))
+        if (validation.IsAccepted && !clientEvidence.IntegrityAllowed)
         {
             validation = new(false, HandshakeRejection.InvalidProcess,
                 "ipc.handshake.client-integrity-mismatch");
@@ -482,7 +488,7 @@ public sealed class CurrentUserAgentControlServer
                     eventEndpoint!,
                     agentProcessId,
                     handshake.ProcessId,
-                    processId => verifyClientProcess(processId) && verifyClientIntegrity(processId),
+                    processId => VerifyEventClient(processId, registration!),
                     timeProvider)
                 .RunAsync(eventCancellation.Token)
             : Task.CompletedTask;
@@ -530,29 +536,26 @@ public sealed class CurrentUserAgentControlServer
                 IpcEnvelope envelope;
                 try
                 {
-                    using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    readTimeout.CancelAfter(requestTransferTimeout);
-                    try
-                    {
-                        envelope = await IpcFrameCodec.ReadAsync(stream, readTimeout.Token);
-                    }
-                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        throw new RequestTransferTimeoutException();
-                    }
+                    envelope = await IpcFrameCodec.ReadAsync(
+                        stream, cancellationToken, requestTransferTimeout);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new RequestTransferTimeoutException();
                 }
                 catch (EndOfStreamException)
                 {
                     return;
                 }
 
-                if (!verifyClientIntegrity(handshake.ProcessId))
+                var requestEvidence = ReadClientEvidence(handshake.ProcessId);
+                if (!requestEvidence.IntegrityAllowed)
                 {
                     throw new InvalidDataException("The client no longer has the Agent's integrity level.");
                 }
                 if (processIncarnationVerifier is not null
                     && !ProcessIncarnationMatcher.Matches(
-                        processIncarnationVerifier.TryRead(handshake.ProcessId),
+                        requestEvidence.Witness,
                         activeRegistration,
                         expectedClientExecutablePath!))
                 {
@@ -637,6 +640,25 @@ public sealed class CurrentUserAgentControlServer
                 "ipc.control.client_connection_failed",
             _ => "ipc.control.connection_failed"
         };
+
+    private (ProcessIncarnation? Witness, bool IntegrityAllowed) ReadClientEvidence(int processId)
+    {
+        if (combineClientEvidence)
+        {
+            var witness = ((WindowsProcessIncarnationVerifier)processIncarnationVerifier!)
+                .TryReadWithIntegrity(processId, out var integrity);
+            return (witness, WindowsProcessIntegrity.CanControl(integrity, serverIntegrity));
+        }
+        return (processIncarnationVerifier?.TryRead(processId), verifyClientIntegrity(processId));
+    }
+
+    private bool VerifyEventClient(int processId, AgentManagedProcess registration)
+    {
+        var evidence = ReadClientEvidence(processId);
+        return evidence.IntegrityAllowed && (processIncarnationVerifier is not null
+            ? ProcessIncarnationMatcher.Matches(evidence.Witness, registration, expectedClientExecutablePath!)
+            : verifyClientProcess(processId));
+    }
 
     private sealed class RequestTransferTimeoutException : TimeoutException
     {

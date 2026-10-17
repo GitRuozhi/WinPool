@@ -5,6 +5,74 @@ namespace WinPool.Application.Tests;
 public sealed class SimulationEditingSessionTests
 {
     [Fact]
+    public void ExplicitJobRestoreLoadsRemainingGoalIntoAnUnchangedEmptyBinding()
+    {
+        var document = Document();
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        var goal = new RealStructureJobGoal(document.SystemId,
+            document.Snapshot with { SnapshotVersion = "durable remaining" }, []);
+        var status = new AgentRealStructureJobResponse(Guid.NewGuid(), "hash", RealOperationState.PartiallyCompleted,
+            1, [], ["Verified pool"], null, false, goal, document.SystemId);
+        Assert.True(session.TryRestoreStructureJob(status, document, session.BindingGeneration, session.ContentRevision, emptyDraft: true));
+        Assert.Same(goal.Working, session.Working);
+        Assert.Equal(status.JobId, session.RealStructureResumeJobId);
+        Assert.Equal(session.ContentRevision, session.RealStructureResumeContentRevision);
+    }
+
+    [Theory]
+    [InlineData("content")]
+    [InlineData("binding")]
+    [InlineData("system")]
+    [InlineData("unknown")]
+    [InlineData("retained-edits")]
+    public void JobRestorePreservesNewDraftAndRejectsStaleOrUnreconciledBindings(string change)
+    {
+        var document = Document();
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        var goal = new RealStructureJobGoal(document.SystemId,
+            document.Snapshot with { SnapshotVersion = "old remaining" }, []);
+        var status = new AgentRealStructureJobResponse(Guid.NewGuid(), "hash", RealOperationState.PartiallyCompleted,
+            1, [], [], null, false, goal, document.SystemId);
+        var binding = session.BindingGeneration;
+        var content = session.ContentRevision;
+        if (change == "binding") session.Bind(document, document.Snapshot);
+        if (change == "system") status = status with { SystemId = SystemId.New() };
+        if (change == "unknown") status = status with { RequiresReconciliation = true };
+        if (change == "retained-edits") session.RealStructureResumeJobId = status.JobId;
+        if (change is "content" or "retained-edits") session.Working = document.Snapshot with { SnapshotVersion = "new user draft" };
+        var preserved = session.Working;
+        if (change == "retained-edits") content = session.ContentRevision;
+        Assert.False(session.TryRestoreStructureJob(status, document, binding, content, emptyDraft: change != "retained-edits"));
+        Assert.Same(preserved, session.Working);
+    }
+
+    [Fact]
+    public void PreviewIsBuiltOncePerContentRevisionAndNoOpRestoreKeepsTheCache()
+    {
+        var document = Document();
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        var builds = 0;
+        SimulationDraftPlan Build() { builds++; return new("preview", []); }
+        var first = session.GetOrBuildPreview(document.Id, Build);
+        for (var index = 0; index < 100; index++)
+            Assert.Same(first, session.GetOrBuildPreview(document.Id, Build));
+        var revision = session.ContentRevision;
+        session.Restore(session.Capture());
+        Assert.Equal(revision, session.ContentRevision);
+        Assert.Same(first, session.GetOrBuildPreview(document.Id, Build));
+        Assert.Equal(1, builds);
+        session.MarkDraftContentChanged();
+        Assert.NotSame(first, session.GetOrBuildPreview(document.Id, Build));
+        Assert.Equal(2, builds);
+        session.Bind(document, document.Snapshot);
+        session.GetOrBuildPreview(document.Id, Build);
+        Assert.Equal(3, builds);
+    }
+
+    [Fact]
     public void BaselineSourceFactsFollowVerifiedRebaseRenameAndPreviewWithoutReseeding()
     {
         var document = Document();

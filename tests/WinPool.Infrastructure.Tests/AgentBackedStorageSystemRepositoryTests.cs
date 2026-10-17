@@ -1,10 +1,26 @@
-﻿using WinPool.Application;
+using WinPool.Application;
 using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Infrastructure.Tests;
 
 public sealed class AgentBackedStorageSystemRepositoryTests
 {
+    [Fact]
+    public async Task CatalogLoadsOnlyMetadataUntilTheSelectedDocumentIsRequested()
+    {
+        var connection = new RecordingConnection();
+        var repository = new AgentBackedStorageSystemRepository(connection);
+        var document = Document(StorageSystemKind.Simulation);
+        await repository.SaveSimulationAsync(document);
+        connection.Requests.Clear();
+        var entries = await repository.LoadSimulationsAsync();
+        Assert.Equal(document.Id, Assert.Single(entries).DocumentId);
+        Assert.IsType<ListAgentSimulationDocumentsRequest>(Assert.Single(connection.Requests));
+        var selected = await repository.LoadSimulationAsync(document.Id);
+        Assert.Equal(document.Id, selected!.Id);
+        Assert.IsType<LoadAgentSimulationDocumentRequest>(connection.Requests[1]);
+    }
+
     [Fact]
     public void CodecRoundTripsSimulationAndRejectsLocalDocument()
     {
@@ -63,7 +79,8 @@ public sealed class AgentBackedStorageSystemRepositoryTests
         Assert.Collection(
             connection.Requests,
             request => Assert.IsType<CaptureAgentManageInventoryRequest>(request),
-            request => Assert.IsType<LoadAgentManageInventoryRequest>(request));
+            request => Assert.IsType<LoadAgentInventoryCacheRequest>(request),
+            request => Assert.IsType<LoadAgentInventoryCacheRequest>(request));
         var payload = LocalInventoryDocumentCodec.Encode(document);
         Assert.Equal(64, payload.Sha256.Length);
         Assert.Throws<InvalidDataException>(
@@ -188,7 +205,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
                     new SimulationDocumentLoadedResponse(current),
                 SaveAgentSimulationDocumentRequest save => Save(save),
                 CaptureAgentManageInventoryRequest => CaptureLocal(),
-                LoadAgentManageInventoryRequest =>
+                LoadAgentInventoryCacheRequest =>
                     new ManageInventoryLoadedResponse(
                         localInventory is null ? null : Guid.NewGuid(),
                         localInventory),
@@ -202,7 +219,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
         {
             localInventory = LocalInventoryDocumentCodec.Encode(
                 Document(StorageSystemKind.Local));
-            return new(Guid.NewGuid(), localInventory);
+            return new(Guid.NewGuid(), localInventory.DocumentId, localInventory.Sha256, 1);
         }
 
         private SimulationDocumentSavedResponse Save(

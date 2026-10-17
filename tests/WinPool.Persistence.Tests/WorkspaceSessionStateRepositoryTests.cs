@@ -27,7 +27,7 @@ public sealed class WorkspaceSessionStateRepositoryTests
         await repository.SaveAsync(
             State("simulation:two") with
             {
-                ActivePage = WorkspacePage.Monitor,
+
                 HighlightedTopologyProviderKey = "partition:test"
             },
             CancellationToken.None);
@@ -35,7 +35,7 @@ public sealed class WorkspaceSessionStateRepositoryTests
         var loaded = Assert.IsType<WorkspaceSessionState>(
             await repository.LoadAsync(CancellationToken.None));
         Assert.Equal("simulation:two", loaded.ActiveDocumentId);
-        Assert.Equal(WorkspacePage.Monitor, loaded.ActivePage);
+
         Assert.Equal("partition:test", loaded.HighlightedTopologyProviderKey);
         Assert.Equal("pool:test", loaded.RememberedProviderKeys[ManageWorkspaceCategory.Pool]);
         Assert.Equal(TimeSpan.Zero, loaded.UpdatedAtUtc.Offset);
@@ -62,7 +62,6 @@ public sealed class WorkspaceSessionStateRepositoryTests
     private static WorkspaceSessionState State(string documentId) =>
         new(
             WorkspaceSessionState.CurrentSchemaVersion,
-            WorkspacePage.Manage,
             documentId,
             ManageWorkspaceCategory.Pool,
             new Dictionary<ManageWorkspaceCategory, string>

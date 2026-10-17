@@ -17,6 +17,8 @@ public sealed record WindowsMaximumCapacityAttemptEvidence(WindowsStorageCommand
 {
     [JsonInclude, JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     internal string? ObservationDiagnostic { get; init; }
+    [JsonIgnore]
+    internal WindowsRealStorageTopology? ObservedTopology { get; init; }
 }
 
 public sealed record WindowsMaximumCapacitySearchEvidence(string AlgorithmVersion, long ActualSizeBytes,
@@ -49,10 +51,7 @@ public sealed partial class WindowsRealStorageBackend
         };
         if ((await journal.ReadAsync(cancellationToken).ConfigureAwait(false)).Count != 0)
             return MaximumUnknown("real.maximum.existing_attempts_never_replayed", new { plan.OperationId, step.Id });
-        var physical = plan.Targets.First(item => item.Kind == StorageObjectKind.PhysicalDisk);
         var expectedFingerprint = preflight.TargetFingerprint;
-        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)
-            ?? throw new InvalidDataException("MAX preflight target missing.");
         if (policy.AlgorithmVersion != MaximumCapacityAlgorithm.Version || policy.SourceFingerprint != expectedFingerprint
             || policy.InitialCandidateBytes != MaximumCapacityAlgorithm.InitialCandidateBytes(policy.UpperBoundBytes))
             throw new InvalidDataException("MAX policy differs from frozen preflight.");
@@ -67,88 +66,29 @@ public sealed partial class WindowsRealStorageBackend
                 return MaximumUnknown("real.maximum.stopped_before_next_attempt", new { LastVerified = lastVerified, LastSuccessfulBytes = state.LastSuccessfulBytes });
             if (ordinal >= policy.MaximumAttempts)
                 return MaximumUnknown("real.maximum.attempt_budget_without_boundary", new { LastVerified = lastVerified, LastSuccessfulBytes = state.LastSuccessfulBytes });
-            WindowsRealStorageTopology before;
-            RealTargetClosure closure;
-            RealStorageCommand command;
-            WindowsStorageCommandTarget attemptTarget;
-            try
-            {
-                before = await CaptureOperationTopologyAsync(plan, step.Id + ":max-before:" + (ordinal + 1), cancellationToken).ConfigureAwait(false);
-                closure = MaximumComponentClosure(plan, before);
-                RequireMaximumInitialIdentity(plan, before, closure, expectedFingerprint);
-                command = BuildMaximumAttemptCommand(stored.Command, state.CandidateBytes, vdId, actualTierId, before.SystemId);
-                var reference = WindowsRealStorageTargetBuilder.GetReference(command);
-                attemptTarget = (WindowsRealOperationPlanner.UsesExactMemberSet(plan)
-                    ? WindowsRealOperationPlanner.BuildExactMemberTarget(before, WindowsRealOperationPlanner.ResolveExactMemberSet(before, plan.Targets), command, new Dictionary<string, string>())
-                    : WindowsRealStorageTargetBuilder.Build(before, reference, new Dictionary<string, string>()))
-                    with { MaximumCapacityAttempt = true, Layout = stored.Command is CreateVirtualDiskCommand ordinaryLayout ? ordinaryLayout.EffectiveLayout : null };
-                if (command is CreateTieredVirtualDiskCommand tiered)
-                {
-                    var related = WindowsRealStorageTargetBuilder.Build(before, tiered.Tier, new Dictionary<string, string>());
-                    attemptTarget = attemptTarget with { RelatedUniqueId = related.UniqueId, RelatedObjectId = related.ObjectId };
-                }
-                if (command is ResizeTierCommand && vdId is not null)
-                {
-                    var owner = before.RequireObject(new(before.SystemId, StorageObjectKind.VirtualDisk, vdId));
-                    attemptTarget = attemptTarget with { RelatedUniqueId = Text(owner, "UniqueId"), RelatedObjectId = Text(owner, "ObjectId") };
-                }
-                await ValidateMaximumSafetyAsync(plan, before, closure, command, cancellationToken).ConfigureAwait(false);
-                RequireMaximumRawComponent(before, closure);
-                if (vdId is not null && (lastTopology is null || !MaximumResizeBeforeMatches(lastTopology, before, vdId, actualTierId)))
-                    throw new InvalidDataException("Last verified MAX mapping changed before the next attempt.");
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                return MaximumUnknown("real.maximum.fresh_preflight_failed", new { Error = exception.ToString(), LastVerified = lastVerified });
-            }
-            var observation = MaximumObservation(before, closure, WindowsRealOperationPlanner.UsesExactMemberSet(plan));
-            var attempt = new MaximumCapacityAttempt(++ordinal, stored.Command is CreateTieredVirtualDiskCommand tc ? tc.Tier.Existing!.Value.ProviderKey : "virtual-disk", vdId is null ? MaximumCapacityAttemptPhase.Create : MaximumCapacityAttemptPhase.Resize,
-                state.CandidateBytes, state.LastSuccessfulBytes, JsonSerializer.Serialize(attemptTarget), closure.Fingerprint,
-                closure.PhysicalMemberFingerprint, JsonSerializer.Serialize(observation));
-            if (!await journal.PrepareAsync(attempt, CancellationToken.None).ConfigureAwait(false))
-                return MaximumUnknown("real.maximum.prepare_cas_failed", attempt);
-            if (journal.IsStopRequested || cancellationToken.IsCancellationRequested)
-            {
-                await journal.CompleteAsync(ordinal, new(MaximumCapacityAttemptState.FailedWithoutCall, state.LastSuccessfulBytes,
-                    "real.maximum.stopped_before_call", JsonSerializer.Serialize(new WindowsNoEffectStepEvidence(true,
-                        "real.maximum.stopped_before_call", closure.PhysicalMemberFingerprint))), CancellationToken.None).ConfigureAwait(false);
-                return MaximumUnknown("real.maximum.stopped_before_call", attempt);
-            }
-            if (!await journal.MarkCallIssuedAsync(ordinal, CancellationToken.None).ConfigureAwait(false))
-                return MaximumUnknown("real.maximum.call_boundary_cas_failed", attempt);
-            WindowsStorageCommandResult provider;
-            try { provider = await adapter.ExecuteAsync(command, attemptTarget, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                var unknown = new MaximumCapacityAttemptResult(MaximumCapacityAttemptState.OutcomeUnknown, state.LastSuccessfulBytes,
-                    "real.maximum.adapter_exception", JsonSerializer.Serialize(new { OriginalException = exception.ToString(), Attempt = attempt }));
-                await journal.CompleteAsync(ordinal, unknown, CancellationToken.None).ConfigureAwait(false);
-                return MaximumUnknown(unknown.Code, unknown);
-            }
-            var result = await ObserveMaximumAttemptAsync(plan, command, attemptTarget, provider, before, closure,
-                vdId, actualTierId, CancellationToken.None).ConfigureAwait(false);
+            var candidate = new MaximumAttemptCandidate(++ordinal,
+                stored.Command is CreateTieredVirtualDiskCommand tiered ? tiered.Tier.Existing!.Value.ProviderKey : "virtual-disk",
+                vdId is null ? MaximumCapacityAttemptPhase.Create : MaximumCapacityAttemptPhase.Resize,
+                state.CandidateBytes, state.LastSuccessfulBytes, expectedFingerprint, vdId, osId, actualTierId, lastTopology);
+            var execution = await ExecuteMaximumAttemptAsync(plan, stored, preflight, candidate, journal, cancellationToken).ConfigureAwait(false);
+            if (execution.Receipt is not { } result) return MaximumAttemptUnknown(execution);
             var success = result.Verified is not null;
             var rejected = result.Code == "real.maximum.capacity_rejected_unchanged";
-            var attemptState = success ? MaximumCapacityAttemptState.Verified
-                : rejected ? MaximumCapacityAttemptState.CapacityRejectedUnchanged
-                : MaximumCapacityAttemptState.OutcomeUnknown;
-            var attemptResult = new MaximumCapacityAttemptResult(attemptState, success ? attempt.CandidateBytes : attempt.LastSuccessfulBytes,
-                result.Code, JsonSerializer.Serialize(result));
-            if (!await journal.CompleteAsync(ordinal, attemptResult, CancellationToken.None).ConfigureAwait(false))
-                return MaximumUnknown("real.maximum.result_cas_failed", result);
-            if (!success && !rejected) return MaximumUnknown(result.Code, result);
+            if (!success && !rejected) return MaximumAttemptUnknown(result);
             if (success)
             {
                 lastVerified = result.Verified!; lastVerifiedOrdinal = ordinal;
                 vdId ??= lastVerified.CreatedObjectId;
                 osId ??= lastVerified.CreatedOsDiskId;
                 actualTierId ??= lastVerified.TieredCreation?.TierInstanceStableId;
-                if (vdId is null || osId is null) return MaximumUnknown("real.maximum.actual_mapping_missing", result);
+                if (vdId is null || osId is null) return new(RealStepOutcome.OutcomeUnknown,
+                    "real.maximum.actual_mapping_missing", result.EvidenceJson);
                 expectedFingerprint = lastVerified.PostFingerprint;
-                lastTopology = await CaptureOperationTopologyAsync(plan, step.Id + ":max-verified:" + ordinal, CancellationToken.None).ConfigureAwait(false);
+                lastTopology = result.ObservedTopology
+                    ?? throw new InvalidDataException("Verified MAX observation has no Agent-local facts.");
                 RequireMaximumInitialIdentity(plan, lastTopology, MaximumComponentClosure(plan, lastTopology), expectedFingerprint);
             }
-            else { boundaryOrdinal = ordinal; expectedFingerprint = result.Second!.Fingerprint; }
+            else { boundaryOrdinal = ordinal; expectedFingerprint = result.PostFingerprint!; lastTopology = result.ObservedTopology; }
             state.Observe(success);
         }
         if (!state.HasMaximum || state.LastSuccessfulBytes <= 0 || lastVerified is null || vdId is null || osId is null
@@ -159,7 +99,8 @@ public sealed partial class WindowsRealStorageBackend
         var search = new WindowsMaximumCapacitySearchEvidence(MaximumCapacityAlgorithm.Version, state.LastSuccessfulBytes,
             ordinal, lastVerifiedOrdinal, boundaryOrdinal, vdId, osId, actualTierId, "real.maximum.capacity_rejected_unchanged");
         var finalEvidence = lastVerified with { PostFingerprint = expectedFingerprint, MaximumCapacity = search };
-        return new(RealStepOutcome.Verified, "real.maximum.integer_gib_boundary_verified", JsonSerializer.Serialize(finalEvidence), vdId);
+        return new(RealStepOutcome.Verified, "real.maximum.integer_gib_boundary_verified", JsonSerializer.Serialize(finalEvidence), vdId)
+        { VerifiedPostState = lastTopology is null ? null : PostState(lastTopology) };
     }
 
     private static RealStorageCommand BuildMaximumAttemptCommand(RealStorageCommand macro, long bytes,
@@ -176,94 +117,6 @@ public sealed partial class WindowsRealStorageBackend
             ? new ResizeTierCommand(RealTargetReference.ForExisting(new(system, StorageObjectKind.StorageTier,
                 actualTierId ?? throw new InvalidDataException("Actual tier mapping absent."))), bytes)
             : new ResizeVirtualDiskCommand(RealTargetReference.ForExisting(new(system, StorageObjectKind.VirtualDisk, vdId)), bytes);
-    }
-
-    private async Task<WindowsMaximumCapacityAttemptEvidence> ObserveMaximumAttemptAsync(OperationPlan plan,
-        RealStorageCommand command, WindowsStorageCommandTarget target, WindowsStorageCommandResult provider,
-        WindowsRealStorageTopology before, RealTargetClosure beforeClosure, string? vdId, string? tierId, CancellationToken ct)
-    {
-        var origin = MaximumObservation(before, beforeClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan));
-        if (command is ResizeVirtualDiskCommand or ResizeTierCommand)
-        {
-            if ((!string.IsNullOrWhiteSpace(provider.UniqueId) && provider.UniqueId != target.UniqueId)
-                || (!string.IsNullOrWhiteSpace(provider.ObjectId) && provider.ObjectId != target.ObjectId))
-                return new(provider, origin, null, null, [], null, "real.maximum.provider_output_identity_changed");
-        }
-        if (!provider.ProviderReturned)
-            return new(provider, origin, null, null, [], null, "real.maximum.adapter_rejected_without_call");
-        var capacity = IsExplicitMaximumCapacityRejection(command, provider, MaximumKnownLayout(command, before, tierId));
-        if (provider.Code != "provider.returned" && !capacity)
-            return new(provider, origin, null, null, [], null, "real.maximum.provider_uncertain_or_noncapacity_failure");
-        var physical = plan.Targets.First(item => item.Kind == StorageObjectKind.PhysicalDisk);
-        var deadline = timeProvider.GetUtcNow().Add(PostCallWindow);
-        WindowsMaximumCapacityObservation? lastFresh = null;
-        string? lastFailedCheck = null;
-        string? lastCaptureException = null;
-        do
-        {
-            try
-            {
-                var first = await CaptureOperationTopologyAsync(plan, "max-postcondition", ct).ConfigureAwait(false);
-                var firstClosure = MaximumComponentClosure(plan, first);
-                lastFresh = MaximumObservation(first, firstClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan));
-                if (first.MachineBinding != plan.RealOperation!.MachineBinding || firstClosure.PhysicalMemberFingerprint != beforeClosure.PhysicalMemberFingerprint)
-                    return new(provider, origin, MaximumObservation(first, firstClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), null, [], null, "real.maximum.physical_or_machine_changed");
-                RequireMaximumRawComponent(first, firstClosure);
-                if (capacity)
-                {
-                    if (firstClosure.Fingerprint != beforeClosure.Fingerprint)
-                        return new(provider, origin, MaximumObservation(first, firstClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), null, [], null, "real.maximum.capacity_error_changed_topology");
-                    var jobs1 = await storageJobReader.ReadAsync(ct).ConfigureAwait(false);
-                    if (!MaximumTerminalJobs(jobs1)) return new(provider, origin, MaximumObservation(first, firstClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), null, [jobs1], null, "real.maximum.storage_job_uncertain");
-                    await Task.Delay(TimeSpan.FromSeconds(2), timeProvider, ct).ConfigureAwait(false);
-                    var second = await CaptureOperationTopologyAsync(plan, "max-capacity-unchanged", ct).ConfigureAwait(false);
-                    var secondClosure = MaximumComponentClosure(plan, second);
-                    var jobs2 = await storageJobReader.ReadAsync(ct).ConfigureAwait(false);
-                    if (second.MachineBinding != before.MachineBinding || secondClosure.PhysicalMemberFingerprint != beforeClosure.PhysicalMemberFingerprint
-                        || secondClosure.Fingerprint != beforeClosure.Fingerprint || !MaximumTerminalJobs(jobs2))
-                        return new(provider, origin, MaximumObservation(first, firstClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), MaximumObservation(second, secondClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), [jobs1, jobs2], null, "real.maximum.capacity_boundary_unproven");
-                    await ValidateMaximumSafetyAsync(plan, second, secondClosure, command, ct).ConfigureAwait(false);
-                    return new(provider, origin, MaximumObservation(first, firstClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), MaximumObservation(second, secondClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), [jobs1, jobs2], null, "real.maximum.capacity_rejected_unchanged");
-                }
-                var verified = VerifyAfter(command, target, provider, before, first);
-                var resizeMatches = verified is not null && MaximumResizeAfterMatches(command, before, first, vdId ?? verified.CreatedObjectId, tierId);
-                var oldFactsPreserved = verified is not null && MaximumOldFactsPreserved(before, first, beforeClosure.Objects,
-                    new[] { vdId ?? verified.CreatedObjectId, tierId, verified.CreatedOsDiskId,
-                        first.Snapshot.OsDisks.SingleOrDefault(item => item.VirtualDiskStableId == (vdId ?? verified.CreatedObjectId))?.StableId }.Where(id => id is not null).Select(id => id!).ToHashSet(StringComparer.Ordinal));
-                lastFailedCheck = verified is null ? "VerifyAfter" : !resizeMatches ? "MaximumResizeAfterMatches"
-                    : !oldFactsPreserved ? "MaximumOldFactsPreserved" : "SafetyAndMapping";
-                if (verified is not null && resizeMatches && oldFactsPreserved)
-                {
-                    await ValidateMaximumSafetyAsync(plan, first, firstClosure, command, ct).ConfigureAwait(false);
-                    var createdVd = verified.CreatedObjectId ?? vdId;
-                    var createdOs = verified.CreatedOsDiskId ?? first.Snapshot.OsDisks.Single(item => item.VirtualDiskStableId == createdVd).StableId;
-                    var tierMapping = verified.TieredCreation;
-                    if (tierMapping is null && tierId is not null)
-                    {
-                        var old = before.Snapshot.StorageTiers.Single(item => item.StableId == tierId);
-                        var actual = first.Snapshot.StorageTiers.Single(item => item.StableId == tierId);
-                        var template = first.Snapshot.StorageTiers.Single(item => item.PoolStableId == actual.PoolStableId && item.VirtualDiskStableId is null);
-                        var vdObject = first.RequireObject(new(first.SystemId, StorageObjectKind.VirtualDisk, createdVd!));
-                        var tierObject = first.RequireObject(new(first.SystemId, StorageObjectKind.StorageTier, tierId));
-                        var templateObject = first.RequireObject(new(first.SystemId, StorageObjectKind.StorageTier, template.StableId));
-                        tierMapping = new(template.StableId, Text(templateObject, "UniqueId"), Text(templateObject, "ObjectId"),
-                            vdObject.Id, Text(vdObject, "UniqueId"), Text(vdObject, "ObjectId"), tierObject.Id, Text(tierObject, "UniqueId"), Text(tierObject, "ObjectId"),
-                            actual.PoolStableId ?? throw new InvalidDataException("Actual tier pool identity missing."), firstClosure.PhysicalDiskId, actual.Size, actual.MediaType, actual.ResiliencySettingName, "Fixed", 1, 65536,
-                            first.Facts.Relationships.Where(edge => !edge.IsRetained).ToArray(), vdObject.Fields, tierObject.Fields);
-                    }
-                    var evidence = new WindowsVerifiedStepEvidence(firstClosure.Fingerprint, firstClosure.PhysicalMemberFingerprint,
-                        createdVd, provider.Code, createdOs, tierMapping, provider.LiveCapabilityEvidence,
-                        PoolMemberRoleEvidence: firstClosure.PoolMemberRoleEvidence, TieredCreationInput: provider.TieredCreationInput);
-                    return new(provider, origin, MaximumObservation(first, firstClosure, WindowsRealOperationPlanner.UsesExactMemberSet(plan)), null, [], evidence, "real.maximum.attempt_verified");
-                }
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
-            { lastCaptureException = exception.GetType().FullName + ": " + exception.Message; }
-            if (timeProvider.GetUtcNow() >= deadline) break;
-            await Task.Delay(PostCallPoll, timeProvider, ct).ConfigureAwait(false);
-        } while (true);
-        return new(provider, origin, lastFresh, null, [], null, "real.maximum.postcondition_unverified")
-        { ObservationDiagnostic = JsonSerializer.Serialize(new { LastFailedCheck = lastFailedCheck, LastCaptureException = lastCaptureException }) };
     }
 
     internal const string EligibleResourceCapacityReason = "The storage pool does not have sufficient eligible resources for the creation of the specified virtual disk.";

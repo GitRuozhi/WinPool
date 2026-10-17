@@ -50,9 +50,13 @@ public sealed partial class WindowsRealStorageBackendTests
     public async Task MultiMaximumCreatesOneExactHalfGibSeedThenSearchesEachActualTierWithoutShrinking()
     {
         var setup = await MultiMaximumFixtureAsync(false);
+        var capturesBefore = setup.Fixture.Source.FullCalls;
         var result = await setup.Fixture.Backend.ExecuteMaximumCapacitySearchAsync(setup.Plan, setup.Step, setup.Preflight, setup.Journal, default);
         Assert.True(result.Outcome == RealStepOutcome.Verified, result.ResultEvidenceJson);
         var records = setup.Journal.Records;
+        var rejections = records.Count(item => item.State == MaximumCapacityAttemptState.CapacityRejectedUnchanged);
+        Assert.Equal(2 * records.Count + rejections - 1, setup.Fixture.Source.FullCalls - capturesBefore);
+        Assert.NotNull(result.VerifiedPostState);
         Assert.Equal(MaximumCapacityAttemptPhase.Seed, records[0].Attempt.Phase);
         Assert.Equal("seed", records[0].Attempt.SearchTargetKey);
         Assert.Equal(5 * MaximumCapacityAlgorithm.GiB, records[0].Attempt.CandidateBytes);
@@ -71,6 +75,7 @@ public sealed partial class WindowsRealStorageBackendTests
     [InlineData("stale")]
     [InlineData("wrong-pool")]
     [InlineData("missing-os-association")]
+    [InlineData("unproven-association-method")]
     public async Task MultiMaximumRejectsNonexactMemberRoleProofBeforeAnyCall(string corruption)
     {
         var setup = await MultiMaximumFixtureAsync(false);
@@ -79,10 +84,14 @@ public sealed partial class WindowsRealStorageBackendTests
             "protected" => item with { IsSystem = true },
             "stale" => item with { InventoryVersion = "stale" },
             "wrong-pool" => item with { PoolStableId = "other" },
+            "unproven-association-method" => item with { VerificationMethod = "Unproven" },
             _ => item with { AssociatedOsDiskIds = ["invented-os"] }
         }).ToArray();
-        var result = await setup.Fixture.Backend.ExecuteMaximumCapacitySearchAsync(setup.Plan, setup.Step, setup.Preflight, setup.Journal, default);
-        Assert.Equal(RealStepOutcome.OutcomeUnknown, result.Outcome);
+        // The Agent invokes this boundary immediately before dispatch. Corrupt
+        // proof must be present before that boundary, rather than changing a
+        // test double after an already validated local context was issued.
+        await Assert.ThrowsAsync<InvalidDataException>(() => setup.Fixture.Backend.PreflightStepAsync(
+            setup.Plan, setup.Plan.RealOperation!.Steps[0], new Dictionary<string, string>(), CancellationToken.None));
         Assert.Equal(0, setup.Fixture.Adapter.CallCount);
         Assert.Empty(setup.Journal.Records);
     }
@@ -233,12 +242,15 @@ public sealed partial class WindowsRealStorageBackendTests
             ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, topology.Facts.InventoryCapturedAt);
         var plan = RealOperationPlanFactory.Create(new(OperationIntent.CreateVirtualDisk, pool.System, new[] { pool }.Concat(templates).Concat(members).ToArray(),
             [step], "Per-tier boundaries"), OperationId.New(), environment, fixture.Session, closure.Fingerprint, closure.Fingerprint,
-            closure.PhysicalMemberFingerprint, "fixture", topology.Facts.InventoryCapturedAt, topology.Facts.InventoryCapturedAt.AddMinutes(5));
-        var preflight = new RealStepPreflight("{}", closure.Fingerprint, closure.Fingerprint, closure.PhysicalMemberFingerprint);
+            closure.PhysicalMemberFingerprint, "Windows exact selected physical-member set; fixture",
+            topology.Facts.InventoryCapturedAt, topology.Facts.InventoryCapturedAt.AddMinutes(5));
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0],
+            new Dictionary<string, string>(), CancellationToken.None);
         var journal = new MaximumMemoryJournal(topology.Facts.InventoryCapturedAt);
         var rejected = false;
         fixture.Adapter.OnExecute = () =>
         {
+            Assert.Equal(MaximumCapacityAttemptState.CallIssued, journal.Records[^1].State);
             var attempt = journal.Records[^1].Attempt;
             rejected = false;
             if (attempt.Phase == MaximumCapacityAttemptPhase.Seed)

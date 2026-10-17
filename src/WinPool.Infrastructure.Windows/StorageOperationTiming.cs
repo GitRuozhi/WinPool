@@ -8,6 +8,8 @@ namespace WinPool.Infrastructure.Windows;
 /// <summary>Best-effort diagnostics only; never used as execution or safety evidence.</summary>
 public static class StorageOperationTiming
 {
+    public static Action<string> Sink { get; set; } = WriteDefault;
+
     public static void Record(string phase, long started, OperationId? operationId = null,
         string? stepId = null, string scope = "storage", int captureCount = 0)
     {
@@ -17,8 +19,7 @@ public static class StorageOperationTiming
             elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
             processId = Environment.ProcessId
         });
-        Trace.WriteLine(entry);
-        DiagnosticLog.AppendFailure(StorageDataLocations.CurrentRoot, "operation-timing.jsonl", entry, null);
+        Sink(entry);
     }
 
     public static async Task<T> MeasureAsync<T>(string phase, Func<Task<T>> action,
@@ -27,5 +28,11 @@ public static class StorageOperationTiming
         var started = Stopwatch.GetTimestamp();
         try { return await action().ConfigureAwait(false); }
         finally { Record(phase, started, operationId, stepId, scope, captureCount); }
+    }
+
+    private static void WriteDefault(string entry)
+    {
+        Trace.WriteLine(entry);
+        DiagnosticLog.AppendFailure(StorageDataLocations.CurrentRoot, "operation-timing.jsonl", entry, null);
     }
 }

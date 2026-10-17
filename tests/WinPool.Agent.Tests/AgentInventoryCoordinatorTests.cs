@@ -3,7 +3,6 @@ using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
-using WinPool.Inventory;
 
 namespace WinPool.Agent.Tests;
 
@@ -13,6 +12,72 @@ public sealed class AgentInventoryCoordinatorTests
     private static readonly SystemId FixtureSystem = new(new Guid("e3abbd80-9305-4f9d-861d-c951a4edfd15"));
     private static readonly string[] OtherObjectIds =
         ["computer", "cpu", "gpu", "monitor", "gpu-supplement", "monitor-supplement"];
+
+    [Fact]
+    public async Task VerifiedPostStatePublishesAndPersistsWithoutAnotherProviderInvocation()
+    {
+        await using var harness = await InventoryHarness.CreateAsync();
+        var before = await harness.CaptureAsync(NetworkCapture(0, ["old"], includeOtherObjects: true), CollectionPurpose.Storage);
+        harness.Events.Clear();
+        harness.provider.CaptureOverride = _ => throw new InvalidOperationException("Verified post-state must not recapture.");
+        var raw = NetworkCapture(1, ["new"]);
+        raw = raw with { SystemId = before.SystemId, SourceFacts = raw.SourceFacts! with { SystemId = before.SystemId } };
+        await harness.coordinator.PublishFreshAsync(raw, null);
+        var updated = Assert.Single(harness.Events.OfType<AgentInventoryUpdatedEvent>());
+        Assert.True(updated.IsAutomatic);
+        var published = LocalInventoryDocumentCodec.Decode(updated.Document);
+        AssertMembership(published, ["new"]);
+        Assert.Equal(updated.Document, await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync());
+    }
+
+    [Fact]
+    public async Task VerifiedPostStateReplacesThePriorOperationScopeInCacheWithoutChangingTheRawBatch()
+    {
+        await using var harness = await InventoryHarness.CreateAsync();
+        var source = Source("physical:baseline", "MSFT_PhysicalDisk", 0, CollectionPurpose.Storage);
+        WinPoolSourceObject Disk(WinPoolSource current) => new("a", FactObjectType.PhysicalDisk, current.Id, "identity:a", true,
+            [WinPoolSourceField.Returned("UniqueId", "provider-a", FactValueType.String, current.Id)]);
+        var baseline = await harness.CaptureAsync(Capture(0, CollectionPurpose.Storage, [source], [Disk(source)]), CollectionPurpose.Storage);
+        var target = new StorageObjectId(baseline.SystemId, StorageObjectKind.PhysicalDisk, "a");
+        StorageSystemDocument Scoped(StorageInventoryScope current, int second, long rawGeneration)
+        {
+            var observed = source with { Id = "physical:" + second, CapturedAt = Start.AddSeconds(second),
+                CaptureGeneration = rawGeneration, Coverage = new(current.Key, ["a"], true, current.Generation) };
+            var facts = Capture(second, CollectionPurpose.Storage, [observed], [Disk(observed)]).SourceFacts! with
+            { SystemId = baseline.SystemId, Collections = [], ScopedCollection = new(current, Start.AddSeconds(second), Start.AddSeconds(second), true) };
+            return new(StorageSystemDocument.CurrentSchemaVersion, baseline.Id, StorageSystemKind.Local,
+                baseline.DisplayName, facts, [], Start.AddSeconds(second)) { SystemId = baseline.SystemId };
+        }
+        var previousScope = StorageInventoryScopeFactory.Create(baseline.SourceFacts!, OperationId.New(), "previous", [target]);
+        harness.provider.ScopedCapture = current => Task.FromResult(Scoped(current, 1, current.Generation));
+        var previous = await harness.coordinator.CaptureManageScopedAsync(previousScope, CorrelationId.New(), CancellationToken.None);
+        Assert.Equal(ApplicationStatus.Succeeded, previous.Status);
+        var savedPrevious = LocalInventoryDocumentCodec.Decode(harness.Events.OfType<AgentInventoryUpdatedEvent>().Last().Document);
+        var previousGeneration = savedPrevious.SourceFacts!.ScopedCollection!.Scope.Generation;
+        Assert.True(previousGeneration > 0);
+
+        var currentScope = StorageInventoryScopeFactory.Create(savedPrevious.SourceFacts, OperationId.New(), "verified-after", [target]);
+        var raw = Scoped(currentScope, 2, 77);
+        var unchanged = WinPoolFactsCodec.Encode(raw.SourceFacts!);
+        harness.Events.Clear();
+        harness.provider.ScopedCapture = _ => throw new InvalidOperationException("Verified post-state must not recapture.");
+        await harness.coordinator.PublishFreshAsync(raw, currentScope);
+
+        var updated = Assert.Single(harness.Events.OfType<AgentInventoryUpdatedEvent>());
+        var saved = LocalInventoryDocumentCodec.Decode(updated.Document);
+        var savedScope = saved.SourceFacts!.ScopedCollection!.Scope;
+        Assert.Equal(currentScope.OperationId, savedScope.OperationId);
+        Assert.Equal(currentScope.StepId, savedScope.StepId);
+        Assert.Equal(previousGeneration + 1, savedScope.Generation);
+        var latest = Assert.Single(saved.SourceFacts.Sources, item => item.Id == "physical:2");
+        Assert.Equal(savedScope.Generation, latest.CaptureGeneration);
+        Assert.Equal(savedScope.Generation, latest.Coverage!.Generation);
+        Assert.Equal(1, harness.provider.ScopedCalls);
+        Assert.Equal(updated.Document, await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync());
+        Assert.Equal(0, raw.SourceFacts!.ScopedCollection!.Scope.Generation);
+        Assert.Equal(77, Assert.Single(raw.SourceFacts.Sources).CaptureGeneration);
+        Assert.Equal(unchanged, WinPoolFactsCodec.Encode(raw.SourceFacts));
+    }
 
     [Fact]
     public async Task ScopedRefreshUsesAuthorityLocatorsSerializesWithFullCaptureAndPreservesUnrelatedFacts()
@@ -57,7 +122,7 @@ public sealed class AgentInventoryCoordinatorTests
         var result = await scopedTask;
         Assert.Equal(ApplicationStatus.Succeeded, result.Status);
         Assert.Equal(1, harness.provider.ScopedCalls);
-        var saved = LocalInventoryDocumentCodec.Decode(Assert.IsType<ManageInventoryCaptureResponse>(result.Value).Document);
+        var saved = LocalInventoryDocumentCodec.Decode(harness.Events.OfType<AgentInventoryUpdatedEvent>().Last().Document);
         Assert.Equal(new[] { "a", "b" }, saved.SourceFacts!.Objects.Select(x => x.Id).Order(StringComparer.Ordinal));
         Assert.True(saved.SourceFacts.IsMerged);
         Assert.True(saved.SourceFacts.ScopedCollection!.Complete);
@@ -382,10 +447,9 @@ public sealed class AgentInventoryCoordinatorTests
             store = new WinPoolSqliteStore(databasePath);
             await store.InitializeAsync();
             lease = AgentWriteOwnerLease.Acquire(store, "inventory-regression");
-            var unused = new UnusedInventoryProvider();
-            coordinator = new(unused, unused, provider, new InventoryComparer(),
-                new InventorySnapshotRepository(store, lease), new InventoryComparisonRepository(store, lease),
-                new LocalInventoryDocumentRepository(store, lease), new LocalSystemIdentityResolver(store, lease),
+            var localDocument = new LocalInventoryDocumentRepository(store, lease);
+            coordinator = new(provider, new InventorySnapshotRepository(store, lease), localDocument,
+                new AgentLocalSystemIdentity(localDocument, new LocalSystemIdentityResolver(store, lease)),
                 new UnusedDeviceResolver(), Events.Add);
         }
 
@@ -398,7 +462,11 @@ public sealed class AgentInventoryCoordinatorTests
             Assert.Equal(ApplicationStatus.Succeeded, result.Status);
             Assert.Null(provider.Next);
             var response = Assert.IsType<ManageInventoryCaptureResponse>(result.Value);
-            var captured = LocalInventoryDocumentCodec.Decode(response.Document);
+            var payload = Events.OfType<AgentInventoryUpdatedEvent>().Last().Document;
+            Assert.Equal(payload.DocumentId, response.DocumentId);
+            Assert.Equal(payload.Sha256, response.Revision);
+            Assert.True(response.Generation > 0);
+            var captured = LocalInventoryDocumentCodec.Decode(payload);
             var loaded = await LoadAsync();
             Assert.Equal(WinPoolFactsCodec.Encode(captured.SourceFacts!), WinPoolFactsCodec.Encode(loaded.SourceFacts!));
             var snapshot = await new InventorySnapshotRepository(store).GetAsync(response.SnapshotId);
@@ -459,13 +527,6 @@ public sealed class AgentInventoryCoordinatorTests
             Next = null;
             return Task.FromResult(document);
         }
-    }
-
-    private sealed class UnusedInventoryProvider : IInventoryProvider
-    {
-        public InventoryProviderKind Kind => InventoryProviderKind.Replay;
-        public Task<ApplicationResult<InventorySnapshot>> CaptureAsync(InventoryRequest request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("This regression must use only the fixed hardware input.");
     }
 
     private sealed class UnusedDeviceResolver : IPhysicalDiskDeviceResolver

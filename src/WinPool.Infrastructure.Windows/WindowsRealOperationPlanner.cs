@@ -389,7 +389,9 @@ public sealed partial class WindowsRealOperationPlanner
         CancellationToken cancellationToken,
         IReadOnlyDictionary<string, string>? verifiedStepOutputs = null,
         bool readOnlyRenameReconciliation = false,
-        RealExactPhysicalMemberSetClosure? exactMemberSet = null)
+        RealExactPhysicalMemberSetClosure? exactMemberSet = null,
+        Action<WindowsRealStorageSafetyEvidence?>? onSafetyVerified = null,
+        WindowsRealStorageSafetyEvidence? verifiedSafety = null)
     {
         var snapshot = topology.Snapshot;
         if (step.Command is CreateVirtualDiskCommand { UseMaximumSize: true, MaximumCapacity: null }
@@ -398,7 +400,11 @@ public sealed partial class WindowsRealOperationPlanner
         var supportEvidence = "fresh-msft-storage:" + closure.Fingerprint;
         verifiedStepOutputs ??= new Dictionary<string, string>();
         WindowsRealStorageSafetyEvidence? safetyEvidence;
-        if (exactMemberSet is not null)
+        if (verifiedSafety is not null)
+        {
+            safetyEvidence = verifiedSafety;
+        }
+        else if (exactMemberSet is not null)
         {
             safetyEvidence = await safetyInspector.InspectAsync(topology, exactMemberSet, step.Command, cancellationToken).ConfigureAwait(false);
         }
@@ -419,6 +425,7 @@ public sealed partial class WindowsRealOperationPlanner
             safetyEvidence = await safetyInspector.ValidateWithEvidenceAsync(
                 topology, closure, step.Command, cancellationToken).ConfigureAwait(false);
         }
+        onSafetyVerified?.Invoke(safetyEvidence);
         if (safetyEvidence?.NativePartitionAttributes is { } nativeAttributes)
             supportEvidence += ";native-msr-attributes:" + JsonSerializer.Serialize(nativeAttributes);
         if (safetyEvidence?.VolumeSafetyEvidence is { Count: > 0 } volumeSafety)

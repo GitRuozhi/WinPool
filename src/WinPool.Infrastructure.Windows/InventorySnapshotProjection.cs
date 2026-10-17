@@ -4,81 +4,9 @@ using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
 
-/// <summary>
-/// Compatibility provider for the fixed embedded read-only PowerShell collector.
-/// No caller-supplied script or command text crosses this boundary.
-/// </summary>
-public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
+/// <summary>Pure persisted/UI projection of the single Windows collector.</summary>
+public static class InventorySnapshotProjection
 {
-    private readonly IHardwareInventoryProvider provider;
-
-    public EmbeddedPowerShellInventoryProvider(
-        IHardwareInventoryProvider? provider = null)
-    {
-        this.provider = provider ?? new WindowsHardwareInventoryProvider();
-    }
-
-    public InventoryProviderKind Kind =>
-        InventoryProviderKind.EmbeddedReadOnlyPowerShell;
-
-    public async Task<ApplicationResult<InventorySnapshot>> CaptureAsync(
-        InventoryRequest request,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        var correlation = CorrelationId.New();
-        if (request.SystemId.Value == Guid.Empty)
-        {
-            return Failure(
-                ApplicationStatus.Rejected,
-                correlation,
-                "inventory.request.missing_system");
-        }
-
-        try
-        {
-            var document = await provider.CollectLocalAsync(cancellationToken);
-            var snapshot = Project(
-                request.SystemId,
-                document.Snapshot);
-            if (!string.IsNullOrWhiteSpace(request.ExpectedInventoryVersion)
-                && !string.Equals(
-                    request.ExpectedInventoryVersion,
-                    snapshot.InventoryVersion,
-                    StringComparison.Ordinal))
-            {
-                return new(
-                    ApplicationStatus.Rejected,
-                    snapshot,
-                    [Message("inventory.version.changed")],
-                    correlation);
-            }
-
-            return ApplicationResult<InventorySnapshot>.Succeeded(
-                snapshot,
-                correlation);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return Failure(
-                ApplicationStatus.Cancelled,
-                correlation,
-                "inventory.capture.cancelled");
-        }
-        catch (Exception exception) when (
-            exception is InventoryScanException
-                or InvalidDataException
-                or IOException
-                or UnauthorizedAccessException
-                or System.ComponentModel.Win32Exception)
-        {
-            return Failure(
-                ApplicationStatus.Failed,
-                correlation,
-                "inventory.capture.failed");
-        }
-    }
-
     public static InventorySnapshot Project(
         SystemId systemId,
         StorageSnapshot source)
@@ -385,20 +313,4 @@ public sealed class EmbeddedPowerShellInventoryProvider : IInventoryProvider
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim()
         ?? string.Empty;
 
-    private static ApplicationResult<InventorySnapshot> Failure(
-        ApplicationStatus status,
-        CorrelationId correlation,
-        string code) =>
-        ApplicationResult<InventorySnapshot>.FromStatus(
-            status,
-            correlation,
-            Message(code));
-
-    private static ApplicationMessage Message(string code) =>
-        new(
-            code,
-            code,
-            string.Empty,
-            ApplicationMessageSeverity.Warning,
-            []);
 }

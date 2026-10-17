@@ -175,46 +175,6 @@ public sealed record ManageCommandSurfaceView(
     IReadOnlyList<ManageCommandView> Commands,
     ManageSystemDialogTargetView SystemDialogTarget);
 
-public interface IManageSystemProjector<in TDocument>
-{
-    ManageSystemProjection Project(TDocument document);
-}
-
-public interface IManageComparisonProjector<in TDocument>
-{
-    ManageObjectComparisonView Project(
-        TDocument document,
-        StorageObjectId objectId,
-        ManageObjectRole role);
-}
-
-public interface IManageDetailsProjector<in TDocument>
-{
-    ManageObjectDetailsView Project(
-        TDocument document,
-        StorageObjectId objectId,
-        ManageObjectRole role,
-        string displayName);
-}
-
-public interface IManageNavigationProjector<in TDocument>
-{
-    ManageObjectNavigationView Project(
-        TDocument document,
-        StorageObjectId objectId,
-        ManageObjectRole role);
-}
-
-public interface IManageCommandProjector<in TDocument>
-{
-    ManageCommandSurfaceView Project(
-        TDocument activeDocument,
-        TDocument localDocument,
-        StorageObjectId objectId,
-        ManageObjectRole role,
-        ManageWorkspaceCategory category);
-}
-
 public static class InternalStableIdentity
 {
     public static SystemId SystemFromDocumentId(string documentId) =>

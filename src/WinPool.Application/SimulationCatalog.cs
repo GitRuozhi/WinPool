@@ -1,21 +1,20 @@
 ﻿using WinPool.Application;
-using WinPool.Infrastructure.Windows;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 public static class SimulationCatalog
 {
     public const string ReferenceDocumentId =
         "simulation:builtin:desktop-pl96ukd-20260727-114130";
 
-    public static IReadOnlyList<StorageSystemDocument> CreateDocuments()
+    public static IReadOnlyList<StorageSystemDocument> CreateDocuments(DateTimeOffset? frozenAt = null)
     {
         var documents = new List<StorageSystemDocument>
         {
             Document(
                 ReferenceDocumentId,
                 "DESKTOP-PL96UKD",
-                SimulationStorageSnapshotFactory.Create())
+                SimulationStorageSnapshotFactory.Create(frozenAt))
         };
         foreach (var layout in SimulationLayouts.CreateAll())
         {
@@ -25,8 +24,8 @@ public static class SimulationCatalog
         return documents;
     }
 
-    public static StorageSystemDocument? TryCreateDocument(string id) =>
-        CreateDocuments().FirstOrDefault(
+    public static StorageSystemDocument? TryCreateDocument(string id, DateTimeOffset? frozenAt = null) =>
+        CreateDocuments(frozenAt).FirstOrDefault(
             document => document.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
 
     private static StorageSystemDocument Document(

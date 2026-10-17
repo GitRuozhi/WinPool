@@ -3,7 +3,7 @@ using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 /// <summary>Owns the exact frozen stage until its result and related facts have been mapped.
 /// This is read-only recovery state, never authority to accept or resume a write.</summary>

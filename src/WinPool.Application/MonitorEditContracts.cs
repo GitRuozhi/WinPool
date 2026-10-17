@@ -3,7 +3,7 @@ using WinPool.Domain;
 namespace WinPool.Application;
 
 public enum MonitorCounterSource { PhysicalDisk, StorageSpacesVirtualDisk }
-public enum MonitorEditTargetStatus { Editing, PendingVerification, Restored, RemovedByEdit, NeedsSelection }
+public enum MonitorEditTargetStatus { Editing, PendingVerification, Restored, RemovedByEdit, NeedsSelection, Unsupported }
 
 public sealed record MonitorEditTargetState(SystemId SystemId, StorageObjectId TargetId, OperationId OperationId,
     string StepId, MonitorEditTargetStatus Status, string ReasonCode, DateTimeOffset ObservedAtUtc,

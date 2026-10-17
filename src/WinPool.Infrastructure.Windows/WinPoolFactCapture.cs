@@ -24,6 +24,7 @@ internal static class WinPoolFactCapture
         ["Win32_NetworkAdapter"] = FactObjectType.NetworkAdapter, ["Win32_Battery"] = FactObjectType.Battery,
         ["Win32_LogicalDisk"] = FactObjectType.LogicalDisk,
         ["Windows.DiskRoles"] = FactObjectType.HardwareSupplement,
+        ["Windows.StorageProviderDiscovery"] = FactObjectType.HardwareSupplement,
         ["Win32_DiskDrive"] = FactObjectType.HardwareSupplement, ["Win32_TimeZone"] = FactObjectType.HardwareSupplement,
         ["SoftwareLicensingProduct"] = FactObjectType.HardwareSupplement,
         ["BatteryStaticData"] = FactObjectType.HardwareSupplement, ["BatteryStatus"] = FactObjectType.HardwareSupplement,

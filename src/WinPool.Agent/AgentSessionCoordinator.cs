@@ -13,10 +13,6 @@ public interface IAgentRequestOperations
         GetAgentSnapshotRequest request,
         CancellationToken cancellationToken);
 
-    Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
-        OpenMainWindowRequest request,
-        CancellationToken cancellationToken);
-
     Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
         OpenAgentNativePropertiesRequest request,
         CancellationToken cancellationToken);
@@ -61,10 +57,6 @@ public interface IAgentRequestOperations
         LookupAgentSimulationCommitRequest request,
         CancellationToken cancellationToken);
 
-    Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
-        CaptureAgentInventoryRequest request,
-        CancellationToken cancellationToken);
-
     Task<ApplicationResult<AgentResponse>> CaptureManageInventoryAsync(
         CaptureAgentManageInventoryRequest request,
         CancellationToken cancellationToken);
@@ -73,8 +65,8 @@ public interface IAgentRequestOperations
         CaptureAgentManageScopedInventoryRequest request, CancellationToken cancellationToken) =>
         Task.FromException<ApplicationResult<AgentResponse>>(new NotSupportedException("Scoped inventory is unavailable."));
 
-    Task<ApplicationResult<AgentResponse>> LoadManageInventoryAsync(
-        LoadAgentManageInventoryRequest request,
+    Task<ApplicationResult<AgentResponse>> LoadInventoryCacheAsync(
+        LoadAgentInventoryCacheRequest request,
         CancellationToken cancellationToken);
 
     Task<ApplicationResult<AgentResponse>> ExportMonitorCsvAsync(
@@ -181,6 +173,12 @@ public sealed class AgentSessionCoordinator
             or PrepareAgentRealOperationRequest
             or AcceptAgentRealOperationRequest
             or QueryAgentRealOperationRequest
+            or ReconcileAgentRealOperationRequest
+            or LoadAgentRealOperationEvidenceRequest
+            or PrepareAgentRealStructureJobRequest
+            or AcceptAgentRealStructureJobRequest
+            or QueryAgentRealStructureJobRequest
+            or StopAgentRealStructureJobRequest
             or QueryAgentRealVirtualDiskCreationRangeRequest
             or QueryAgentRealStructureCreationSupportRequest
             or ListAgentRecoverableRealOperationsRequest
@@ -211,8 +209,6 @@ public sealed class AgentSessionCoordinator
         {
             GetAgentSnapshotRequest typed =>
                 operations.GetSnapshotAsync(typed, cancellationToken),
-            OpenMainWindowRequest typed =>
-                operations.OpenMainWindowAsync(typed, cancellationToken),
             OpenAgentNativePropertiesRequest typed =>
                 operations.OpenNativePropertiesAsync(typed, cancellationToken),
             StartAgentMonitoringRequest typed =>
@@ -235,14 +231,12 @@ public sealed class AgentSessionCoordinator
                 operations.CommitSimulationEditAsync(typed, cancellationToken),
             LookupAgentSimulationCommitRequest typed =>
                 operations.LookupSimulationCommitAsync(typed, cancellationToken),
-            CaptureAgentInventoryRequest typed =>
-                operations.CaptureInventoryAsync(typed, cancellationToken),
             CaptureAgentManageInventoryRequest typed =>
                 operations.CaptureManageInventoryAsync(typed, cancellationToken),
             CaptureAgentManageScopedInventoryRequest typed =>
                 operations.CaptureManageScopedInventoryAsync(typed, cancellationToken),
-            LoadAgentManageInventoryRequest typed =>
-                operations.LoadManageInventoryAsync(typed, cancellationToken),
+            LoadAgentInventoryCacheRequest typed =>
+                operations.LoadInventoryCacheAsync(typed, cancellationToken),
             ExportAgentMonitorCsvRequest typed =>
                 operations.ExportMonitorCsvAsync(typed, cancellationToken),
             SetAgentPreferenceRequest typed =>
@@ -334,6 +328,27 @@ public sealed class AgentSessionCoordinator
                 query, TrustedSession(peer, string.Empty, false), cancellationToken);
         }
 
+        if (request is ReconcileAgentRealOperationRequest recheck)
+            return await service.RecheckAsync(recheck,
+                TrustedSession(peer, string.Empty, false), cancellationToken);
+
+        if (request is LoadAgentRealOperationEvidenceRequest evidence)
+            return await service.LoadEvidenceAsync(evidence,
+                TrustedSession(peer, string.Empty, false), cancellationToken);
+
+        if (request is QueryAgentRealStructureJobRequest queryJob)
+            return await service.QueryStructureJobAsync(queryJob,
+                TrustedSession(peer, string.Empty, false), cancellationToken);
+        if (request is StopAgentRealStructureJobRequest stopJob)
+            return await service.StopStructureJobAsync(stopJob,
+                TrustedSession(peer, string.Empty, false), cancellationToken);
+        if (request is AcceptAgentRealStructureJobRequest acceptJob)
+        {
+            var armed = realModeGate.TryUseForNewWrite(peer, acceptJob.ProductSessionId, out _);
+            return await service.AcceptStructureJobAsync(acceptJob,
+                TrustedSession(peer, acceptJob.ProductSessionId, armed), cancellationToken);
+        }
+
         if (request is StopAgentRealOperationFollowingStepsRequest stop)
         {
             // Stopping steps that have not begun is available after mode exit.
@@ -358,6 +373,7 @@ public sealed class AgentSessionCoordinator
         var productSessionId = request switch
         {
             PrepareAgentRealOperationRequest typed => typed.ProductSessionId,
+            PrepareAgentRealStructureJobRequest typed => typed.ProductSessionId,
             QueryAgentRealVirtualDiskCreationRangeRequest typed => typed.ProductSessionId,
             QueryAgentRealStructureCreationSupportRequest typed => typed.ProductSessionId,
             QueryAgentRealPartitionResizeRangeRequest typed => typed.ProductSessionId,
@@ -373,6 +389,8 @@ public sealed class AgentSessionCoordinator
         {
             PrepareAgentRealOperationRequest typed =>
                 await service.PrepareAsync(typed, session, cancellationToken),
+            PrepareAgentRealStructureJobRequest typed =>
+                await service.PrepareStructureJobAsync(typed, session, cancellationToken),
             QueryAgentRealVirtualDiskCreationRangeRequest typed =>
                 await service.QueryVirtualDiskCreationRangeAsync(typed, session, cancellationToken),
             QueryAgentRealStructureCreationSupportRequest typed =>

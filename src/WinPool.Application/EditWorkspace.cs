@@ -2015,6 +2015,20 @@ public sealed record StructureProblem(
         };
     }
 
+    /// <summary>Reuses pool capacity rules without counting the uncommitted placeholder as existing allocation.</summary>
+    public static (long Size, long Footprint) EstimateDraftVirtualDiskCapacity(StorageSnapshot snapshot, VirtualDiskInfo draft)
+    {
+        var tiers = snapshot.StorageTiers.Where(item => item.PoolStableId == draft.PoolStableId).ToArray();
+        if (tiers.Length > 0) return (tiers.Sum(item => item.Size), tiers.Sum(item => item.FootprintOnPool));
+        var capacitySnapshot = snapshot with
+        {
+            VirtualDisks = snapshot.VirtualDisks.Where(item => item.StableId != draft.StableId).ToArray()
+        };
+        var size = EstimatePoolLogicalCapacity(capacitySnapshot, draft.PoolStableId!, draft.ResiliencySettingName,
+            draft.Interleave ?? 65536);
+        return (size, EstimatePoolPhysicalFootprint(capacitySnapshot, draft.PoolStableId!, size, draft.ResiliencySettingName));
+    }
+
     public static long EstimatePoolLogicalCapacity(
         StorageSnapshot snapshot,
         string poolId,

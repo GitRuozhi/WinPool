@@ -97,7 +97,10 @@ public sealed record SimulationEditRequest(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? ScmToleratedFailures = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<SimulationMemberDiskUsage>? MemberDiskUsages = null);
+    IReadOnlyList<SimulationMemberDiskUsage>? MemberDiskUsages = null,
+    DateTimeOffset? FrozenAtUtc = null,
+    string? AllocatedJobId = null,
+    string? AllocatedMsrId = null);
 
 public sealed record SimulationMemberDiskUsage(string DiskId, string Usage);
 
@@ -121,6 +124,9 @@ public sealed record SimulationDraftPlan(
     public SystemId? BaselineSystemId { get; init; }
     public long? BaselineRevision { get; init; }
     public string? BaselineInventoryVersion { get; init; }
+
+    [JsonIgnore]
+    public StorageSystemDocument? PreviewDocument { get; init; }
 
     public bool IsEmpty => Steps.Count == 0;
 

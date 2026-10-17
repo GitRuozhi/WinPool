@@ -10,39 +10,9 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class WinPoolFactCaptureTests
 {
     [Theory]
-    [InlineData("\n")]
-    [InlineData("\r\n")]
-    public void PhysicalAssociationLocatorAcceptsResourceLineEndingsAndRetainsVirtualFirstOrder(string newline)
-    {
-        var source = string.Join(newline, new[]
-        {
-            "$diskPhysicalMap = @{}",
-            "foreach ($disk in $diskObjects) {",
-            "    try {",
-            "        $physicalMatch = @($disk | Get-PhysicalDisk | Select-Object -First 1)",
-            "        if ($physicalMatch.Count -gt 0) {",
-            "            $diskPhysicalMap[[int]$disk.Number] = Get-AssociationKey $physicalMatch[0] \"$($physicalMatch[0].DeviceId)|$($physicalMatch[0].FriendlyName)|$($physicalMatch[0].Size)\"",
-            "        }",
-            "    }",
-            "    catch {",
-            "    }",
-            "}",
-            "",
-            "$virtualDiskKeyByOsDisk = @{}",
-            "$physicalDisks = foreach ($physical in $physicalObjects) {"
-        });
-        var rewritten = EmbeddedStorageInventoryScript.AddPhysicalDiskAssociationFallback(source);
-        Assert.DoesNotContain("\r", rewritten);
-        Assert.DoesNotContain("$disk | Get-PhysicalDisk | Select-Object -First 1", rewritten);
-        Assert.True(rewritten.IndexOf("$diskPhysicalMap = @{}", StringComparison.Ordinal)
-            > rewritten.IndexOf("$virtualDiskKeyByOsDisk = @{}", StringComparison.Ordinal));
-        Assert.Contains("PhysicalDiskCurrentIdentityNotUnique", rewritten);
-    }
-
-    [Theory]
     [InlineData(CollectionPurpose.Storage)]
     [InlineData(CollectionPurpose.Hardware)]
-    public void FullCollectorNormalizesEveryMultilineRewriteBoundary(CollectionPurpose purpose)
+    public void FixedCollectorPreservesExactAssociationRulesForBothPurposes(CollectionPurpose purpose)
     {
         var source = EmbeddedStorageInventoryScript.ForPurpose(purpose);
         Assert.DoesNotContain("\r", source);
@@ -126,7 +96,7 @@ public sealed class WinPoolFactCaptureTests
     public void FixedCollectorRecordsPoolMemberAndVirtualDiskAssociationFailures()
     {
         var script = EmbeddedStorageInventoryScript.ForPurpose(CollectionPurpose.Storage);
-        Assert.Contains("$members = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop })", script);
+        Assert.Contains("Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop", script);
         Assert.Contains("Get-SourceSet 'MSFT_Disk' { Get-Disk -VirtualDisk $virtual -ErrorAction Stop }", script);
         Assert.DoesNotContain("foreach ($mappedDisk in @(Get-Disk -VirtualDisk $virtual))", script);
     }
@@ -146,53 +116,83 @@ public sealed class WinPoolFactCaptureTests
         Assert.Equal(FieldReadState.Failed, Assert.Single(facts.Collections).State);
     }
 
-    [Fact]
-    public void StorageCollectionDiscoversExactLocalProviderBeforeReadingPhysicalDisks()
+    [Theory]
+    [InlineData(CollectionPurpose.Storage)]
+    [InlineData(CollectionPurpose.Hardware)]
+    public void OrdinaryCollectionDisablesDiscoveryAndKeepsTheFixedTemplate(CollectionPurpose purpose)
     {
-        var script = EmbeddedStorageInventoryScript.ForPurpose(CollectionPurpose.Storage);
+        var script = EmbeddedStorageInventoryScript.ForPurpose(purpose);
         ReadOnlyStorageCommandPolicy.EnsureSafe(script);
-        const string refresh = "Update-StorageProviderCache -StorageSubSystem $subsystem -DiscoveryLevel Level3 -ErrorAction Stop";
-        var scope = script.IndexOf("$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' {", StringComparison.Ordinal);
-        var discovery = script.IndexOf(refresh, StringComparison.Ordinal);
-        var query = script.IndexOf("Get-PhysicalDisk -ErrorAction Stop", discovery, StringComparison.Ordinal);
-        Assert.True(scope >= 0 && discovery > scope && query > discovery);
-        Assert.Contains("$subsystemObjects.Count -ne 1", script);
-        Assert.Contains("$subsystem.CimClass.CimClassName", script);
-        Assert.Contains("$subsystem.CimSystemProperties.Namespace", script);
-        Assert.Contains("$subsystem.CimSystemProperties.ServerName, [Environment]::MachineName", script);
-        Assert.Contains("[string]::IsNullOrWhiteSpace([string]$subsystem.UniqueId)", script);
-        Assert.Contains("[string]::IsNullOrWhiteSpace([string]$subsystem.ObjectId)", script);
-        Assert.Contains("StorageProviderCacheDiscoveryFailed:", script);
-        Assert.Contains("ClassName=$ClassName; Namespace=$Namespace; ReasonCode=[string]$_.FullyQualifiedErrorId", script);
-        Assert.DoesNotContain("-FriendlyName", script.Substring(scope, query - scope));
+        Assert.Contains("$WinPoolDiscoverProviderCache = $false", script);
+        Assert.Contains("$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-WinPoolStorageClass 'MSFT_PhysicalDisk' })", script);
         Assert.Equal(60, WindowsPowerShellRunner.TimeoutSeconds);
     }
 
     [Fact]
-    public void HardwareCollectionKeepsDiscoveryRefreshOutOfItsFixedCommand()
+    public async Task ExplicitDiscoveryFailureDoesNotPreventIndependentPhysicalEnumeration()
     {
-        var script = EmbeddedStorageInventoryScript.ForPurpose(CollectionPurpose.Hardware);
-        ReadOnlyStorageCommandPolicy.EnsureSafe(script);
-        Assert.DoesNotContain("Update-StorageProviderCache", script);
-        Assert.Contains("$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-PhysicalDisk -ErrorAction Stop })", script);
+        var harness = """
+$ErrorActionPreference = 'Stop'
+$sourceQueryFailures = [System.Collections.Generic.List[object]]::new()
+$WinPoolDiscoverProviderCache = $true
+$subsystemObjects = @([pscustomobject]@{
+    UniqueId='subsystem-uid'; ObjectId='subsystem-object'
+    CimClass=[pscustomobject]@{ CimClassName='MSFT_StorageSubSystem' }
+    CimSystemProperties=[pscustomobject]@{ Namespace='root/Microsoft/Windows/Storage'; ServerName=[Environment]::MachineName }
+})
+function Update-StorageProviderCache { [CmdletBinding()] param($StorageSubSystem,$DiscoveryLevel) throw 'access-denied' }
+function Get-PhysicalDisk { [CmdletBinding()] param() [pscustomobject]@{ UniqueId='physical-uid' } }
+""" + EmbeddedStorageInventoryScript.ProviderDiscovery + """
+$physicalObjects = @(Get-PhysicalDisk -ErrorAction Stop)
+[ordered]@{ Physical=@($physicalObjects); Failures=@($sourceQueryFailures.ToArray()) } | ConvertTo-Json -Depth 6 -Compress
+""";
+        using var result = await RunHelperAsync(harness);
+        Assert.Equal("physical-uid", Assert.Single(result.RootElement.GetProperty("Physical").EnumerateArray()).GetProperty("UniqueId").GetString());
+        var failure = Assert.Single(result.RootElement.GetProperty("Failures").EnumerateArray());
+        Assert.Equal("Windows.StorageProviderDiscovery", failure.GetProperty("ClassName").GetString());
+        Assert.Contains("access-denied", failure.GetProperty("ReasonCode").GetString());
+        var script = EmbeddedStorageInventoryScript.ForPurpose(CollectionPurpose.Storage, discoverProviderCache: true);
+        Assert.Contains("$WinPoolDiscoverProviderCache = $true", script);
+        Assert.True(script.IndexOf("Update-StorageProviderCache -StorageSubSystem", StringComparison.Ordinal)
+            < script.IndexOf("$physicalObjects = @(Get-SourceSet", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void ProviderDiscoveryFailureCannotBecomeASuccessfulPhysicalDiskSource()
+    public void DiscoveryFailureKeepsSuccessfulPhysicalFactsAndMarksRequestedDiscoveryIncomplete()
     {
         using var json = JsonDocument.Parse("""
             {"SourceQuerySuccesses":[{"ClassName":"MSFT_PhysicalDisk","Namespace":"root/Microsoft/Windows/Storage"}],
              "SourceObservations":[{"ClassName":"MSFT_PhysicalDisk","Namespace":"root/Microsoft/Windows/Storage","Identity":"disk",
                 "Fields":[{"Name":"UniqueId","CimType":"String","Value":"disk","ReadState":"Returned"}]}],
-             "SourceQueryFailures":[{"ClassName":"MSFT_PhysicalDisk","Namespace":"root/Microsoft/Windows/Storage",
+             "SourceQueryFailures":[{"ClassName":"Windows.StorageProviderDiscovery","Namespace":"WinPool/Native",
                 "ReasonCode":"StorageProviderCacheDiscoveryFailed:subsystem-not-unique"}]}
             """);
         var facts = WinPoolFactCapture.Read(json.RootElement, StorageSnapshot.Empty("test"), SystemId.New(), CollectionPurpose.Storage);
-        var source = Assert.Single(facts.Sources);
-        Assert.Equal(FieldReadState.Failed, source.ReadState);
-        Assert.Equal("StorageProviderCacheDiscoveryFailed:subsystem-not-unique", source.ReasonCode);
+        Assert.Equal(FieldReadState.Returned, facts.Sources.Single(x => x.ClassName == "MSFT_PhysicalDisk").ReadState);
+        Assert.Equal("disk", Assert.Single(facts.Objects).Field("UniqueId")!.DisplayValue());
+        Assert.Equal(FieldReadState.Failed, facts.Sources.Single(x => x.ClassName == "Windows.StorageProviderDiscovery").ReadState);
         Assert.Equal(FieldReadState.Failed, Assert.Single(facts.Collections).State);
-        Assert.Equal(source.Id, Assert.Single(facts.Objects).SourceRef);
+    }
+
+    private static async Task<JsonDocument> RunHelperAsync(string harness)
+    {
+        var start = new ProcessStartInfo(WindowsPowerShellRunner.ExecutablePath)
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+        };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-NonInteractive");
+        start.ArgumentList.Add("-EncodedCommand");
+        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(harness));
+        using var process = Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException) { process.Kill(entireProcessTree: true); throw; }
+        Assert.True(process.ExitCode == 0, await error);
+        return JsonDocument.Parse(await output);
     }
 
     [Fact]

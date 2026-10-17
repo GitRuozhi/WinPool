@@ -223,14 +223,15 @@ public sealed class InMemoryOperationAuthority : IOperationAuthority
         }
 
         if (!StringComparer.Ordinal.Equals(token.InventoryVersion, plan.InventoryVersion) ||
-            !StringComparer.Ordinal.Equals(token.InventoryVersion, context.CurrentInventoryVersion))
+            (!(context.FrozenRealConfirmation && plan.RealOperation is not null)
+                && !StringComparer.Ordinal.Equals(token.InventoryVersion, context.CurrentInventoryVersion)))
         {
             return Invalid(AuthorizationValidationKind.InventoryMismatch, "authority.inventory-mismatch", "The inventory changed after authorization.");
         }
 
         if (!StringComparer.Ordinal.Equals(token.TargetFingerprint,
                 plan.RealOperation?.TargetFingerprint ?? ComputeTargetFingerprint(plan.Targets)) ||
-            (plan.RealOperation is not null &&
+            (plan.RealOperation is not null && !context.FrozenRealConfirmation &&
              !StringComparer.Ordinal.Equals(token.TargetFingerprint, context.CurrentTargetFingerprint)))
         {
             return Invalid(AuthorizationValidationKind.TargetMismatch, "authority.target-mismatch", "The target set changed after authorization.");
@@ -246,7 +247,7 @@ public sealed class InMemoryOperationAuthority : IOperationAuthority
 
         if (plan.RealOperation is not null &&
             (!StringComparer.Ordinal.Equals(token.PhysicalMemberFingerprint, plan.RealOperation.PhysicalMemberFingerprint) ||
-             !StringComparer.Ordinal.Equals(token.PhysicalMemberFingerprint, context.CurrentPhysicalMemberFingerprint)))
+             (!context.FrozenRealConfirmation && !StringComparer.Ordinal.Equals(token.PhysicalMemberFingerprint, context.CurrentPhysicalMemberFingerprint))))
         {
             return Invalid(AuthorizationValidationKind.TargetMismatch, "authority.physical-member-mismatch", "The physical member changed after authorization.");
         }

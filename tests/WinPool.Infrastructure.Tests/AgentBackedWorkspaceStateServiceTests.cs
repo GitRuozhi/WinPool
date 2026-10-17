@@ -13,7 +13,6 @@ public sealed class AgentBackedWorkspaceStateServiceTests
 
         var loaded = Assert.IsType<WorkspaceUiState>(await service.LoadAsync());
 
-        Assert.Equal("Test", loaded.ShellPage);
         Assert.Equal("simulation:test", loaded.ActiveSystemId);
         Assert.Equal(ManageWorkspaceCategory.Partition, loaded.Category);
         Assert.Equal("partition:selected", loaded.HighlightedTopologyStableId);
@@ -29,7 +28,6 @@ public sealed class AgentBackedWorkspaceStateServiceTests
         var connection = new WorkspaceConnection(null);
         var service = new AgentBackedWorkspaceStateService(connection);
         var state = new WorkspaceUiState(
-            "Monitor",
             "simulation:test",
             ManageWorkspaceCategory.Pool,
             new Dictionary<ManageWorkspaceCategory, string>
@@ -41,7 +39,7 @@ public sealed class AgentBackedWorkspaceStateServiceTests
         await service.SaveAsync(state);
 
         var request = Assert.IsType<SaveAgentWorkspaceStateRequest>(connection.Requests[0]);
-        Assert.Equal(WorkspacePage.Monitor, request.State.ActivePage);
+
         Assert.Equal(ManageWorkspaceCategory.Pool, request.State.ActiveCategory);
         Assert.Equal("pool:test", request.State.RememberedProviderKeys[ManageWorkspaceCategory.Pool]);
         Assert.Equal("pool:highlighted", request.State.HighlightedTopologyProviderKey);
@@ -52,7 +50,6 @@ public sealed class AgentBackedWorkspaceStateServiceTests
     public void EncodeRoundTripsABuiltinSimulationAndDiskSelection()
     {
         var state = new WorkspaceUiState(
-            "Manage",
             "simulation:builtin:layout-standard-tiered",
             ManageWorkspaceCategory.Disk,
             new Dictionary<ManageWorkspaceCategory, string>
@@ -73,7 +70,6 @@ public sealed class AgentBackedWorkspaceStateServiceTests
     private static WorkspaceSessionState State() =>
         new(
             WorkspaceSessionState.CurrentSchemaVersion,
-            WorkspacePage.Test,
             "simulation:test",
             ManageWorkspaceCategory.Partition,
             new Dictionary<ManageWorkspaceCategory, string>

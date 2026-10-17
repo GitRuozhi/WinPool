@@ -459,19 +459,6 @@ public sealed class LocalWorkspaceStateService : IWorkspaceStateService
     }
 }
 
-/// <summary>
-/// Explicit no-Agent runtime fallback for the product build. It does not
-/// recreate legacy workspace.json when the Agent is unavailable.
-/// </summary>
-public sealed class EphemeralWorkspaceStateService : IWorkspaceStateService
-{
-    public Task<WorkspaceUiState?> LoadAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult<WorkspaceUiState?>(null);
-
-    public Task SaveAsync(WorkspaceUiState state, CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
-}
-
 public sealed class InventoryScanException : Exception
 {
     public InventoryScanException(string message, string diagnostic, Exception? innerException = null)

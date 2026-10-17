@@ -44,12 +44,27 @@ public sealed class SimulationEditingSession
     public StorageSnapshot Working
     {
         get => working;
-        set { if (!ReferenceEquals(working, value)) ContentRevision = checked(ContentRevision + 1); working = value; }
+        set { if (!ReferenceEquals(working, value)) MarkDraftContentChanged(); working = value; }
     }
     public long ContentRevision { get; private set; }
     public bool RealResultSynchronizationPending { get; private set; }
     public void SetRealResultSynchronizationPending(bool pending) => RealResultSynchronizationPending = pending;
-    public void MarkDraftContentChanged() => ContentRevision = checked(ContentRevision + 1);
+    public void MarkDraftContentChanged()
+    {
+        ContentRevision = checked(ContentRevision + 1);
+        CurrentPlan = null;
+    }
+    private (string DocumentId, long Baseline, long Binding, long Content)? previewKey;
+    public SimulationDraftPlan GetOrBuildPreview(string documentId, Func<SimulationDraftPlan> build)
+    {
+        var key = (documentId, BaselineRevision, BindingGeneration, ContentRevision);
+        if (previewKey != key || CurrentPlan is null)
+        {
+            CurrentPlan = build();
+            previewKey = key;
+        }
+        return CurrentPlan;
+    }
     public SystemId SystemId { get; private set; }
     public long BaselineRevision { get; private set; }
     public long BindingGeneration { get; private set; }
@@ -79,6 +94,31 @@ public sealed class SimulationEditingSession
     public bool HasBaselineConflict { get; private set; }
     public string ConflictReason { get; private set; } = string.Empty;
     public string RealApplyMessage { get; set; } = string.Empty;
+    private Guid? realStructureResumeJobId;
+    public Guid? RealStructureResumeJobId
+    {
+        get => realStructureResumeJobId;
+        set { realStructureResumeJobId = value; RealStructureResumeContentRevision = ContentRevision; }
+    }
+    public long RealStructureResumeContentRevision { get; private set; }
+
+    public bool TryRestoreStructureJob(AgentRealStructureJobResponse status, StorageSystemDocument document,
+        long expectedBinding, long expectedContent, bool emptyDraft)
+    {
+        if (BindingGeneration != expectedBinding || ContentRevision != expectedContent
+            || status.SystemId != SystemId || document.SystemId != SystemId || status.RequiresReconciliation
+            || status.State is RealOperationState.Prepared or RealOperationState.Accepted or RealOperationState.Running
+            || !emptyDraft && (RealStructureResumeJobId != status.JobId || RealStructureResumeContentRevision != ContentRevision))
+            return false;
+        if (status.State == RealOperationState.Succeeded) { Bind(document, document.Snapshot); return true; }
+        if (status.RemainingGoal is not { } goal || goal.SystemId != SystemId) return false;
+        RebaseVerified(document, new(goal.Working,
+            goal.PoolIntents.ToDictionary(item => item.PoolId, item => item.Intent, StringComparer.Ordinal),
+            MaximumSizeFields.ToHashSet(StringComparer.Ordinal)));
+        OutcomeUnknown = false;
+        RealStructureResumeJobId = status.JobId;
+        return true;
+    }
 
     /// <summary>A real creation placeholder carries no simulated/provider capacity claim.</summary>
     public static StorageSnapshot InsertRealDraftVirtualDisk(StorageSnapshot snapshot, string poolId, string name)
@@ -183,6 +223,7 @@ public sealed class SimulationEditingSession
     public void Bind(StorageSystemDocument document, StorageSnapshot working)
     {
         BindingGeneration = checked(BindingGeneration + 1);
+        RealStructureResumeJobId = null;
         RealResultSynchronizationPending = false;
         SystemId = document.SystemId;
         BaselineRevision = document.Revision;
@@ -228,7 +269,11 @@ public sealed class SimulationEditingSession
 
     public void Restore(EditorDraftState state)
     {
-        MarkDraftContentChanged();
+        if (ReferenceEquals(Working, state.Snapshot) && MaximumSizeFields.SetEquals(state.MaximumSizeFields)
+            && PoolIntents.Count == state.PoolIntents.Count
+            && PoolIntents.All(pair => state.PoolIntents.TryGetValue(pair.Key, out var intent) && intent == pair.Value))
+            return;
+        if (ReferenceEquals(Working, state.Snapshot)) MarkDraftContentChanged();
         Working = state.Snapshot;
         PoolIntents.Clear();
         foreach (var pair in state.PoolIntents) PoolIntents[pair.Key] = pair.Value;
@@ -257,6 +302,7 @@ public sealed class SimulationEditingSession
     }
     public void Discard()
     {
+        RealStructureResumeJobId = null;
         BindingGeneration = checked(BindingGeneration + 1);
         RealResultSynchronizationPending = false;
         Working = Baseline; UndoStack.Clear(); RedoStack.Clear(); MaximumSizeFields.Clear(); PoolIntents.Clear();

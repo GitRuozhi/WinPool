@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace WinPool.Agent;
 
@@ -25,8 +26,14 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
     private const uint Synchronize = 0x00100000;
     private const uint WaitTimeout = 258;
 
-    public ProcessIncarnation? TryRead(int processId)
+    public ProcessIncarnation? TryRead(int processId) => TryRead(processId, false, out _);
+
+    public ProcessIncarnation? TryReadWithIntegrity(int processId, out int? integrityLevel) =>
+        TryRead(processId, true, out integrityLevel);
+
+    private static ProcessIncarnation? TryRead(int processId, bool readIntegrity, out int? integrityLevel)
     {
+        integrityLevel = null;
         if (processId <= 0)
         {
             return null;
@@ -34,28 +41,22 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
 
         try
         {
-            var handle = OpenProcess(ProcessQueryLimitedInformation | Synchronize, false, processId);
-            if (handle == nint.Zero)
+            using var handle = OpenProcess(ProcessQueryLimitedInformation | Synchronize, false, processId);
+            if (handle.IsInvalid)
             {
                 return null;
             }
 
-            try
-            {
-                // Retained handles keep an exited process's image and creation
-                // time queryable. Only an unsignaled process is still running.
-                if (WaitForSingleObject(handle, 0) != WaitTimeout) return null;
-                var imagePath = ReadImagePath(handle);
-                var startedAtUtc = ReadStartedAtUtc(handle);
-                return imagePath is null || startedAtUtc is null
-                    || WaitForSingleObject(handle, 0) != WaitTimeout
-                    ? null
-                    : new(processId, imagePath, startedAtUtc.Value);
-            }
-            finally
-            {
-                CloseHandle(handle);
-            }
+            // The same live handle supplies image, creation and optional token
+            // evidence. No PID-only observation is cached for a later request.
+            if (WaitForSingleObject(handle, 0) != WaitTimeout) return null;
+            var imagePath = ReadImagePath(handle);
+            var startedAtUtc = ReadStartedAtUtc(handle);
+            if (readIntegrity) integrityLevel = WindowsProcessIntegrity.TryRead(handle);
+            return imagePath is null || startedAtUtc is null
+                || WaitForSingleObject(handle, 0) != WaitTimeout
+                ? null
+                : new(processId, imagePath, startedAtUtc.Value);
         }
         catch (Exception exception) when (
             exception is ArgumentException
@@ -81,7 +82,7 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
             registration,
             expectedExecutablePath);
 
-    private static string? ReadImagePath(nint handle)
+    private static string? ReadImagePath(SafeProcessHandle handle)
     {
         var buffer = new StringBuilder(32_768);
         var length = buffer.Capacity;
@@ -90,7 +91,7 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
             : null;
     }
 
-    private static DateTimeOffset? ReadStartedAtUtc(nint handle)
+    private static DateTimeOffset? ReadStartedAtUtc(SafeProcessHandle handle)
     {
         return GetProcessTimes(handle, out var created, out _, out _, out _)
             ? new DateTimeOffset(DateTime.FromFileTimeUtc(created.ToFileTime()))
@@ -104,15 +105,15 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern nint OpenProcess(uint desiredAccess, bool inheritHandle, int processId);
+    private static extern SafeProcessHandle OpenProcess(uint desiredAccess, bool inheritHandle, int processId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern uint WaitForSingleObject(nint handle, uint milliseconds);
+    private static extern uint WaitForSingleObject(SafeProcessHandle handle, uint milliseconds);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool QueryFullProcessImageName(
-        nint process,
+        SafeProcessHandle process,
         uint flags,
         StringBuilder executablePath,
         ref int size);
@@ -120,15 +121,12 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetProcessTimes(
-        nint process,
+        SafeProcessHandle process,
         out NativeFileTime creationTime,
         out NativeFileTime exitTime,
         out NativeFileTime kernelTime,
         out NativeFileTime userTime);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(nint handle);
 }
 
 public static class ProcessIncarnationMatcher

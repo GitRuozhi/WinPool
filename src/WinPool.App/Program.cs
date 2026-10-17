@@ -139,7 +139,9 @@ public static class Program
         try
         {
             using var previousProcess = Process.GetProcessById(processId.Value);
-            previousProcess.WaitForExit(10_000);
+            // Registering while the old App is still closing would redirect
+            // this replacement to it and then leave no App after it exits.
+            previousProcess.WaitForExit();
         }
         catch (ArgumentException)
         {

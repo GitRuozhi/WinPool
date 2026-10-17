@@ -12,6 +12,48 @@ namespace WinPool.Agent.Client.Tests;
 
 public sealed class NamedPipeAgentConnectionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IndependentPipeConnectTimeoutReturnsOneConnectionFailure(bool eventPipe)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WinPool.Agent.Client.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var endpointPath = Path.Combine(directory, "agent-endpoint.json");
+        var userHash = IpcIdentity.HashUserSid(WindowsIdentity.GetCurrent().User!.Value);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        await File.WriteAllTextAsync(endpointPath, JsonSerializer.Serialize(new AgentEndpoint(
+            IpcProtocol.CurrentVersion, pipeName, nonce, sessionId, Environment.ProcessId, DateTimeOffset.UtcNow)));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await using var server = eventPipe ? CurrentUserPipeFactory.CreateServer(pipeName) : null;
+        var serverTask = eventPipe ? ReplyWithMissingEventPipeAsync() : Task.CompletedTask;
+        await using var connection = new NamedPipeAgentConnection(endpointPath,
+            new RecordingLauncher(), null, null, new TrueAgentProcessLiveness());
+
+        var result = await connection.ConnectAsync(timeout.Token);
+        Assert.Equal(ApplicationStatus.RequiresEnvironment, result.Status);
+        Assert.Equal("agent.connect.failed", Assert.Single(result.Messages).Code);
+        await serverTask;
+        Directory.Delete(directory, recursive: true);
+
+        async Task ReplyWithMissingEventPipeAsync()
+        {
+            await server!.WaitForConnectionAsync(timeout.Token);
+            var request = await IpcFrameCodec.ReadAsync(server, timeout.Token);
+            var connectionId = Guid.NewGuid();
+            var eventNonce = Guid.NewGuid();
+            await IpcFrameCodec.WriteAsync(server, new IpcEnvelope(IpcProtocol.CurrentVersion, Guid.NewGuid(),
+                request.CorrelationId, AgentControlMessageTypes.HandshakeAccepted, DateTimeOffset.UtcNow,
+                JsonSerializer.SerializeToElement(new AgentHandshakeReply(IpcProtocol.CurrentVersion,
+                    connectionId, sessionId, Environment.ProcessId, DateTimeOffset.UtcNow,
+                    new(IpcIdentity.CreateAgentEventPipeName(userHash, connectionId, eventNonce),
+                        connectionId, eventNonce, DateTimeOffset.UtcNow.AddSeconds(30))),
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web))), timeout.Token);
+        }
+    }
+
     [Fact]
     public async Task EventTransportReconnectReportsGapAndReseedsSnapshot()
     {
@@ -425,8 +467,7 @@ public sealed class NamedPipeAgentConnectionTests
             Assert.True((await connection.ConnectAsync(timeout.Token)).IsSuccess);
             Assert.Equal(1, operations.SnapshotRequestCount);
 
-            // The server has not timed out yet. Renewing here proves the next
-            // request is never put on a connection near its idle deadline.
+            // Renewal is serialized with the next requests after a long idle.
             await Task.Delay(200, timeout.Token);
             var first = connection.SendAsync(new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
             var second = connection.SendAsync(new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
@@ -434,8 +475,7 @@ public sealed class NamedPipeAgentConnectionTests
             Assert.True((await second).IsSuccess);
             Assert.Equal(4, operations.SnapshotRequestCount); // initial, renewed, first, second
 
-            // Even after the server's accepted-idle timeout, the first user
-            // request must complete without exposing a stale-pipe failure.
+            // A later user request must also survive proactive renewal.
             await Task.Delay(TimeSpan.FromSeconds(2.2), timeout.Token);
             var afterServerIdle = await connection.SendAsync(
                 new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
@@ -450,8 +490,54 @@ public sealed class NamedPipeAgentConnectionTests
         }
     }
 
+    [Fact]
+    public async Task AuthenticatedIdleConnectionWaitsForFirstRequestByteWithoutTransferTimeout()
+    {
+        var userHash = IpcIdentity.HashUserSid(WindowsIdentity.GetCurrent().User!.Value);
+        var nonce = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var pipeName = IpcIdentity.CreateAgentControlPipeName(userHash, nonce);
+        var registry = new AgentProcessRegistry();
+        var operations = new SnapshotOperations(sessionId);
+        var coordinator = new AgentSessionCoordinator(operations,
+            new AgentShutdownWorkflow(new NoOpShutdownActions(), registry), registry);
+        var failure = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var serverCancellation = new CancellationTokenSource();
+        var server = new CurrentUserAgentControlServer(pipeName, nonce, userHash, sessionId,
+            Environment.ProcessId, coordinator,
+            requestTransferTimeout: TimeSpan.FromMilliseconds(100),
+            reportConnectionFailure: (code, _) => failure.TrySetResult(code));
+        var serverTask = server.RunAsync(serverCancellation.Token);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await using var client = CurrentUserPipeFactory.CreateClient(pipeName);
+            await client.ConnectAsync(timeout.Token);
+            await WriteHandshakeAsync(client, nonce, userHash, Guid.NewGuid(), timeout.Token);
+            Assert.Equal(AgentControlMessageTypes.HandshakeAccepted,
+                (await IpcFrameCodec.ReadAsync(client, timeout.Token)).MessageType);
+
+            await Task.Delay(300, timeout.Token);
+            Assert.False(failure.Task.IsCompleted);
+
+            var request = new GetAgentSnapshotRequest(CorrelationId.New());
+            await IpcFrameCodec.WriteAsync(client, new IpcEnvelope(IpcProtocol.CurrentVersion,
+                Guid.NewGuid(), request.CorrelationId.Value, AgentControlMessageTypes.GetSnapshot,
+                DateTimeOffset.UtcNow, JsonSerializer.SerializeToElement(request)), timeout.Token);
+            Assert.Equal(AgentControlMessageTypes.Response,
+                (await IpcFrameCodec.ReadAsync(client, timeout.Token)).MessageType);
+            Assert.Equal(1, operations.SnapshotRequestCount);
+            Assert.False(failure.Task.IsCompleted);
+        }
+        finally
+        {
+            serverCancellation.Cancel();
+            try { await serverTask; }
+            catch (OperationCanceledException) when (serverCancellation.IsCancellationRequested) { }
+        }
+    }
+
     [Theory]
-    [InlineData(0)]
     [InlineData(1)]
     [InlineData(5)]
     public async Task AcceptedClientWithIncompleteRequestReleasesListener(int byteCount)
@@ -480,8 +566,8 @@ public sealed class NamedPipeAgentConnectionTests
                 await WriteHandshakeAsync(stalled, nonce, userHash, processInstanceId, timeout.Token);
                 Assert.Equal(AgentControlMessageTypes.HandshakeAccepted,
                     (await IpcFrameCodec.ReadAsync(stalled, timeout.Token)).MessageType);
-                // Valid length prefix followed by a partial payload, partial
-                // prefix, and a completely idle accepted peer are all bounded.
+                // A partial prefix and a valid prefix with a partial payload
+                // are both bounded once the first frame byte has arrived.
                 await stalled.WriteAsync(new byte[] { 100, 0, 0, 0, 123 }.AsMemory(0, byteCount), timeout.Token);
                 await stalled.FlushAsync(timeout.Token);
                 Assert.Equal("ipc.control.request_transfer_timeout", await failure.Task.WaitAsync(timeout.Token));
@@ -689,7 +775,7 @@ public sealed class NamedPipeAgentConnectionTests
             CancellationToken.None);
         var manageInventory = Assert.IsType<ManageInventoryCaptureResponse>(
             manageInventoryResponse.Value);
-        Assert.Equal("local:test", manageInventory.Document.DocumentId);
+        Assert.Equal("local:test", manageInventory.DocumentId);
         // Both startup phases and failures cross the real named event pipe to every App watcher.
         foreach (var purpose in new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware })
         {
@@ -699,12 +785,12 @@ public sealed class NamedPipeAgentConnectionTests
             Assert.Equal(started, Assert.IsType<AgentInventoryStartedEvent>(eventEnumerator.Current));
             Assert.True(await secondEventEnumerator.MoveNextAsync());
             Assert.Equal(started, Assert.IsType<AgentInventoryStartedEvent>(secondEventEnumerator.Current));
-            eventHub.Publish(new AgentInventoryUpdatedEvent(purpose, manageInventory.Document, occurredAt, IsAutomatic: true));
+            eventHub.Publish(new AgentInventoryUpdatedEvent(purpose, SnapshotOperations.LocalInventory(), occurredAt, IsAutomatic: true));
             Assert.True(await eventEnumerator.MoveNextAsync());
             var report = Assert.IsType<AgentInventoryUpdatedEvent>(eventEnumerator.Current);
             Assert.Equal(purpose, report.Purpose);
             Assert.True(report.IsAutomatic);
-            Assert.Equal(manageInventory.Document, report.Document);
+            Assert.Equal(SnapshotOperations.LocalInventory(), report.Document);
             Assert.True(await secondEventEnumerator.MoveNextAsync());
             Assert.Equal(report, Assert.IsType<AgentInventoryUpdatedEvent>(secondEventEnumerator.Current));
         }
@@ -715,8 +801,20 @@ public sealed class NamedPipeAgentConnectionTests
         Assert.Equal(failedReport, Assert.IsType<AgentInventoryFailedEvent>(eventEnumerator.Current));
         Assert.True(await secondEventEnumerator.MoveNextAsync());
         Assert.Equal(failedReport, Assert.IsType<AgentInventoryFailedEvent>(secondEventEnumerator.Current));
+        var monitorSession = SessionId.New();
+        var monitorTarget = new StorageObjectId(SystemId.New(), StorageObjectKind.PhysicalDisk, "synthetic");
+        var sample = new MonitorSample(monitorSession, monitorTarget, occurredAt,
+            [new(MonitorMetricKind.ActiveTimePercent, 12)]) { Sequence = 7 };
+        eventHub.Publish(new AgentMonitorBatchEvent(new(sessionId), monitorSession,
+            7, 7, [sample], true, occurredAt));
+        Assert.True(await eventEnumerator.MoveNextAsync());
+        var batch = Assert.IsType<AgentMonitorBatchEvent>(eventEnumerator.Current);
+        Assert.True(batch.HasGap);
+        Assert.Equal(7, Assert.Single(batch.Samples).Sequence);
+        Assert.True(await secondEventEnumerator.MoveNextAsync());
+        Assert.IsType<AgentMonitorBatchEvent>(secondEventEnumerator.Current);
         var cachedInventoryResponse = await connection.SendAsync(
-            new LoadAgentManageInventoryRequest(CorrelationId.New()),
+            new LoadAgentInventoryCacheRequest(CorrelationId.New()),
             CancellationToken.None);
         Assert.NotNull(
             Assert.IsType<ManageInventoryLoadedResponse>(cachedInventoryResponse.Value)
@@ -852,7 +950,7 @@ public sealed class NamedPipeAgentConnectionTests
 
         Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
         var send = connection.SendAsync(
-            new OpenMainWindowRequest(null, CorrelationId.New()),
+            new LoadAgentWorkspaceStateRequest(CorrelationId.New()),
             CancellationToken.None);
         await operations.MainWindowStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -927,7 +1025,7 @@ public sealed class NamedPipeAgentConnectionTests
 
         Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
         var first = connection.SendAsync(
-            new OpenMainWindowRequest(null, CorrelationId.New()),
+            new LoadAgentWorkspaceStateRequest(CorrelationId.New()),
             CancellationToken.None);
         await operations.MainWindowStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -1008,7 +1106,7 @@ public sealed class NamedPipeAgentConnectionTests
         using var requestCancellation = new CancellationTokenSource(
             TimeSpan.FromMilliseconds(100));
         var request = connection.SendAsync(
-            new OpenMainWindowRequest(null, CorrelationId.New()),
+            new LoadAgentWorkspaceStateRequest(CorrelationId.New()),
             requestCancellation.Token);
         await operations.MainWindowStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var unknown = await request.WaitAsync(TimeSpan.FromSeconds(5));
@@ -1294,12 +1392,7 @@ public sealed class NamedPipeAgentConnectionTests
                     request.CorrelationId));
         }
 
-        public virtual Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
-            OpenMainWindowRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
-        public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
+public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
             OpenAgentNativePropertiesRequest request,
             CancellationToken cancellationToken) =>
             Acknowledge(request);
@@ -1314,7 +1407,7 @@ public sealed class NamedPipeAgentConnectionTests
             CancellationToken cancellationToken) =>
             Acknowledge(request);
 
-        public Task<ApplicationResult<AgentResponse>> LoadWorkspaceStateAsync(
+        public virtual Task<ApplicationResult<AgentResponse>> LoadWorkspaceStateAsync(
             LoadAgentWorkspaceStateRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
@@ -1367,7 +1460,11 @@ public sealed class NamedPipeAgentConnectionTests
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new SimulationDocumentSavedResponse(request.Document),
+                    new SimulationEditCommittedResponse(new SimulationCommitReceipt(
+                        request.Intent.CommitId, request.Intent.DocumentId,
+                        request.Intent.ExpectedRevision, request.Intent.ExpectedRevision + 1,
+                        new string('a', 64), new string('b', 64), request.Intent.IntentHash,
+                        request.Intent.Edits.FirstOrDefault()?.FrozenAtUtc ?? DateTimeOffset.UtcNow)),
                     request.CorrelationId));
 
         public Task<ApplicationResult<AgentResponse>> LookupSimulationCommitAsync(
@@ -1378,23 +1475,16 @@ public sealed class NamedPipeAgentConnectionTests
                     new SimulationCommitLookupResponse(false, null),
                     request.CorrelationId));
 
-        public Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
-            CaptureAgentInventoryRequest request,
-            CancellationToken cancellationToken) =>
-            Acknowledge(request);
-
         public Task<ApplicationResult<AgentResponse>> CaptureManageInventoryAsync(
             CaptureAgentManageInventoryRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new ManageInventoryCaptureResponse(
-                        Guid.NewGuid(),
-                        LocalInventory()),
+                    new ManageInventoryCaptureResponse(Guid.NewGuid(), LocalInventory().DocumentId, LocalInventory().Sha256, 1),
                     request.CorrelationId));
 
-        public Task<ApplicationResult<AgentResponse>> LoadManageInventoryAsync(
-            LoadAgentManageInventoryRequest request,
+        public Task<ApplicationResult<AgentResponse>> LoadInventoryCacheAsync(
+            LoadAgentInventoryCacheRequest request,
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
@@ -1416,7 +1506,7 @@ public sealed class NamedPipeAgentConnectionTests
                     new AgentPreferenceSavedResponse(new WinPool.Domain.AgentPreferences()),
                     request.CorrelationId));
 
-        private static LocalInventoryDocumentPayload LocalInventory() =>
+        public static LocalInventoryDocumentPayload LocalInventory() =>
             new(
                 "local:test",
                 2,
@@ -1442,13 +1532,13 @@ public sealed class NamedPipeAgentConnectionTests
         public TaskCompletionSource ReleaseMainWindow { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public override async Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
-            OpenMainWindowRequest request,
+        public override async Task<ApplicationResult<AgentResponse>> LoadWorkspaceStateAsync(
+            LoadAgentWorkspaceStateRequest request,
             CancellationToken cancellationToken)
         {
             MainWindowStarted.TrySetResult();
             await ReleaseMainWindow.Task.WaitAsync(cancellationToken);
-            return await base.OpenMainWindowAsync(request, cancellationToken);
+            return await base.LoadWorkspaceStateAsync(request, cancellationToken);
         }
     }
 

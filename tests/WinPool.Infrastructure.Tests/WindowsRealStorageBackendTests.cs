@@ -16,7 +16,7 @@ public sealed partial class WindowsRealStorageBackendTests
     private const string MachineBinding = "synthetic-machine-binding";
 
     [Fact]
-    public async Task ScopedSafetyChecksCollectEveryTimeAndKeepTheFullComponentFingerprint()
+    public async Task ScopedPreflightsCollectFreshFactsAndExecuteReusesTheValidatedComponent()
     {
         var fixture = new Fixture(secondDisk: true, scopedCaptures: true);
         var plan = await fixture.PrepareAsync();
@@ -34,13 +34,13 @@ public sealed partial class WindowsRealStorageBackendTests
         fixture.Adapter.OnExecute = () => fixture.SetOffline(true);
         var result = await fixture.Backend.ExecuteStepAsync(plan, step, second, default);
         Assert.Equal(RealStepOutcome.Verified, result.Outcome);
-        Assert.Equal(3, fixture.Source.Scopes.Count); // Re-preflight, immediately before call, after call.
+        Assert.Equal(2, fixture.Source.Scopes.Count); // Re-preflight and post-state; Execute reuses its preflight facts.
         Assert.Equal(2, fixture.Source.FullCalls);
         Assert.Equal(1, fixture.Adapter.CallCount);
         var reconciled = await fixture.Backend.ReconcileAsync(plan,
             [new(step.Id, RealOperationStepState.Verified, result.Code, second.TargetEvidenceJson, result.ResultEvidenceJson)], default);
         Assert.True(reconciled.CanReleaseWriteBarrier);
-        Assert.Equal(4, fixture.Source.Scopes.Count);
+        Assert.Equal(3, fixture.Source.Scopes.Count);
         Assert.Equal("reconcile", fixture.Source.Scopes[^1].StepId);
         Assert.Equal(2, fixture.Source.FullCalls);
     }
@@ -66,30 +66,69 @@ public sealed partial class WindowsRealStorageBackendTests
     }
 
     [Theory]
+    [InlineData("{1}\\\\HOST\\root/Storage\\SPACES_PhysicalDisk.ObjectId=\"{provider}:PD:{member}\"")]
+    [InlineData("PCI\\VEN_1234&DEV_5678")]
+    [InlineData("存储设备 <Q> + '\\path\\'")]
+    public async Task ProviderStringEncodingSurvivesPersistenceAndPreflightStillRejectsChangedIdentity(string identity)
+    {
+        var fixture = new Fixture();
+        using var providerJson = JsonDocument.Parse(JsonSerializer.Serialize(identity, new JsonSerializerOptions
+        { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        var providerValue = providerJson.RootElement.Clone();
+        fixture.FactsTransform = item => item.Id != PhysicalId ? item : item with
+        {
+            Fields = item.Fields.Select(field => field.Name != "ObjectId" ? field
+                : field with { Value = providerValue }).ToImmutableArray()
+        };
+        var plan = await fixture.PrepareAsync();
+        var live = await fixture.Reader.CaptureAsync(default);
+        var restored = JsonSerializer.Deserialize<StorageSystemDocument>(JsonSerializer.Serialize(live.Document))!;
+        var restoredField = restored.SourceFacts!.Objects.Single(item => item.Id == PhysicalId).Field("ObjectId")!;
+        Assert.Equal(identity, restoredField.Value!.Value.GetString());
+        Assert.NotEqual(providerValue.GetRawText(), restoredField.Value.Value.GetRawText());
+        fixture.CompleteFactsTransform = facts => JsonSerializer.Deserialize<WinPoolFacts>(JsonSerializer.Serialize(facts))!;
+        var step = Assert.Single(plan.RealOperation!.Steps);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        Assert.Equal(plan.RealOperation.TargetFingerprint, preflight.TargetFingerprint);
+        fixture.FactsTransform = item => item.Id != PhysicalId ? item : item with
+        {
+            Fields = item.Fields.Select(field => field.Name != "ObjectId" ? field
+                : WinPoolSourceField.Returned("ObjectId", identity + "-replacement", FactValueType.String, item.SourceRef)).ToImmutableArray()
+        };
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan, step,
+            new Dictionary<string, string>(), default));
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
+    [Theory]
     [InlineData("timeout")]
     [InlineData("incomplete")]
-    public async Task FreshCaptureFailureBeforeAdapterPersistsProvenNoCall(string failure)
+    public async Task FreshPreflightCaptureFailureNeverCallsProviderAndKeepsTheNoCallRecoveryContract(string failure)
     {
         var fixture = new Fixture(scopedCaptures: true);
         var plan = await fixture.PrepareAsync();
         var step = Assert.Single(plan.RealOperation!.Steps);
-        var preflight = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
+        await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
         if (failure == "timeout") fixture.Source.ScopedFailure = new TimeoutException("fixed inventory exceeded 60 seconds");
         else fixture.Source.CompleteScopedCapture = false;
-        var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight, default);
-        Assert.Equal(RealStepOutcome.FailedWithoutEffect, result.Outcome);
-        Assert.Equal("real.pre_call_capture_failed", result.Code);
-        var evidence = JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(result.ResultEvidenceJson)!;
-        Assert.True(evidence.NoWindowsCall);
-        Assert.Equal(plan.RealOperation.PhysicalMemberFingerprint, evidence.PhysicalMemberFingerprint);
-        Assert.NotEmpty(evidence.Diagnostic!);
+
+        Exception preflightFailure = failure == "timeout"
+            ? await Assert.ThrowsAsync<TimeoutException>(() => fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default))
+            : await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default));
+
         Assert.Equal(0, fixture.Adapter.CallCount);
+        Assert.Equal(2, fixture.Source.FullCalls);
+        Assert.Single(fixture.Source.Scopes);
         fixture.Source.ScopedFailure = null;
         fixture.Source.CompleteScopedCapture = true;
+        // The Agent persists a no-call receipt when fresh preflight throws.
+        var noEffect = new WindowsNoEffectStepEvidence(true, "operation.preflight_failed",
+            plan.RealOperation!.PhysicalMemberFingerprint, preflightFailure.ToString());
         var reconciled = await fixture.Backend.ReconcileAsync(plan,
-            [new(step.Id, RealOperationStepState.Verifying, result.Code, preflight.TargetEvidenceJson, result.ResultEvidenceJson)], default);
+            [new(step.Id, RealOperationStepState.Failed, noEffect.Code, null, JsonSerializer.Serialize(noEffect))], default);
         Assert.Equal(RealOperationState.Failed, reconciled.State);
         Assert.True(reconciled.CanReleaseWriteBarrier);
+        Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
     [Theory]
@@ -304,6 +343,40 @@ public sealed partial class WindowsRealStorageBackendTests
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
+    [Theory]
+    [InlineData(FieldReadState.NotCollected)]
+    [InlineData(FieldReadState.Unavailable)]
+    [InlineData(FieldReadState.Failed)]
+    public async Task ReturnedNullFingerprintSurvivesPersistenceWithoutEquatingMissingOrFailedReads(FieldReadState differentState)
+    {
+        var fixture = new Fixture
+        {
+            FactsTransform = item => item.ObjectType != FactObjectType.PhysicalDisk ? item : item with
+            {
+                Fields = item.Fields.Add(WinPoolSourceField.Returned<object?>("OptionalProviderDetail", null,
+                    FactValueType.UInt64, item.SourceRef))
+            }
+        };
+        var target = fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId);
+        var live = await fixture.Reader.CaptureAsync(default);
+        var before = live.RequireSinglePhysicalClosure([target]);
+        var persisted = JsonSerializer.Deserialize<StorageSystemDocument>(JsonSerializer.Serialize(live.Document))!;
+        Assert.Null(persisted.SourceFacts!.Objects.Single(item => item.Id == PhysicalId).Field("OptionalProviderDetail")!.Value);
+        var restored = new WindowsRealStorageTopology(persisted, live.MachineBinding, live.Facts.InventoryCapturedAt);
+        Assert.Equal(before.Fingerprint, restored.RequireSinglePhysicalClosure([target]).Fingerprint);
+        var unavailable = persisted with { SourceFacts = persisted.SourceFacts with
+        {
+            Objects = persisted.SourceFacts.Objects.Select(item => item.Id != PhysicalId ? item : item with
+            {
+                Fields = item.Fields.Select(field => field.Name != "OptionalProviderDetail" ? field
+                    : field with { ReadState = differentState }).ToImmutableArray()
+            }).ToImmutableArray()
+        } };
+        var different = new WindowsRealStorageTopology(unavailable, live.MachineBinding, live.Facts.InventoryCapturedAt);
+        Assert.NotEqual(before.Fingerprint, different.RequireSinglePhysicalClosure([target]).Fingerprint);
+        Assert.Equal(0, fixture.Adapter.CallCount);
+    }
+
     [Fact]
     public async Task PhysicalAllocationCounterReadStateRemainsFingerprintEvidence()
     {
@@ -442,23 +515,20 @@ public sealed partial class WindowsRealStorageBackendTests
     }
 
     [Fact]
-    public async Task ChangedTopologyAfterPreflightFailsWithoutCallingProvider()
+    public async Task EachFreshPreflightRejectsTopologyChangesBeforeCallingProvider()
     {
         var fixture = new Fixture();
         var plan = await fixture.PrepareAsync();
         var step = plan.RealOperation!.Steps[0];
-        var preflight = await fixture.Backend.PreflightStepAsync(
+        await fixture.Backend.PreflightStepAsync(
             plan, step, new Dictionary<string, string>(), CancellationToken.None);
         fixture.SetOffline(true);
 
-        var result = await fixture.Backend.ExecuteStepAsync(
-            plan, step, preflight, CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(
+            plan, step, new Dictionary<string, string>(), CancellationToken.None));
 
-        Assert.Equal(RealStepOutcome.FailedWithoutEffect, result.Outcome);
+        Assert.Equal(3, fixture.Source.FullCalls);
         Assert.Equal(0, fixture.Adapter.CallCount);
-        var noEffect = JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(result.ResultEvidenceJson);
-        Assert.NotNull(noEffect);
-        Assert.True(noEffect.NoWindowsCall);
     }
 
     [Theory]
@@ -495,43 +565,41 @@ public sealed partial class WindowsRealStorageBackendTests
     }
 
     [Fact]
-    public async Task SafetyComFailureImmediatelyBeforeCallIsProvenNoEffect()
+    public async Task SafetyComFailureAtFreshPreflightNeverCallsProviderAndPreservesTheOriginalError()
     {
         var fixture = new Fixture();
         var plan = await fixture.PrepareAsync();
         var step = Assert.Single(plan.RealOperation!.Steps);
-        var preflight = await fixture.Backend.PreflightStepAsync(plan, step,
-            new Dictionary<string, string>(), CancellationToken.None);
-        fixture.Safety.ProbeFailure = new System.Runtime.InteropServices.COMException(
+        var probeFailure = new System.Runtime.InteropServices.COMException(
             "Read-only VDS access was denied.", unchecked((int)0x80070005));
+        fixture.Safety.ProbeFailure = probeFailure;
 
-        var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight,
-            CancellationToken.None);
+        var failure = await Assert.ThrowsAsync<System.Runtime.InteropServices.COMException>(() =>
+            fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), CancellationToken.None));
 
-        Assert.Equal(RealStepOutcome.FailedWithoutEffect, result.Outcome);
+        Assert.Same(probeFailure, failure);
+        Assert.Equal(unchecked((int)0x80070005), failure.HResult);
         Assert.Equal(0, fixture.Adapter.CallCount);
-        var evidence = JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(result.ResultEvidenceJson);
-        Assert.NotNull(evidence);
-        Assert.True(evidence.NoWindowsCall);
-        Assert.Contains("COMException", evidence.Diagnostic);
+        var noEffect = new WindowsNoEffectStepEvidence(true, "operation.preflight_failed",
+            plan.RealOperation!.PhysicalMemberFingerprint, failure.ToString());
         var reconciliation = await fixture.Backend.ReconcileAsync(plan,
-            [new RealOperationStepProgress(step.Id, RealOperationStepState.Failed,
-                result.Code, preflight.TargetEvidenceJson, result.ResultEvidenceJson)],
+            [new(step.Id, RealOperationStepState.Failed, noEffect.Code, null, JsonSerializer.Serialize(noEffect))],
             CancellationToken.None);
         Assert.Equal(RealOperationState.Failed, reconciliation.State);
         Assert.True(reconciliation.CanReleaseWriteBarrier);
+        Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
     [Fact]
-    public async Task CreatedEfiFormatRechecksExactCreatedTargetAndPersistsFreshNativeApplicabilityProof()
+    public async Task CreatedEfiFormatReusesExactPreflightTargetAndNativeApplicabilityProof()
     {
-        var fixture = new Fixture();
-        var (plan, step, preflight) = await PrepareCreatedEfiFormatAsync(fixture);
+        var fixture = new Fixture(expirePostCallWindow: true);
         var native = CreatedEfiNativeProof();
         var applicability = new WindowsVolumeSafetyEvidence("synthetic-inventory", "volume:efi",
             "partition:efi", @"\\?\Volume{bb7fc4ad-1a8e-4f81-90de-d2aa179373ca}\", true,
             "NotApplicableNativeEfiSystemPartition", null, null, native.VerifiedAt);
-        fixture.Safety.CreatedFormatEvidence = new(native, [applicability]);
+        var (plan, step, preflight) = await PrepareCreatedEfiFormatAsync(fixture,
+            () => fixture.Safety.CreatedFormatEvidence = new(native, [applicability]));
         fixture.Safety.Reject = true;
         var callsBeforeExecute = fixture.Safety.CreatedFormatCallCount;
         fixture.Adapter.OnExecute = () => fixture.SnapshotTransform = snapshot => EfiSnapshot(snapshot, formatted: true);
@@ -539,7 +607,7 @@ public sealed partial class WindowsRealStorageBackendTests
         var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight, CancellationToken.None);
 
         Assert.Equal(RealStepOutcome.Verified, result.Outcome);
-        Assert.Equal(callsBeforeExecute + 1, fixture.Safety.CreatedFormatCallCount);
+        Assert.Equal(callsBeforeExecute, fixture.Safety.CreatedFormatCallCount);
         Assert.Equal("partition:efi", fixture.Safety.LastCreatedFormatTarget!.Value.ProviderKey);
         Assert.Equal(1, fixture.Adapter.CallCount);
         var evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(result.ResultEvidenceJson)!;
@@ -547,45 +615,70 @@ public sealed partial class WindowsRealStorageBackendTests
         Assert.Equal(applicability, Assert.Single(evidence.VolumeSafetyEvidence!));
     }
 
+    [Fact]
+    public async Task CreatedEfiFormatUsesValidatedTargetInsteadOfPersistedTargetJson()
+    {
+        var fixture = new Fixture(expirePostCallWindow: true);
+        var (plan, step, preflight) = await PrepareCreatedEfiFormatAsync(fixture);
+        var validatedTarget = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!;
+        fixture.Adapter.OnExecute = () => fixture.SnapshotTransform = snapshot => EfiSnapshot(snapshot, formatted: true);
+
+        var result = await fixture.Backend.ExecuteStepAsync(plan, step,
+            preflight with { TargetEvidenceJson = "invalid-persisted-representation" }, CancellationToken.None);
+
+        Assert.Equal(RealStepOutcome.Verified, result.Outcome);
+        Assert.Equal(1, fixture.Adapter.CallCount);
+        Assert.Equal(validatedTarget, fixture.Adapter.LastTarget);
+        Assert.True(fixture.Adapter.LastTarget!.CreatedInThisPlan);
+    }
+
     [Theory]
-    [InlineData("created-flag")]
     [InlineData("guid")]
-    [InlineData("object-id")]
-    [InlineData("unique-id")]
+    [InlineData("physical-object-id")]
+    [InlineData("disk-unique-id")]
     [InlineData("parent-path")]
     [InlineData("role")]
     [InlineData("missing-native")]
     [InlineData("stale-native")]
     [InlineData("wrong-native-partition")]
     [InlineData("native-read-only")]
-    [InlineData("native-read-failed")]
     public async Task CreatedEfiFormatNeverCallsProviderWithWrongTargetOrUnprovenNativeSafety(string change)
     {
-        var fixture = new Fixture();
-        var (plan, step, preflight) = await PrepareCreatedEfiFormatAsync(fixture);
-        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!;
+        var fixture = new Fixture(expirePostCallWindow: true);
         var native = CreatedEfiNativeProof();
-        switch (change)
+        native = change switch
         {
-            case "created-flag": target = target with { CreatedInThisPlan = false }; break;
-            case "guid": target = target with { PartitionGuid = Guid.NewGuid().ToString() }; break;
-            case "object-id": target = target with { ObjectId = "replacement" }; break;
-            case "unique-id": target = target with { UniqueId = "replacement" }; break;
-            case "parent-path": target = target with { OsDiskPath = "replacement" }; break;
-            case "role": target = target with { PartitionTypeGuid = WindowsNativeMsrAttributesReader.BasicDataRole.ToString() }; break;
-            case "stale-native": native = native with { InventoryVersion = "old-observation" }; break;
-            case "wrong-native-partition": native = native with { PartitionStableId = "replacement" }; break;
-            case "native-read-only": native = native with { Attributes = WindowsNativeMsrAttributes.ReadOnly }; break;
-            case "native-read-failed": fixture.Safety.CreatedFormatFailure = new IOException("native read failed"); break;
-        }
-        fixture.Safety.CreatedFormatEvidence = new(change == "missing-native" ? null : native, []);
-        preflight = preflight with { TargetEvidenceJson = JsonSerializer.Serialize(target) };
+            "guid" => native with { PartitionGuid = Guid.NewGuid() },
+            "physical-object-id" => native with { PhysicalObjectId = "replacement" },
+            "disk-unique-id" => native with { DiskUniqueId = "replacement" },
+            "parent-path" => native with { DiskPath = "replacement" },
+            "role" => native with { PartitionType = WindowsNativeMsrAttributesReader.BasicDataRole },
+            "stale-native" => native with { InventoryVersion = "old-observation" },
+            "wrong-native-partition" => native with { PartitionStableId = "replacement" },
+            "native-read-only" => native with { Attributes = WindowsNativeMsrAttributes.ReadOnly },
+            _ => native
+        };
+        var (plan, step, preflight) = await PrepareCreatedEfiFormatAsync(fixture,
+            () => fixture.Safety.CreatedFormatEvidence = new(change == "missing-native" ? null : native, []));
+
         var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight, CancellationToken.None);
 
         Assert.Equal(RealStepOutcome.FailedWithoutEffect, result.Outcome);
         Assert.Equal("real.pre_call_safety_unverified", result.Code);
         Assert.Equal(0, fixture.Adapter.CallCount);
         Assert.True(JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(result.ResultEvidenceJson)!.NoWindowsCall);
+    }
+
+    [Fact]
+    public async Task CreatedEfiFormatNativeReadFailureStopsAtFreshPreflightWithoutProviderCall()
+    {
+        var fixture = new Fixture(expirePostCallWindow: true);
+
+        var failure = await Assert.ThrowsAsync<IOException>(() => PrepareCreatedEfiFormatAsync(fixture,
+            () => fixture.Safety.CreatedFormatFailure = new IOException("native read failed")));
+
+        Assert.Equal("native read failed", failure.Message);
+        Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
     private static WindowsNativeMsrSafetyEvidence CreatedEfiNativeProof() => new(
@@ -608,7 +701,7 @@ public sealed partial class WindowsRealStorageBackendTests
     };
 
     private static async Task<(OperationPlan Plan, RealOperationStep Step, RealStepPreflight Preflight)>
-        PrepareCreatedEfiFormatAsync(Fixture fixture)
+        PrepareCreatedEfiFormatAsync(Fixture fixture, Action? beforePreflight = null)
     {
         fixture.SnapshotTransform = snapshot => snapshot with
             { OsDisks = [snapshot.OsDisks[0] with { PartitionStyle = "GPT" }] };
@@ -628,6 +721,7 @@ public sealed partial class WindowsRealStorageBackendTests
         var created = new WindowsVerifiedStepEvidence(closure.Fingerprint, closure.PhysicalMemberFingerprint,
             "partition:efi", "provider.returned");
         fixture.Safety.CreatedFormatEvidence = new(CreatedEfiNativeProof(), []);
+        beforePreflight?.Invoke();
         var step = plan.RealOperation!.Steps[1];
         var preflight = await fixture.Backend.PreflightStepAsync(plan, step,
             new Dictionary<string, string> { [create.Id] = JsonSerializer.Serialize(created) }, CancellationToken.None);
@@ -635,31 +729,37 @@ public sealed partial class WindowsRealStorageBackendTests
     }
 
     [Fact]
-    public async Task VolumeSafetyProofIsFrozenAndFreshPreCallProofIsPersisted()
+    public async Task VolumeSafetyProofFreezesPreparationUsesFreshPreflightAndIsNotRereadAtExecute()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(expirePostCallWindow: true);
         var frozen = new WindowsVolumeSafetyEvidence("snapshot-one", "volume:synthetic",
             "partition:synthetic", @"\\?\Volume{bb7fc4ad-1a8e-4f81-90de-d2aa179373ca}\",
             true, "NotApplicableUnformatted", 1, 512,
             DateTimeOffset.Parse("2026-09-27T08:00:00Z"));
         fixture.Safety.Evidence = new(null, [frozen]);
-        var plan = await fixture.PrepareAsync();
+        var plan = await fixture.PrepareRenameAsync();
         var step = Assert.Single(plan.RealOperation!.Steps);
-        Assert.Contains(";volume-safety:" + JsonSerializer.Serialize(new[] { frozen }),
-            step.SupportEvidence);
-        var preflight = await fixture.Backend.PreflightStepAsync(plan, step,
-            new Dictionary<string, string>(), CancellationToken.None);
+        Assert.Contains(";volume-safety:" + JsonSerializer.Serialize(new[] { frozen }), step.SupportEvidence);
+        var preparationSafetyCalls = fixture.Safety.CallCount;
         var live = frozen with { InventoryVersion = "snapshot-two", VerifiedAt = frozen.VerifiedAt.AddSeconds(1) };
         fixture.Safety.Evidence = new(null, [live]);
-        fixture.Adapter.OnExecute = () => fixture.SetOffline(true);
 
-        var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight,
-            CancellationToken.None);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step,
+            new Dictionary<string, string>(), CancellationToken.None);
+
+        Assert.Equal(preparationSafetyCalls + 1, fixture.Safety.CallCount);
+        var preflightSafetyCalls = fixture.Safety.CallCount;
+        fixture.Safety.ProbeFailure = new IOException("Execute must reuse the fresh preflight safety proof.");
+        fixture.Adapter.OnExecute = () => fixture.VolumeLabel = "NEW";
+        var result = await fixture.Backend.ExecuteStepAsync(plan, step, preflight, CancellationToken.None);
 
         Assert.Equal(RealStepOutcome.Verified, result.Outcome);
+        Assert.Equal(preflightSafetyCalls, fixture.Safety.CallCount);
+        Assert.Equal(0, fixture.Safety.ObservedCallCount);
+        Assert.Equal(3, fixture.Source.FullCalls); // Preparation, fresh preflight, post-state.
         Assert.Equal(1, fixture.Adapter.CallCount);
-        var evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(result.ResultEvidenceJson);
-        Assert.NotNull(evidence);
+        Assert.Contains(";volume-safety:" + JsonSerializer.Serialize(new[] { frozen }), step.SupportEvidence);
+        var evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(result.ResultEvidenceJson)!;
         Assert.Equal(live, Assert.Single(evidence.VolumeSafetyEvidence!));
         Assert.Null(evidence.NativeMsrSafetyEvidence);
     }
@@ -1947,8 +2047,16 @@ public sealed partial class WindowsRealStorageBackendTests
         RealOperationStep[] steps = twoSteps ? [create, new RealOperationStep("create-vdisk",
             new CreateVirtualDiskCommand(RealTargetReference.FromStep(StorageObjectKind.StoragePool, create.Id), "New VD", 256L << 20, 65536, 1),
             [create.Id], "Created pool", "New VD", "Requested pool capacity allocated", "fresh pool evidence")] : [create];
-        var plan = await fixture.Backend.PrepareAsync(new RealOperationIntentRequest(OperationIntent.CreateStoragePool,
-            physical.System, [physical], steps, "Exact empty pool"), fixture.Session, OperationId.New(), CancellationToken.None);
+        var before = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        var closure = before.RequireSinglePhysicalClosure([physical]);
+        var environment = new EnvironmentProfile(EnvironmentId.New(), EnvironmentKind.LocalMachine, MachineBinding,
+            ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, before.Facts.InventoryCapturedAt);
+        // These cases exercise persisted historical single-physical plans. Current
+        // Prepare chooses the exact member-set owner, which has separate recovery.
+        var plan = RealOperationPlanFactory.Create(new RealOperationIntentRequest(OperationIntent.CreateStoragePool,
+            physical.System, [physical], steps, "Exact empty pool"), OperationId.New(), environment, fixture.Session,
+            closure.Fingerprint, closure.Fingerprint, closure.PhysicalMemberFingerprint,
+            "Historical single-physical pool creation", before.Facts.InventoryCapturedAt, before.Facts.InventoryCapturedAt.AddMinutes(5));
         var preflight = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0],
             new Dictionary<string, string>(), CancellationToken.None);
         var returned = new WindowsStorageCommandResult(true, "provider.returned", "pool:returned", "pool:returned",
@@ -2343,10 +2451,8 @@ public sealed partial class WindowsRealStorageBackendTests
         var fixture = new Fixture();
         var (plan, progress) = await PrepareReturnedTieredCreationAsync(fixture);
         var step = Assert.Single(plan.RealOperation!.Steps);
-        var before = await fixture.Reader.CaptureAsync(CancellationToken.None);
-        var closure = before.RequireSinglePhysicalClosure([fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId)]);
-        var preflight = new RealStepPreflight(progress.TargetEvidence!, closure.Fingerprint,
-            closure.Fingerprint, closure.PhysicalMemberFingerprint);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, step,
+            new Dictionary<string, string>(), CancellationToken.None);
         fixture.Adapter.ResultTransform = _ => JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)!;
         fixture.Adapter.OnExecute = () => fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true);
 
@@ -2440,10 +2546,8 @@ public sealed partial class WindowsRealStorageBackendTests
         }
         else
         {
-            var before = await fixture.Reader.CaptureAsync(CancellationToken.None);
-            var closure = before.RequireSinglePhysicalClosure([fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId)]);
-            var preflight = new RealStepPreflight(progress.TargetEvidence!, closure.Fingerprint,
-                closure.Fingerprint, closure.PhysicalMemberFingerprint);
+            var preflight = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0],
+                new Dictionary<string, string>(), CancellationToken.None);
             fixture.Adapter.ResultTransform = _ => JsonSerializer.Deserialize<WindowsStorageCommandResult>(progress.ResultEvidence!)!;
             fixture.Adapter.OnExecute = () => fixture.SnapshotTransform = snapshot => TieredCreationSnapshot(snapshot, true, bytes);
             var result = await fixture.Backend.ExecuteStepAsync(plan, plan.RealOperation!.Steps[0], preflight, CancellationToken.None);
@@ -2929,6 +3033,35 @@ public sealed partial class WindowsRealStorageBackendTests
             StorageObjectId tier, CancellationToken cancellationToken) => throw new InvalidOperationException("No real creation-size API in this rename fixture.");
     }
 
+    private sealed class SyntheticPoolCapabilities : IWindowsRealStorageCapabilityReader
+    {
+        public Task<WindowsTierCapability> ReadTierAsync(WindowsRealStorageTopology topology,
+            StorageObjectId physicalDisk, CancellationToken cancellationToken)
+        {
+            var memberships = topology.Facts.Relationships.Where(item => !item.IsRetained
+                && item.Kind == "pool-member" && item.ToId == physicalDisk.ProviderKey).ToArray();
+            var associations = memberships.SelectMany(member => new[] { member }.Concat(
+                topology.Facts.Relationships.Where(item => !item.IsRetained
+                    && item.Kind == "subsystem-pool" && item.ToId == member.FromId))).ToArray();
+            var subsystem = associations.Where(item => item.Kind == "subsystem-pool")
+                .Select(item => item.FromId).Distinct(StringComparer.Ordinal).Single();
+            return Task.FromResult(new WindowsTierCapability("queried", physicalDisk.ProviderKey,
+                subsystem, subsystem, subsystem, topology.Facts.InventoryCapturedAt, associations,
+                [WinPoolSourceField.Returned("SupportsStoragePoolCreation", true, FactValueType.Boolean, subsystem),
+                 WinPoolSourceField.Returned("SupportsStorageTieredVirtualDiskCreation", true, FactValueType.Boolean, subsystem),
+                 WinPoolSourceField.Returned("PhysicalDisksPerStoragePoolMin", 1UL, FactValueType.UInt64, subsystem)], null));
+        }
+
+        public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(WindowsRealStorageTopology topology,
+            StorageObjectId volume, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Inject explicit volume capabilities in this synthetic fixture.");
+
+        public Task<VirtualDiskCreationSize> ReadTierCreationSizeAsync(WindowsRealStorageTopology topology,
+            StorageObjectId tier, CancellationToken cancellationToken) =>
+            Task.FromResult(new VirtualDiskCreationSize(268435456, 3999956729856, 268435456, [])
+                { RangeOriginBytes = 268435456 });
+    }
+
     private sealed class Fixture
     {
         private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-09-27T08:00:00Z");
@@ -2945,17 +3078,21 @@ public sealed partial class WindowsRealStorageBackendTests
         {
             this.secondDisk = secondDisk;
             this.sharedOrdinaryPool = sharedOrdinaryPool;
-            Source = new SyntheticFactSource(() => CreateDocument());
+            var postCallTime = expirePostCallWindow ? new ExpiringPostCallTimeProvider(Now) : null;
+            Adapter = new SyntheticAdapter();
+            Source = new SyntheticFactSource(() => CreateDocument(), () =>
+            {
+                if (Adapter.CallCount > 0) postCallTime?.Expire();
+            });
             Source.SupportsScopedCapture = scopedCaptures;
             Reader = new WindowsRealStorageTopologyReader(
                 Source, new SyntheticMachineIdentity(), new FixedTimeProvider(Now));
-            Adapter = new SyntheticAdapter();
             Safety = new SyntheticSafetyInspector();
             var planner = new WindowsRealOperationPlanner(
                 Reader, new ForbiddenPartitionSizeReader(), new AdministratorPrivilege(),
-                new FixedTimeProvider(Now), Safety, capabilities: tierCapabilities);
+                new FixedTimeProvider(Now), Safety, capabilities: tierCapabilities ?? new SyntheticPoolCapabilities());
             Backend = new WindowsRealStorageBackend(Adapter, planner, Reader,
-                expirePostCallWindow ? new ExpiringPostCallTimeProvider(Now)
+                postCallTime is not null ? postCallTime
                     : maximumCapacityClock ? new ElapsedTimeProvider(Now) : new FixedTimeProvider(Now), storageJobs);
         }
 
@@ -3181,7 +3318,7 @@ public sealed partial class WindowsRealStorageBackendTests
                 "subsystem:synthetic", secondDisk ? [PhysicalId, OtherPhysicalId] : [PhysicalId]);
     }
 
-    private sealed class SyntheticFactSource(Func<StorageSystemDocument> capture) : IWindowsRealStorageFactSource
+    private sealed class SyntheticFactSource(Func<StorageSystemDocument> capture, Action? afterCapture = null) : IWindowsRealStorageFactSource
     {
         public bool SupportsScopedCapture { get; set; }
         public int FullCalls { get; private set; }
@@ -3191,14 +3328,19 @@ public sealed partial class WindowsRealStorageBackendTests
         public Task<StorageSystemDocument> CaptureFreshAsync(CancellationToken cancellationToken)
         {
             FullCalls++;
-            return Task.FromResult(capture());
+            return Task.FromResult(Capture());
+        }
+        private StorageSystemDocument Capture()
+        {
+            try { return capture(); }
+            finally { afterCapture?.Invoke(); }
         }
         public Task<StorageSystemDocument> CaptureFreshAsync(StorageInventoryScope scope, CancellationToken cancellationToken)
         {
             if (!SupportsScopedCapture) throw new NotSupportedException("Synthetic source has no scoped capture capability.");
             Scopes.Add(scope);
             if (ScopedFailure is not null) throw ScopedFailure;
-            var document = capture();
+            var document = Capture();
             var facts = document.SourceFacts!;
             var ids = StorageInventoryScopeFactory.Create(facts, scope.OperationId, scope.StepId, scope.Targets).BeforeObjectIds.ToHashSet(StringComparer.Ordinal);
             // This fixture simulates a scoped source response. Production source-level traversal has separate provider tests.
@@ -3248,11 +3390,13 @@ public sealed partial class WindowsRealStorageBackendTests
         public string ResultCode { get; set; } = "provider.returned";
         public Func<WindowsStorageCommandResult, WindowsStorageCommandResult>? ResultTransform { get; set; }
         public int CallCount { get; private set; }
+        public WindowsStorageCommandTarget? LastTarget { get; private set; }
         public Task<WindowsStorageCommandResult> ExecuteAsync(
             RealStorageCommand command, WindowsStorageCommandTarget target,
             CancellationToken cancellationToken)
         {
             CallCount++;
+            LastTarget = target;
             OnExecute?.Invoke();
             var result = new WindowsStorageCommandResult(true, ResultCode,
                 target.UniqueId, target.ObjectId, null, target.DiskNumber, null, null, null);
@@ -3273,8 +3417,9 @@ public sealed partial class WindowsRealStorageBackendTests
 
     private sealed class ExpiringPostCallTimeProvider(DateTimeOffset now) : TimeProvider
     {
-        private int reads;
-        public override DateTimeOffset GetUtcNow() => now.AddSeconds(61 * reads++);
+        private bool expired;
+        public void Expire() => expired = true;
+        public override DateTimeOffset GetUtcNow() => expired ? now.AddSeconds(61) : now;
     }
 
     private sealed class ForbiddenPartitionSizeReader : IPartitionSupportedSizeReader

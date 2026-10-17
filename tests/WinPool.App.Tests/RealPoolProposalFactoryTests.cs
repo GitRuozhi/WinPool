@@ -159,17 +159,15 @@ public sealed class RealPoolProposalFactoryTests
     }
 
     [Fact]
-    public void RemovalAndTierRenameDeclareCompleteExistingPoolMembers()
+    public void RemovalDeclaresCompleteExistingPoolMembers()
     {
         var pool = Id(StorageObjectKind.StoragePool, "pool");
         var tier = Id(StorageObjectKind.StorageTier, "tier");
         StorageObjectId[] members = [Id(StorageObjectKind.PhysicalDisk, "a"), Id(StorageObjectKind.PhysicalDisk, "b")];
         var removal = RealOperationProposalFactory.DissolveSingleMemberPool(_system, pool, null, [tier], members);
         Assert.Equal(new[] { pool }.Concat(members).Concat(new[] { tier }), removal.Targets);
-        var rename = RealOperationProposalFactory.RenameHddTier(_system, tier, "Renamed", pool, members);
-        Assert.Equal(new[] { tier, pool }.Concat(members), rename.Targets);
         var deleteTier = RealOperationProposalFactory.DeleteHddTierTemplate(_system, tier, pool, members);
-        Assert.Equal(rename.Targets, deleteTier.Targets);
+        Assert.Equal(new[] { tier, pool }.Concat(members), deleteTier.Targets);
         Assert.Throws<ArgumentException>(() => RealOperationProposalFactory.DeleteHddTierTemplate(_system, tier, members: members));
     }
 }

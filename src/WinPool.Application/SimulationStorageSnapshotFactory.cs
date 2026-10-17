@@ -1,6 +1,6 @@
 using WinPool.Application;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 /// <summary>
 /// Isolated, immutable inventory used to exercise the UI without mapping any
@@ -14,8 +14,9 @@ public static class SimulationStorageSnapshotFactory
 
     public const string SimulatedSnapshotVersion = "simulation-winpool-v04";
 
-    public static StorageSnapshot Create()
+    public static StorageSnapshot Create(DateTimeOffset? frozenAt = null)
     {
+        var now = frozenAt ?? DateTimeOffset.UtcNow;
         var disks = new[]
         {
             Disk("sim:disk:00", 0, "ST8000NM017B-2TJ103", "ST8000NM017B-2TJ103", "HDD", 8001563222016, "sim:pool:primordial",
@@ -124,14 +125,14 @@ public static class SimulationStorageSnapshotFactory
         return new StorageSnapshot(
             StorageSnapshot.CurrentSchemaVersion,
             SimulatedSnapshotVersion,
-            DateTimeOffset.Now,
+            now,
             new ComputerInfo(
                 ComputerId,
                 SimulatedComputerName,
                 "Windows 10 Pro",
                 "10.0.19045",
                 "19045",
-                DateTimeOffset.Now.AddDays(-3),
+                now.AddDays(-3),
                 "22H2",
                 "7184"),
             [new StorageSubsystemInfo("sim:subsystem:spaces", "Windows Storage Spaces", "Healthy", "OK")],

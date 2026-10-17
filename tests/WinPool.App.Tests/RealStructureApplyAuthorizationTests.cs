@@ -57,7 +57,8 @@ public sealed class RealStructureApplyAuthorizationTests
             {
                 Targets = change == "physical" ? [target] : proposal.Targets,
                 Steps = [proposal.Steps[0] with { Command = change == "name" ? original with { Name = "Other pool" }
-                    : original with { PhysicalDisk = RealTargetReference.ForExisting(target) } }]
+                    : original with { PhysicalDisk = RealTargetReference.ForExisting(target),
+                        Members = [RealTargetReference.ForExisting(target)] } }]
             };
         }
         if (change == "clear-oem") Assert.Throws<ArgumentException>(() => fixture.Authorization.ValidateProposal(proposal));
@@ -198,7 +199,9 @@ public sealed class RealStructureApplyAuthorizationTests
         {
             snapshot = snapshot with { StorageTiers = [new("tier:verified", true, "Requested pool_HDD", "HDD", "Simple", 0, 0,
                 "pool:verified", null, [authorization.PhysicalTarget.ProviderKey], 1, 65536)] };
-            Complete(RealOperationProposalFactory.CreateHddTierTemplate(fixture.Session.SystemId, Id(StorageObjectKind.StoragePool, "pool:verified"), "Requested pool_HDD"), "tier:verified");
+            Complete(RealOperationProposalFactory.CreateTierTemplate(fixture.Session.SystemId,
+                Id(StorageObjectKind.StoragePool, "pool:verified"), [authorization.PhysicalTarget],
+                "Requested pool_HDD", "HDD", StorageLayoutParameters.LegacyDefault), "tier:verified");
         }
         snapshot = snapshot with
         {
@@ -493,7 +496,7 @@ public sealed class RealStructureApplyAuthorizationTests
             Draft = new(new(true, [], []), [], [], [], [new(pool, physical.StableId, intent, true, true)]);
             Authorization = new(Draft, Session, "product-session");
             DirectDisk = new(Session.SystemId, StorageObjectKind.OsDisk, direct.StableId);
-            CreatePool = RealOperationProposalFactory.CreateSingleMemberPool(Session.SystemId, Authorization.PhysicalTarget, pool.FriendlyName, null);
+            CreatePool = RealOperationProposalFactory.CreatePoolWithMembers(Session.SystemId, [Authorization.PhysicalTarget], pool.FriendlyName);
             var now = DateTimeOffset.UtcNow;
             trusted = new(SessionId.New(), "product-session", Guid.NewGuid().ToString("D"), 42, now, Path.GetFullPath("WinPool.App.exe"), true);
             environment = new(EnvironmentId.New(), EnvironmentKind.LocalMachine, "machine", ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, now);
@@ -515,9 +518,10 @@ public sealed class RealStructureApplyAuthorizationTests
             var intent = Draft.Creations[0].Intent;
             var poolTarget = new StorageObjectId(Session.SystemId, StorageObjectKind.StoragePool, pool);
             return intent.Layout == PoolVirtualDiskLayout.HddTiered
-                ? RealOperationProposalFactory.CreateTieredVirtualDisk(Session.SystemId, poolTarget,
-                    new(Session.SystemId, StorageObjectKind.StorageTier, "tier:verified"), "Requested VD", intent.VirtualDiskSizeBytes ?? 0, intent.VirtualDiskUseMaximum)
-                : RealOperationProposalFactory.CreateFirstVirtualDisk(Session.SystemId, poolTarget,
+                ? RealOperationProposalFactory.CreateTieredVirtualDisk(Session.SystemId, poolTarget, [Authorization.PhysicalTarget],
+                    [new(RealTargetReference.ForExisting(new(Session.SystemId, StorageObjectKind.StorageTier, "tier:verified")),
+                        null, intent.VirtualDiskSizeBytes, intent.VirtualDiskUseMaximum, StorageLayoutParameters.LegacyDefault, "HDD")], "Requested VD")
+                : RealOperationProposalFactory.CreateFirstVirtualDisk(Session.SystemId, poolTarget, [Authorization.PhysicalTarget],
                     new("Requested VD", intent.VirtualDiskSizeBytes ?? 0, false, true, true, "Original label", 'E', intent.VirtualDiskUseMaximum));
         }
 
@@ -534,7 +538,9 @@ public sealed class RealStructureApplyAuthorizationTests
                 { Command = normalized.Steps[0].Command switch
                 {
                     CreateVirtualDiskCommand ordinary => ordinary with { MaximumCapacity = policy },
-                    CreateTieredVirtualDiskCommand tiered => tiered with { MaximumCapacity = policy },
+                    CreateTieredVirtualDiskCommand tiered => tiered with { MaximumCapacity = policy,
+                        CapacityTiers = tiered.CapacityTiers!.Select(item => item.UsesMaximumSize(tiered.UseMaximumSize)
+                            ? item with { MaximumCapacity = policy } : item).ToArray() },
                     _ => throw new InvalidOperationException()
                 } }] };
             }

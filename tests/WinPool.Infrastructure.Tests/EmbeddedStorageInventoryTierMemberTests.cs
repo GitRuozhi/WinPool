@@ -65,6 +65,19 @@ public sealed class EmbeddedStorageInventoryTierMemberTests
         Assert.Equal(0, result.RootElement.GetProperty("AllocationQueries").GetInt32());
     }
 
+    [Theory]
+    [InlineData("physical-facts-empty")]
+    [InlineData("physical-facts-no-provider-identity")]
+    public async Task MissingPhysicalPrerequisitesNeverInvokeExtent(string scenario)
+    {
+        using var result = await RunAsync(scenario);
+        Assert.Empty(ReadKeys(result));
+        Assert.Equal(0, result.RootElement.GetProperty("ExtentCalls").GetInt32());
+        Assert.Contains("tier-extent-physical-facts-unavailable", result.RootElement.GetProperty("Failure").GetString());
+        Assert.Contains(result.RootElement.GetProperty("SourceQueryFailures").EnumerateArray(),
+            x => x.GetProperty("ReasonCode").GetString()!.Contains("tier-extent-physical-facts-unavailable", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void ProductionCollectorUsesOnlyAllocatedPhysicalDisksForTheSingleTierFastPath()
     {
@@ -106,6 +119,8 @@ $tier = [pscustomobject]@{
 }
 $virtualTiers = @($tier)
 switch ([string]$fixture.Scenario) {
+    'physical-facts-empty' { $physicalObjects = @() }
+    'physical-facts-no-provider-identity' { $physicalObjects = @([pscustomobject]@{ UniqueId=''; ObjectId='physical-object'; MediaType='HDD' }) }
     'allocation-mismatch' { $script:allocatedMembers = @([pscustomobject]@{ UniqueId='other-uid'; ObjectId='other-object'; MediaType='HDD' }) }
     'tier-size-mismatch' { $tier.Size = [uint64]101 }
     'write-cache-nonzero' { $virtual.WriteCacheSize = [uint64]1 }
@@ -157,9 +172,11 @@ function Invoke-CimMethod {
     return [pscustomobject]@{ ReturnValue=[uint32]0; PhysicalExtents=@($extent) }
 }
 """ + EmbeddedStorageInventoryScript.TierMemberAssociationHelpers + """
-$keys = @(Get-ExactTierMemberKeys $tier $virtual $pool $virtualTiers)
+$keys = @()
+$failure = $null
+try { $keys = @(Get-ExactTierMemberKeys $tier $virtual $pool $virtualTiers) } catch { $failure = [string]$_.Exception.Message }
 [ordered]@{ Keys=@($keys); ExtentCalls=$script:extentCalls; AllocationQueries=$script:allocationQueries;
-    SourceQueryFailures=@($sourceQueryFailures.ToArray()) } | ConvertTo-Json -Depth 8 -Compress
+    SourceQueryFailures=@($sourceQueryFailures.ToArray()); Failure=$failure } | ConvertTo-Json -Depth 8 -Compress
 """;
 
         var start = new ProcessStartInfo(WindowsPowerShellRunner.ExecutablePath)

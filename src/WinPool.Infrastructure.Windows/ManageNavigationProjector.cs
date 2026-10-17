@@ -9,7 +9,6 @@ namespace WinPool.Infrastructure.Windows;
 /// snapshot relationships when switching Manage categories.
 /// </summary>
 public sealed class ManageNavigationProjector
-    : IManageNavigationProjector<StorageSystemDocument>
 {
     public ManageObjectNavigationView Project(
         StorageSystemDocument document,

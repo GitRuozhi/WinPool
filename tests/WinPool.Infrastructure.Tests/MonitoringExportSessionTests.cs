@@ -1,7 +1,8 @@
-using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
+using WinPool.Ipc;
 
 namespace WinPool.Infrastructure.Tests;
 
@@ -72,12 +73,13 @@ public sealed class MonitoringExportSessionTests
         public bool ExportFails { get; set; }
         public string? SamplingFailure { get; set; }
         private readonly AgentInstanceId instance = new(Guid.NewGuid());
+        private readonly Channel<AgentEvent> events = Channel.CreateUnbounded<AgentEvent>();
 
         public Task<ApplicationResult<AgentHandshake>> ConnectAsync(CancellationToken cancellationToken) =>
             Task.FromResult(ApplicationResult<AgentHandshake>.Succeeded(
-                new(11, instance, Environment.ProcessId, (AgentCapability)0, DateTimeOffset.UtcNow), CorrelationId.New()));
-        public async IAsyncEnumerable<AgentEvent> WatchAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-        { await Task.CompletedTask; yield break; }
+                new(IpcProtocol.CurrentVersion, instance, Environment.ProcessId, (AgentCapability)0, DateTimeOffset.UtcNow), CorrelationId.New()));
+        public IAsyncEnumerable<AgentEvent> WatchAsync(CancellationToken cancellationToken) =>
+            events.Reader.ReadAllAsync(cancellationToken);
         public Task<ApplicationResult<AgentResponse>> SendAsync(AgentRequest request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();

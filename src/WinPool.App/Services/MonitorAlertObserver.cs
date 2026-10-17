@@ -16,7 +16,7 @@ internal sealed class MonitorAlertObserver : IDisposable
     private const int RememberedStorageEventKeys = 128;
 
     private readonly WorkspaceViewModel _viewModel;
-    private readonly DispatcherQueueTimer _timer;
+    private readonly DispatcherQueue _dispatcher;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly HashSet<string> _publishedStorageEventKeys = new(StringComparer.Ordinal);
     private readonly Queue<string> _storageEventKeyOrder = new();
@@ -34,9 +34,7 @@ internal sealed class MonitorAlertObserver : IDisposable
     {
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         ArgumentNullException.ThrowIfNull(dispatcherQueue);
-        _timer = dispatcherQueue.CreateTimer();
-        _timer.Interval = TimeSpan.FromSeconds(1);
-        _timer.Tick += Timer_Tick;
+        _dispatcher = dispatcherQueue;
     }
 
     public void Start()
@@ -47,11 +45,18 @@ internal sealed class MonitorAlertObserver : IDisposable
         }
 
         _started = true;
-        _timer.Start();
+        _viewModel.Monitoring.Changed += Monitoring_Changed;
+        _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         BeginTick();
     }
 
-    private void Timer_Tick(DispatcherQueueTimer sender, object args) => BeginTick();
+    private void Monitoring_Changed() => _dispatcher.TryEnqueue(BeginTick);
+
+    private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is nameof(WorkspaceViewModel.CurrentAgentPreferences)
+            or nameof(WorkspaceViewModel.AgentPreferencesLoaded)) BeginTick();
+    }
 
     private void BeginTick()
     {
@@ -74,12 +79,6 @@ internal sealed class MonitorAlertObserver : IDisposable
             var monitoring = _viewModel.Monitoring;
             if (monitoring.UsesAgent)
             {
-                await monitoring.RefreshRemoteStateAsync(_shutdown.Token);
-                if (_disposed)
-                {
-                    return;
-                }
-
                 _hasAuthoritativeAgentSnapshot |= monitoring.IsRemoteStateKnown;
             }
 
@@ -156,7 +155,7 @@ internal sealed class MonitorAlertObserver : IDisposable
             }
         }
 
-        if (monitoring.IsRunning && monitoring.HasPollingLoop)
+        if (monitoring.IsRunning && monitoring.IsAttached)
         {
             return;
         }
@@ -203,11 +202,12 @@ internal sealed class MonitorAlertObserver : IDisposable
                 MonitorEditTargetStatus.PendingVerification => zh ? "编辑结果或采样恢复待确认" : "Edit outcome or sampling recovery pending",
                 MonitorEditTargetStatus.RemovedByEdit => zh ? "对象已由编辑删除；历史保留" : "Object removed by edit; history retained",
                 MonitorEditTargetStatus.NeedsSelection => zh ? "采样身份无法唯一核实，需要重新选择" : "Sampling identity cannot be uniquely verified; selection required",
+                MonitorEditTargetStatus.Unsupported => zh ? "池成员没有独立的 OS 磁盘计数器" : "Pool member has no independent OS disk counter",
                 _ => zh ? "实际采样已恢复" : "Actual sampling restored"
             };
             issues.Add(new($"edit:{edit.OperationId.Value:N}:{edit.StepId}:{edit.TargetId.ProviderKey}:{edit.Status}",
                 $"{edit.TargetId.ProviderKey} · {label} · {edit.ReasonCode}")
-            { IsInformation = edit.Status is MonitorEditTargetStatus.Editing or MonitorEditTargetStatus.RemovedByEdit or MonitorEditTargetStatus.Restored });
+            { IsInformation = edit.Status is MonitorEditTargetStatus.Editing or MonitorEditTargetStatus.RemovedByEdit or MonitorEditTargetStatus.Restored or MonitorEditTargetStatus.Unsupported });
         }
 
         if (runtime.PersistencePaused)
@@ -230,6 +230,10 @@ internal sealed class MonitorAlertObserver : IDisposable
                     ? $"⚠ 记录不完整：{knownLoss} 条样本未保存"
                     : $"⚠ Incomplete recording: {knownLoss} samples were not saved"));
         }
+        if (runtime.TransportGapCount > 0)
+            issues.Add(new($"transport-gap:{runtime.SessionOccurrenceId ?? "current"}",
+                zh ? $"实时显示存在 {runtime.TransportGapCount} 次序列缺口"
+                    : $"Live display has {runtime.TransportGapCount} sequence gaps") { IsInformation = true });
 
         if (runtime.PersistenceDelayed && !runtime.PersistencePaused)
         {
@@ -500,8 +504,8 @@ internal sealed class MonitorAlertObserver : IDisposable
         }
 
         _disposed = true;
-        _timer.Stop();
-        _timer.Tick -= Timer_Tick;
+        _viewModel.Monitoring.Changed -= Monitoring_Changed;
+        _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
         _shutdown.Cancel();
     }
 

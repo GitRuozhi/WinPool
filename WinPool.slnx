@@ -9,7 +9,6 @@
     <Project Path="src/WinPool.Infrastructure.Sqlite/WinPool.Infrastructure.Sqlite.csproj" />
     <Project Path="src/WinPool.Infrastructure.Windows/WinPool.Infrastructure.Windows.csproj" />
     <Project Path="src/WinPool.Ipc/WinPool.Ipc.csproj" />
-    <Project Path="src/WinPool.Inventory/WinPool.Inventory.csproj" />
     <Project Path="src/WinPool.Monitoring/WinPool.Monitoring.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -22,7 +21,6 @@
     <Project Path="tests/WinPool.Execution.Tests/WinPool.Execution.Tests.csproj" />
     <Project Path="tests/WinPool.Infrastructure.Tests/WinPool.Infrastructure.Tests.csproj" />
     <Project Path="tests/WinPool.Ipc.Tests/WinPool.Ipc.Tests.csproj" />
-    <Project Path="tests/WinPool.Inventory.Tests/WinPool.Inventory.Tests.csproj" />
     <Project Path="tests/WinPool.Monitoring.Tests/WinPool.Monitoring.Tests.csproj" />
     <Project Path="tests/WinPool.Persistence.Tests/WinPool.Persistence.Tests.csproj" />
   </Folder>

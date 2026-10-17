@@ -152,8 +152,11 @@ public sealed partial class SettingsPage : Page
         }
         finally
         {
-            DataLocationOptions.IsEnabled = true;
-            ContextHelp.SetDisabledReason(DataLocationOptions, null);
+            if (!((MainWindow)App.Window).IsCloseInProgress)
+            {
+                DataLocationOptions.IsEnabled = true;
+                ContextHelp.SetDisabledReason(DataLocationOptions, null);
+            }
         }
     }
 
@@ -184,6 +187,7 @@ public sealed partial class SettingsPage : Page
         }
 
         using var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        await ((MainWindow)App.Window).SaveWorkspaceBeforeAgentShutdownAsync(shutdownTimeout.Token);
         var shutdown = await ViewModel.AgentConnection.SendAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.StorageLocationSwitch,
@@ -276,7 +280,7 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        ((MainWindow)App.Window).RequestClose();
+        ((MainWindow)App.Window).RequestClose(agentAlreadyStopped: true, lastActivePageAlreadySaved: true);
     }
 
     private async Task RestartAgentAfterAbortedSwitchAsync()

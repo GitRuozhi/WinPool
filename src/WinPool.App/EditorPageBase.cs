@@ -151,7 +151,7 @@ public partial class EditorPageBase : Page
     private async Task RefreshRealInventoryAsync(StorageInventoryScope? scope = null)
     {
         LastRealInventoryRefreshSucceeded = false;
-        var previousSnapshot = ViewModel.EffectiveActiveSnapshot;
+        var previousSnapshot = ViewModel.ActiveSnapshot;
         if (scope is null)
             await ViewModel.ScanAsync();
         else
@@ -164,7 +164,7 @@ public partial class EditorPageBase : Page
                 scopedWindow.RefreshActiveEditorAfterRealInventory(this);
             return;
         }
-        var refreshed = ViewModel.EffectiveActiveSnapshot;
+        var refreshed = ViewModel.ActiveSnapshot;
         if (!ReferenceEquals(refreshed, previousSnapshot)
             && string.IsNullOrWhiteSpace(ViewModel.ScanError))
         {
@@ -434,32 +434,16 @@ public partial class EditorPageBase : Page
             await CancelPreparedRealAsync(connection, productSessionId, frozen);
             return false;
         }
-        if (accepted is { IsSuccess: true, Value: AgentRealOperationResponse acceptedStatus }
-            && ObserveFrozenRealStatus(plan, acceptedStatus, observeTerminal: false))
+        var statusCache = RealOperationStatusCache.For(connection);
+        statusCache.Remember(frozen);
+        var acceptedStatus = await statusCache.ResolveAsync(accepted?.Value, CancellationToken.None);
+        if (acceptedStatus is not null && ObserveFrozenRealStatus(plan, acceptedStatus, observeTerminal: false))
             LastRealOperationResponse = acceptedStatus;
 
-        // Accept is short-lived. Query the assigned identity after a lost reply;
-        // never issue a second write request to infer whether the first ran.
-        // Each storage step includes fresh provider and safety reads. A normal
-        // multi-step pool operation can take longer than thirty seconds; keep
-        // querying the same accepted identity so its separately confirmed
-        // follow-up layout is still offered when completion is observed.
-        for (var attempt = 0; attempt < 1200; attempt++)
+        // Subscribe before the initial read. Durable status revisions and one
+        // reconnect read replace the per-250 ms full-plan polling loop.
+        await foreach (var current in statusCache.WatchAsync(plan.OperationId, CancellationToken.None))
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(250));
-            ApplicationResult<AgentResponse> status;
-            try
-            {
-                status = await flow.QueryAsync(CancellationToken.None);
-            }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException)
-            {
-                PublishOperationException(Text("无法读取操作结果", "Could not read the operation result"),
-                    "real", exception, "real.query.failed");
-                return false;
-            }
-            if (!status.IsSuccess || status.Value is not AgentRealOperationResponse current)
-                continue;
             if (!ObserveFrozenRealStatus(plan, current, observeTerminal: false))
                 continue;
             LastRealOperationResponse = current;
@@ -475,7 +459,12 @@ public partial class EditorPageBase : Page
             if (needsRefresh)
             {
                 ReportRealActivity(Text("正在刷新相关对象", "Refreshing related objects"));
-                await RefreshRealInventoryAsync(refreshScope);
+                if (succeeded)
+                {
+                    LastRealInventoryRefreshSucceeded = await ViewModel.ReadPublishedRealInventoryAsync(plan.OperationId);
+                    if (LastRealInventoryRefreshSucceeded) OnRealInventoryRefreshed();
+                }
+                else await RefreshRealInventoryAsync(refreshScope);
             }
             if (!ViewModel.RealStructureResults.Owns(current)
                 && (!needsRefresh || LastRealInventoryRefreshSucceeded))
@@ -528,10 +517,14 @@ public partial class EditorPageBase : Page
     {
         try
         {
+            var cache = RealOperationStatusCache.For(connection);
+            cache.Remember(frozen);
             var result = await connection.SendAsync(new StopAgentRealOperationFollowingStepsRequest(
                 frozen.Plan.OperationId, frozen.Plan.PlanHash, productSessionId,
                 CorrelationId.New()), CancellationToken.None);
-            if (result.IsSuccess && result.Value is AgentRealOperationResponse current
+            var current = result.IsSuccess
+                ? await cache.ResolveAsync(result.Value, CancellationToken.None) : null;
+            if (current is not null
                 && ObserveFrozenRealStatus(frozen.Plan, current))
             {
                 LastRealOperationResponse = current;
@@ -545,7 +538,9 @@ public partial class EditorPageBase : Page
             // or rejected stop reply.
             result = await connection.SendAsync(new QueryAgentRealOperationRequest(
                 frozen.Plan.OperationId, CorrelationId.New()), CancellationToken.None);
-            if (result.IsSuccess && result.Value is AgentRealOperationResponse queried
+            var queried = result.IsSuccess
+                ? await cache.ResolveAsync(result.Value, CancellationToken.None) : null;
+            if (queried is not null
                 && ObserveFrozenRealStatus(frozen.Plan, queried))
             {
                 LastRealOperationResponse = queried;

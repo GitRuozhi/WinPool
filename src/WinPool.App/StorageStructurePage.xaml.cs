@@ -36,8 +36,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
         && !_applyingRealDraft && !IsRealStructureApplyInProgress && !_renameInProgress
         && !_outcomeUnknown && !EditingSession.RealResultSynchronizationPending && !EditingSession.HasBaselineConflict
         && !ViewModel.IsRealOperationBusy;
+    private bool CanInspectRetainedStructureJob => !ViewModel.IsUsingSimulatedInventory
+        && EditingSession.RealStructureResumeJobId is not null && ViewModel.AgentConnection is not null
+        && EditingSession.SystemId == ViewModel.SelectedSystem.SystemId
+        && !_applyingRealDraft && !IsRealStructureApplyInProgress && !_renameInProgress && !ViewModel.IsRealOperationBusy;
+    private AgentRealStructureJobResponse? PendingStructureJobForEmptyDraft => !ViewModel.IsUsingSimulatedInventory
+        && EditingSession.RealStructureResumeJobId is null && !HasUncommittedChanges()
+        ? ViewModel.FindRecoverableStructureJob(EditingSession.SystemId) : null;
 
-    private bool _formDirty;
+    private bool _formDirtyValue;
+    private bool _formDirty
+    {
+        get => _formDirtyValue;
+        set
+        {
+            if (value && !_filling) EditingSession.MarkDraftContentChanged();
+            _formDirtyValue = value;
+        }
+    }
     private string _lastPoolName = string.Empty;
     private string _lastVirtualDiskName = string.Empty;
     private readonly HashSet<string> _capacityDefaultModesInitialized = new(StringComparer.OrdinalIgnoreCase);
@@ -227,13 +243,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
         UpdateButtonState();
     }
 
+    private (bool Busy, bool Overlay, Guid? PendingJob)? _lastActivityPresentation;
     protected override void OnRealOperationActivityChanged(bool isBusy, bool showOverlay, string phase)
     {
         RealTopologyOverlay.Visibility = showOverlay ? Visibility.Visible : Visibility.Collapsed;
         RealTopologyProgress.IsActive = showOverlay;
         RealTopologyPhase.Text = phase;
-        if (isBusy) { RefreshTopology(); UpdateButtonState(); }
-        else RefreshExecutionMode();
+        // Progress only changes the overlay. The topology follows the document/draft revision.
+        var presentation = (isBusy, showOverlay, ViewModel.FindRecoverableStructureJob(EditingSession.SystemId)?.JobId);
+        if (_lastActivityPresentation == presentation) return;
+        _lastActivityPresentation = presentation;
+        UpdateButtonState();
     }
 
     protected override void OnRealInventoryRefreshed()
@@ -254,7 +274,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var priorPool = SelectedPool();
         var priorMemberIds = priorPool?.MemberPhysicalDiskIds.ToArray();
         var priorSelectedDiskId = _selectedPoolDiskId;
-        var fresh = ViewModel.EffectiveActiveSnapshot;
+        var fresh = ViewModel.ActiveSnapshot;
         EditingSession.Bind(ViewModel.SelectedSystem, fresh);
         NormalizeSelection();
 
@@ -2693,11 +2713,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
         try
         {
-            var projected = _formDirty ? ApplyFormToWorking(_working) : _working;
-            var built = SimulationDraftPlanner.Build(EditingSession.Baseline, projected);
-            var enriched = built.Steps.Select(EnrichPlanIntent).ToList();
-            AppendPartitionIntents(enriched);
-            _currentPlan = SimulationDraftPlanner.Precheck(EditingSession.Baseline, enriched);
+            _currentPlan = EditingSession.GetOrBuildPreview(ViewModel.ActiveDocument.Id, () =>
+            {
+                var projected = _formDirty ? ApplyFormToWorking(_working) : _working;
+                var built = SimulationDraftPlanner.BuildEdits(EditingSession.Baseline, projected);
+                var enriched = built.Steps.Select(EnrichPlanIntent).ToList();
+                AppendPartitionIntents(enriched);
+                return SimulationDraftPlanner.Precheck(ViewModel.ActiveDocument, enriched);
+            });
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
         {
@@ -3202,7 +3225,11 @@ public sealed partial class StorageStructurePage : EditorPageBase
             && (simulated || !ViewModel.IsRealOperationBusy);
         var planBlocked = _currentPlan?.DisplayItems.Any(item =>
             item.Decision?.Verdict != StorageRuleVerdict.Allow) == true;
-        ApplyAllButton.IsEnabled = CanEditDraft
+        var restorePending = PendingStructureJobForEmptyDraft is not null
+            && !_applyingRealDraft && !IsRealStructureApplyInProgress && !_renameInProgress && !ViewModel.IsRealOperationBusy;
+        ApplyButtonLabel.Text = restorePending ? Text("恢复待处理作业", "Restore pending job") : ViewModel.Localization["ApplyAll"];
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ApplyAllButton, ApplyButtonLabel.Text);
+        ApplyAllButton.IsEnabled = restorePending || CanInspectRetainedStructureJob || CanEditDraft
             && hasUnapplied
             && (simulated ? _currentPlan is { IsEmpty: false } : _realDraftPreview?.CanApply == true)
             && string.IsNullOrWhiteSpace(_planBuildError)
@@ -3845,7 +3872,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _poolIntents.Clear();
         _nameDefaults.Clear();
         _outcomeUnknown = false;
-        EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.EffectiveActiveSnapshot);
+        EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.ActiveSnapshot);
         _formDirty = false;
         _formHistoryCaptured = false;
         _selectedPoolId = null;
@@ -4229,7 +4256,21 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private async void ApplyAll_Click(object sender, RoutedEventArgs e)
     {
-        if (!CanEditDraft) return;
+        if (PendingStructureJobForEmptyDraft is { } pendingJob && ViewModel.AgentConnection is { } connection)
+        {
+            if (_applyingRealDraft || IsRealStructureApplyInProgress || _renameInProgress || ViewModel.IsRealOperationBusy) return;
+            var restoringSession = EditingSession;
+            _applyingRealDraft = true;
+            try
+            {
+                await RestoreRemainingStructureGoalAsync(restoringSession, pendingJob.JobId, connection, emptyDraft: true);
+                if (ReferenceEquals(EditingSession, restoringSession)) RefreshAll();
+            }
+            finally { _applyingRealDraft = false; UpdateButtonState(); }
+            return;
+        }
+        var inspectRetainedJob = CanInspectRetainedStructureJob;
+        if (!CanEditDraft && !inspectRetainedJob) return;
         var submittedSession = EditingSession;
         var submittedSystemId = submittedSession.SystemId;
         bool IsCurrentSubmission() => ReferenceEquals(EditingSession, submittedSession)
@@ -4237,11 +4278,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         if (!ViewModel.IsUsingSimulatedInventory)
         {
-            if (!CanEditDraft || !HasUncommittedChanges() || HasInvalidSizeInput()) return;
+            if (!inspectRetainedJob && (!CanEditDraft || !HasUncommittedChanges() || HasInvalidSizeInput())) return;
             var selectedPoolMembers = SelectedPool()?.MemberPhysicalDiskIds.ToArray();
             var selectedMember = _selectedPoolDiskId;
-            MergeFormIntoWorking();
-            CaptureSelectedIntent();
+            if (!inspectRetainedJob)
+            {
+                MergeFormIntoWorking();
+                CaptureSelectedIntent();
+            }
             _applyingRealDraft = true;
             UpdateButtonState();
             try
@@ -4250,7 +4294,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 if (!IsCurrentSubmission()) return;
                 if (realApplied)
                 {
-                    EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.EffectiveActiveSnapshot);
+                    EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.ActiveSnapshot);
                     _formDirty = false;
                     _formHistoryCaptured = false;
                     RestoreRealSelection(selectedPoolMembers, selectedMember);
@@ -4305,7 +4349,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        var planned = _currentPlan ?? SimulationDraftPlanner.Build(EditingSession.Baseline, pending);
+        RefreshPendingActions();
+        if (_currentPlan is null)
+        {
+            await ShowMessageAsync(Text("无法应用草稿", "Cannot apply draft"), _planBuildError);
+            return;
+        }
+        var planned = _currentPlan;
         var blockedItem = planned.DisplayItems.FirstOrDefault(item =>
             item.Decision?.Verdict != StorageRuleVerdict.Allow);
         if (blockedItem is not null)
@@ -4413,7 +4463,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         _maximumSizeFields.Clear();
         _poolIntents.Clear();
         _outcomeUnknown = false;
-        EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.EffectiveActiveSnapshot);
+        EditingSession.Bind(ViewModel.SelectedSystem, ViewModel.ActiveSnapshot);
         _selectedPoolId = EditWorkspace.IsDraftPool(_selectedPoolId ?? string.Empty)
             ? _working.StoragePools.LastOrDefault(item => !item.IsPrimordial)?.StableId
             : _selectedPoolId;
@@ -4598,11 +4648,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
             var primaryTier = result.StorageTiers.Where(tier => tier.PoolStableId == pool.StableId
                 && tier.MemberPhysicalDiskIds.Count > 0).OrderBy(tier => EditWorkspace.NormalizeMedia(tier.MediaType) switch
                 { "SCM" => 0, "SSD" => 1, _ => 2 }).FirstOrDefault();
+            var modeled = ViewModel.IsUsingSimulatedInventory || isDraft
+                ? EditWorkspace.EstimateDraftVirtualDiskCapacity(result, draftVdisk) : default;
             var finalSize = ViewModel.IsUsingSimulatedInventory || isDraft
-                ? result.StorageTiers.Where(item => item.PoolStableId == pool.StableId).Sum(item => item.Size)
+                ? modeled.Size
                 : TryReadCreationSize(out var requested, out var maximum) && !maximum ? requested ?? 0 : 0;
             var finalFootprint = ViewModel.IsUsingSimulatedInventory || isDraft
-                ? result.StorageTiers.Where(item => item.PoolStableId == pool.StableId).Sum(item => item.FootprintOnPool) : 0;
+                ? modeled.Footprint : 0;
             result = result with
             {
                 VirtualDisks = result.VirtualDisks.Select(item => item.StableId == draftVdisk.StableId

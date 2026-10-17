@@ -2,7 +2,7 @@ using WinPool.Application;
 using WinPool.Domain;
 using System.Text.Json;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 public sealed record RealStructureDraftPreview(bool CanApply,
     IReadOnlyList<string> Actions, IReadOnlyList<string> BlockingReasons)
@@ -455,13 +455,15 @@ public static class RealStructureDraftPlanner
             .Select(disk => disk.StableId).ToHashSet();
         var deletedPartitionIds = before.Partitions.Where(partition => deletedDiskIds.Contains(partition.OsDiskStableId ?? ""))
             .Select(partition => partition.StableId).ToHashSet();
+        // Free bytes are observations, not requested edits; ordinary OS activity can change them before Agent preparation.
         if (NestedObjectsDiffer(before.OsDisks.Where(disk => !deletedDiskIds.Contains(disk.StableId)).ToArray(),
                 after.OsDisks.Where(disk => !deletedDiskIds.Contains(disk.StableId)).ToArray(), disk => disk.StableId)
             || NestedObjectsDiffer(before.Partitions.Where(partition => !deletedPartitionIds.Contains(partition.StableId)).ToArray(),
-                after.Partitions.Where(partition => !deletedPartitionIds.Contains(partition.StableId)).ToArray(), partition => partition.StableId)
+                after.Partitions.Where(partition => !deletedPartitionIds.Contains(partition.StableId)).ToArray(), partition => partition.StableId,
+                (old, current) => (current with { SizeRemaining = old.SizeRemaining }) == old)
             || NestedObjectsDiffer(before.Volumes.Where(volume => !deletedPartitionIds.Contains(volume.PartitionStableId ?? "")).ToArray(),
                 after.Volumes.Where(volume => !deletedPartitionIds.Contains(volume.PartitionStableId ?? "")).ToArray(), volume => volume.StableId,
-                (old, current) => (current with { AccessPaths = old.AccessPaths }) == old
+                (old, current) => (current with { AccessPaths = old.AccessPaths, SizeRemaining = old.SizeRemaining }) == old
                     && current.AccessPaths.SequenceEqual(old.AccessPaths)))
             blocks.Add(T("磁盘、分区或卷的独立更改不属于结构草稿；请使用磁盘分区页。", "Independent disk, partition or volume changes belong in the disk partition editor."));
         if (after.PhysicalDisks.Count != before.PhysicalDisks.Count

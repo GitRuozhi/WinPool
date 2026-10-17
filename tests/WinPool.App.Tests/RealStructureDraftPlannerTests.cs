@@ -14,6 +14,81 @@ public sealed class RealStructureDraftPlannerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void RealStructureGoalRoundTripAllowsDeletingExactDescendantsAcrossFreeSpaceObservations(bool removePool)
+    {
+        var session = NestedDeletionGoal(removePool);
+        var plan = RealStructureDraftPlanner.Build(session);
+        Assert.True(plan.Preview.CanApply, string.Join("; ", plan.Preview.BlockingReasons));
+        if (removePool) Assert.Single(plan.RemovedPools);
+        else Assert.Single(plan.RemovedVirtualDisks);
+        Assert.Single(session.Working.OsDisks);
+        Assert.Single(session.Working.Partitions);
+        Assert.Single(session.Working.Volumes);
+    }
+
+    [Theory]
+    [InlineData("geometry")]
+    [InlineData("label")]
+    [InlineData("letter")]
+    [InlineData("remove-disk")]
+    [InlineData("remove-partition")]
+    [InlineData("remove-volume")]
+    public void RealStructureGoalRoundTripRejectsIndependentPartitionAndVolumeEdits(string edit)
+    {
+        var session = NestedDeletionGoal(removePool: false);
+        var working = session.Working;
+        session.Working = edit switch
+        {
+            "geometry" => working with { Partitions = working.Partitions.Select(item => item with { Size = item.Size - MiB }).ToArray() },
+            "label" => working with { Volumes = working.Volumes.Select(item => item with { FileSystemLabel = "Unapproved" }).ToArray() },
+            "letter" => working with { Volumes = working.Volumes.Select(item => item with { AccessPaths = ["F:\\"] }).ToArray() },
+            "remove-disk" => working with { OsDisks = [] },
+            "remove-partition" => working with { Partitions = [] },
+            _ => working with { Volumes = [] }
+        };
+        var plan = RealStructureDraftPlanner.Build(session);
+        Assert.False(plan.Preview.CanApply);
+        Assert.Contains(plan.Preview.BlockingReasons, reason => reason.Contains("Independent disk", StringComparison.Ordinal));
+    }
+
+    private static SimulationEditingSession NestedDeletionGoal(bool removePool)
+    {
+        var snapshot = ExistingSnapshot(withVirtualDisk: true);
+        var vd = snapshot.VirtualDisks.Single();
+        var targetDisk = new OsDiskInfo("disk:target-vd", "Q", 7, "GPT", vd.Size, false, false, false, null, vd.StableId);
+        var systemDisk = new OsDiskInfo("disk:unrelated-system", "System", 2, "GPT", 128 * GiB, true, true, false, null, null);
+        var targetPartition = new PartitionInfo("partition:target", true, 7, 1, "BasicData", MiB, 32 * GiB,
+            false, false, "E", "Q", "REFS", 65536, 16 * GiB, "Healthy", "OK", "E:\\", targetDisk.StableId);
+        var systemPartition = targetPartition with { StableId = "partition:unrelated-system", DiskNumber = 2,
+            OsDiskStableId = systemDisk.StableId, DriveLetter = "C", FileSystem = "NTFS", FileSystemLabel = "System",
+            Path = "C:\\", IsBoot = true, IsSystem = true };
+        snapshot = snapshot with
+        {
+            OsDisks = [targetDisk, systemDisk], Partitions = [targetPartition, systemPartition],
+            Volumes = [new("volume:target", true, targetPartition.StableId, "REFS", "Q", 32 * GiB, 16 * GiB,
+                    65536, "Healthy", "OK", ["E:\\"]),
+                new("volume:unrelated-system", true, systemPartition.StableId, "NTFS", "System", 32 * GiB, 16 * GiB,
+                    65536, "Healthy", "OK", ["C:\\"])]
+        };
+        var app = NativeSession(snapshot);
+        var desired = removePool ? SimulationEditingSession.RemoveRealPoolDraft(app.Working, vd.PoolStableId!)
+            : SimulationEditingSession.RemoveRealVirtualDiskDraft(app.Working, vd.StableId);
+        // Logs and other normal OS activity can change C: free bytes between the App draft and Agent fresh preparation.
+        var fresh = snapshot with
+        {
+            Partitions = snapshot.Partitions.Select(item => item.StableId == systemPartition.StableId
+                ? item with { SizeRemaining = item.SizeRemaining - 4096 } : item).ToArray(),
+            Volumes = snapshot.Volumes.Select(item => item.PartitionStableId == systemPartition.StableId
+                ? item with { SizeRemaining = item.SizeRemaining - 4096 } : item).ToArray()
+        };
+        var agent = NativeSession(fresh);
+        agent.Working = JsonSerializer.Deserialize<StorageSnapshot>(JsonSerializer.Serialize(desired))!;
+        return agent;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void ActualMirrorTierCanUseALegalSubsetOfItsCompletePoolMembers(bool extentMemberIsHotSpare)
     {
         var baseline = NativeTierSession(keepUnusedTemplate: false).Baseline;

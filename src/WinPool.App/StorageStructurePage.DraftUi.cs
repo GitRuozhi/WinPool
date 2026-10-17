@@ -48,8 +48,8 @@ public sealed partial class StorageStructurePage
         var key = (ViewModel, ViewModel.SelectedSystem.SystemId);
         _activeNavigationKey = key;
         var fresh = ViewModel.IsUsingSimulatedInventory
-            ? EditWorkspace.NormalizeTierCapacities(ViewModel.EffectiveActiveSnapshot)
-            : ViewModel.EffectiveActiveSnapshot;
+            ? EditWorkspace.NormalizeTierCapacities(ViewModel.ActiveSnapshot)
+            : ViewModel.ActiveSnapshot;
         _programmaticCapacityText.Clear();
         _userCapacityEdits.Clear();
         _capacityDefaultModesInitialized.Clear();
@@ -221,7 +221,13 @@ public sealed partial class StorageStructurePage
 
     private void UpdatePendingActionCount()
     {
-        PendingActionsButtonLabel.Text = Text($"{PendingActionCount} 动作等待实施", $"{PendingActionCount} actions waiting");
+        var needsReview = !ViewModel.IsUsingSimulatedInventory && PendingActionCount == 0
+            && HasUncommittedChanges()
+            && (_realDraftPreview?.BlockingReasons.Count > 0 || !string.IsNullOrWhiteSpace(_planBuildError)
+                || EditingSession.HasBaselineConflict || _outcomeUnknown || EditingSession.RealResultSynchronizationPending);
+        PendingActionsButtonLabel.Text = needsReview
+            ? Text("草稿待核对", "Draft needs review")
+            : Text($"{PendingActionCount} 动作等待实施", $"{PendingActionCount} actions waiting");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(PendingActionsButton, "StructurePendingActionsButton");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PendingActionsButton, PendingActionsButtonLabel.Text);
         PendingActionsButton.IsEnabled = true;

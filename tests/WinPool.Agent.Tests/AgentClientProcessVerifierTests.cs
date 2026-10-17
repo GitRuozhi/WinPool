@@ -64,14 +64,16 @@ public sealed class AgentClientProcessVerifierTests
     }
 
     [Fact]
-    public void LimitedProcessQueryReadsTheCurrentProcessWitness()
+    public void LimitedProcessQueryReadsIncarnationAndIntegrityFromTheSameLiveHandle()
     {
-        var witness = new WindowsProcessIncarnationVerifier().TryRead(Environment.ProcessId);
+        var witness = new WindowsProcessIncarnationVerifier().TryReadWithIntegrity(Environment.ProcessId, out var integrity);
 
         Assert.NotNull(witness);
         Assert.Equal(Environment.ProcessId, witness.ProcessId);
         Assert.True(Path.IsPathFullyQualified(witness.ImagePath));
         Assert.True(witness.StartedAtUtc <= DateTimeOffset.UtcNow);
+        Assert.Equal(WindowsProcessIntegrity.TryRead(Environment.ProcessId), integrity);
+        Assert.True(integrity >= 0);
     }
 
     [Theory]
@@ -120,6 +122,8 @@ public sealed class AgentClientProcessVerifierTests
             Assert.Equal(exitCode, child.ExitCode);
             Assert.False(retainedHandle.IsClosed);
             Assert.Null(verifier.TryRead(child.Id));
+            Assert.Null(verifier.TryReadWithIntegrity(child.Id, out var exitedIntegrity));
+            Assert.Null(exitedIntegrity);
             Assert.False(verifier.IsExpectedExecutable(child.Id, executable));
             Assert.False(verifier.Matches(registration, executable));
         }

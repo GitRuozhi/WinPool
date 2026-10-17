@@ -75,7 +75,7 @@ public sealed class LocalInventoryObserverTests
         Assert.Equal("hardware", Assert.Single(catalog.Systems).DisplayName);
         Assert.False(displayed.Reader.TryRead(out _));
         Assert.Single(failures);
-        Assert.All(connection.Requests, request => Assert.IsType<LoadAgentManageInventoryRequest>(request));
+        Assert.All(connection.Requests, request => Assert.IsType<LoadAgentInventoryCacheRequest>(request));
     }
 
     [Fact]
@@ -142,6 +142,17 @@ public sealed class LocalInventoryObserverTests
             connection.Requests.Cast<CaptureAgentManageInventoryRequest>().Select(x => x.Purpose));
     }
 
+    [Fact]
+    public async Task MissingCaptureEventLoadsCommittedCacheOnce()
+    {
+        var connection = new Connection { Cached = Payload(1, "retained"), PublishCaptureEvents = false };
+        var document = await new AgentBackedHardwareInventoryProvider(connection).CollectLocalAsync(CancellationToken.None);
+        Assert.Equal("retained", document.DisplayName);
+        Assert.Collection(connection.Requests,
+            request => Assert.IsType<CaptureAgentManageInventoryRequest>(request),
+            request => Assert.IsType<LoadAgentInventoryCacheRequest>(request));
+    }
+
     private static LocalInventoryObserver CreateObserver(Connection connection, StorageSystemCatalog catalog,
         Channel<string> displayed, List<string> failures) => new(connection, document =>
         {
@@ -158,6 +169,7 @@ public sealed class LocalInventoryObserverTests
         public Channel<AgentEvent> Events { get; } = Channel.CreateUnbounded<AgentEvent>();
         public List<AgentRequest> Requests { get; } = [];
         public LocalInventoryDocumentPayload? Cached { get; set; }
+        public bool PublishCaptureEvents { get; set; } = true;
         public Task<ApplicationResult<AgentHandshake>> ConnectAsync(CancellationToken cancellationToken) =>
             throw new InvalidOperationException("History must not connect to the Agent.");
         public IAsyncEnumerable<AgentEvent> WatchAsync(CancellationToken cancellationToken) =>
@@ -165,10 +177,12 @@ public sealed class LocalInventoryObserverTests
         public Task<ApplicationResult<AgentResponse>> SendAsync(AgentRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
+            if (PublishCaptureEvents && request is CaptureAgentManageInventoryRequest capture && Cached is not null)
+                Events.Writer.TryWrite(new AgentInventoryUpdatedEvent(capture.Purpose, Cached, DateTimeOffset.UtcNow));
             AgentResponse response = request switch
             {
-                LoadAgentManageInventoryRequest => new ManageInventoryLoadedResponse(null, Cached),
-                CaptureAgentManageInventoryRequest => new ManageInventoryCaptureResponse(Guid.NewGuid(), Cached!),
+                LoadAgentInventoryCacheRequest => new ManageInventoryLoadedResponse(null, Cached),
+                CaptureAgentManageInventoryRequest => new ManageInventoryCaptureResponse(Guid.NewGuid(), Cached!.DocumentId, Cached.Sha256, 1),
                 _ => throw new InvalidOperationException("Unexpected request")
             };
             return Task.FromResult(ApplicationResult<AgentResponse>.Succeeded(response, request.CorrelationId));

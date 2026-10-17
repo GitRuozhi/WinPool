@@ -1,9 +1,55 @@
+using WinPool.Domain;
+
 namespace WinPool.Application.Tests;
 
 public sealed class SimulationAutomaticPartitionIntentTests
 {
     private const long MiB = 1L << 20;
     private const long Size = 32L << 30;
+
+    [Fact]
+    public void NamingAnUntieredDraftVirtualDiskAndUndoRedoPreserveCapacityAndAutomaticLayout()
+    {
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:untiered-name", StorageSystemKind.Simulation, "Untiered pool",
+            SimulationLayouts.PoolWithoutVirtualDisk(), [], DateTimeOffset.UtcNow);
+        var session = new SimulationEditingSession();
+        session.Bind(document, document.Snapshot);
+        var pool = document.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        Assert.Empty(document.Snapshot.StorageTiers);
+        session.Working = EditWorkspace.InsertDraftVirtualDisk(session.Working, pool.StableId, "EmptyPool", "Simple", 65536);
+        var original = Assert.Single(session.Working.VirtualDisks);
+        Assert.True(original.Size > 0);
+        session.PoolIntents[pool.StableId] = new(true, true, "NTFS", 65536, "EmptyPool", VirtualDiskName: "EmptyPool", DriveLetter: 'E');
+        session.UndoStack.Push(session.Capture());
+
+        var renamed = original with { FriendlyName = "V061_Sim" };
+        var capacity = EditWorkspace.EstimateDraftVirtualDiskCapacity(session.Working, renamed);
+        Assert.Equal(original.Size, capacity.Size);
+        Assert.Equal(original.FootprintOnPool, capacity.Footprint);
+        session.Working = session.Working with
+        {
+            VirtualDisks = [renamed with { Size = capacity.Size, FootprintOnPool = capacity.Footprint }]
+        };
+        session.PoolIntents[pool.StableId] = session.PoolIntents[pool.StableId] with
+            { VirtualDiskName = renamed.FriendlyName, VolumeName = renamed.FriendlyName };
+        Assert.True(session.Undo());
+        Assert.True(session.Redo());
+        var restored = Assert.Single(session.Working.VirtualDisks);
+        Assert.Equal(renamed.FriendlyName, restored.FriendlyName);
+        Assert.Equal(original.Size, restored.Size);
+        var repeated = EditWorkspace.EstimateDraftVirtualDiskCapacity(session.Working, restored);
+        Assert.Equal(capacity, repeated);
+
+        var steps = SimulationDraftPlanner.BuildEdits(session.Baseline, session.Working).Steps.ToList();
+        var create = Assert.Single(steps, step => step.Kind == SimulationEditKind.CreateVirtualDisk);
+        SimulationDraftPlanner.ConfigureAutomaticPartitionIntent(steps, create, session.PoolIntents[pool.StableId],
+            "sim:partition:renamed-data", "sim:volume:renamed-data", "sim:partition:renamed-msr");
+        var plan = session.GetOrBuildPreview(document.Id, () => SimulationDraftPlanner.Precheck(document, steps));
+        Assert.Equal(3, plan.Steps.Count);
+        Assert.All(plan.DisplayItems, item => Assert.Equal(StorageRuleVerdict.Allow, item.Decision!.Verdict));
+        Assert.NotNull(plan.PreviewDocument);
+    }
 
     [Theory]
     [InlineData(false, false)]

@@ -9,9 +9,19 @@ namespace WinPool.App.ViewModels;
 public sealed partial class WorkspaceViewModel
 {
     private readonly Dictionary<OperationId, string> _recoveredRealOperationFeedback = [];
+    private readonly Dictionary<Guid, AgentRealStructureJobResponse> _recoverableStructureJobs = [];
+    public AgentRealStructureJobResponse? FindRecoverableStructureJob(SystemId systemId) =>
+        _recoverableStructureJobs.Values.Where(job => job.SystemId == systemId)
+            .OrderByDescending(job => job.Revision).FirstOrDefault();
+    public void ObserveStructureJob(AgentRealStructureJobResponse status, Guid? resumeFromJobId = null)
+    {
+        if (resumeFromJobId is { } previous) _recoverableStructureJobs.Remove(previous);
+        if (status.State == RealOperationState.Succeeded) _recoverableStructureJobs.Remove(status.JobId);
+        else _recoverableStructureJobs[status.JobId] = status with { RemainingGoal = null };
+        RealOperationActivityChanged?.Invoke();
+    }
     private readonly CancellationTokenSource _realOperationRecoveryCancellation = new();
     private Task? _realOperationRecoveryRefresh;
-    private Task? _realOperationRecoveryPoll;
     private bool _refreshingRecoveredRealOperation;
     public RealStructureResultSynchronization RealStructureResults { get; } = new();
     public bool IsRealOperationBusy { get; private set; }
@@ -25,13 +35,16 @@ public sealed partial class WorkspaceViewModel
 
     public void SetRealOperationActivity(bool busy, bool obscure, string phase, string? owner = null)
     {
-        IsRealOperationBusy = busy;
         var retained = !busy && RealOperationSubmission.IsBlocked;
-        IsRealGraphObscured = obscure || retained;
         var chinese = Localization.EffectiveLanguage == LanguagePreference.ZhCn;
-        RealOperationPhase = retained ? chinese ? "正在只读核对操作结果" : "Reconciling the operation result" : phase;
-        if (owner is not null) RealOperationOwner = owner;
-        if (!busy && !retained) RealOperationOwner = null;
+        var nextPhase = retained ? chinese ? "操作结果待核对" : "Operation result needs review" : phase;
+        var nextOwner = !busy && !retained ? null : owner ?? RealOperationOwner;
+        if (IsRealOperationBusy == busy && IsRealGraphObscured == (obscure || retained)
+            && RealOperationPhase == nextPhase && RealOperationOwner == nextOwner) return;
+        IsRealOperationBusy = busy;
+        IsRealGraphObscured = obscure || retained;
+        RealOperationPhase = nextPhase;
+        RealOperationOwner = nextOwner;
         if (busy || retained)
             _notificationService.Publish(GlobalNotificationSeverity.Info,
                 IsUsingSimulatedInventory ? chinese ? "编辑操作" : "Editing operation"
@@ -41,7 +54,6 @@ public sealed partial class WorkspaceViewModel
                     AutoDismiss = false, RecordInHistory = false });
         else _notificationService.DismissByKey(EditorProgressKey);
         RealOperationActivityChanged?.Invoke();
-        if (!busy) EnsureRealOperationRecoveryPolling();
     }
 
     public void ObserveRealOperation(AgentRealOperationResponse status)
@@ -76,12 +88,9 @@ public sealed partial class WorkspaceViewModel
         try
         {
             ScanError = string.Empty;
-            var result = await _agentConnection.SendAsync(
+            var document = await AgentInventoryReader.CaptureAsync(_agentConnection,
                 new CaptureAgentManageScopedInventoryRequest(scope, CorrelationId.New()), cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            if (result.Value is not ManageInventoryCaptureResponse response)
-                throw new InvalidDataException(result.Messages.FirstOrDefault()?.Code ?? "Scoped refresh failed.");
-            var document = LocalInventoryDocumentCodec.Decode(response.Document);
             var complete = document.SourceFacts?.ScopedCollection is { Complete: true } collection
                 && collection.Scope.SystemId == scope.SystemId
                 && collection.Scope.OperationId == scope.OperationId
@@ -89,7 +98,7 @@ public sealed partial class WorkspaceViewModel
             // Even an incomplete batch preserves the previous facts and exposes
             // its failure metadata. It cannot authorize a following segment.
             ApplyLocalInventory(document);
-            if (!complete || !result.IsSuccess)
+            if (!complete)
                 throw new InvalidDataException(document.SourceFacts?.ScopedCollection?.ReasonCode ?? "The related inventory is incomplete.");
             if (!RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(ActiveDocument, document, scope))
                 return false;
@@ -117,11 +126,20 @@ public sealed partial class WorkspaceViewModel
     {
         ScanError = exception.Message;
         _notificationService.PublishWarning(Localization["Warning"],
-            "磁盘操作结果已记录，但相关视图未刷新；后台将继续只读核对。 / The operation result is recorded, but its related view is stale. Background read-only recovery will continue.",
+            "磁盘操作结果已记录，但相关视图未刷新；请手动刷新以重新只读核对。 / The operation result is recorded, but its related view is stale. Refresh to recheck it without writing.",
             "real", $"real:refresh:{scope.Key}", options: new GlobalNotificationOptions { Detail = exception.Message });
     }
 
     public void StopRealOperationRecovery() => _realOperationRecoveryCancellation.Cancel();
+
+    public async Task RecheckRealOperationsAsync()
+    {
+        if (_agentConnection is null || IsRealOperationBusy) return;
+        await RecoverRealOperationsAsync();
+        await RealOperationRecovery.RecheckAsync(_agentConnection, RealOperationSubmission,
+            _ => { }, _realOperationRecoveryCancellation.Token);
+        await RecoverRealOperationsAsync();
+    }
 
     public async Task RecoverRealOperationsAsync()
     {
@@ -136,7 +154,6 @@ public sealed partial class WorkspaceViewModel
         finally
         {
             _realOperationRecoveryRefresh = null;
-            EnsureRealOperationRecoveryPolling();
         }
     }
 
@@ -174,7 +191,16 @@ public sealed partial class WorkspaceViewModel
                     }
                     _recoveredRealOperationFeedback.TryAdd(status.Plan.OperationId, string.Empty);
                     ObserveRealOperation(status);
-                }, cancellationToken);
+                }, cancellationToken, job =>
+                {
+                    ObserveStructureJob(job);
+                    var chinese = Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+                    _notificationService.PublishWarning(chinese ? "结构作业尚未完成" : "Structural job incomplete",
+                        chinese ? "已完成变更不会回滚。可在结构编辑页的空草稿中点击“恢复待处理作业”，查看剩余目标；再次应用需要重新确认。"
+                            : "Completed changes remain. In an empty structure draft, select Restore pending job to inspect the remaining goal; applying again requires confirmation.",
+                        "real", $"real:job:{job.JobId:D}", options: new GlobalNotificationOptions
+                        { Detail = $"JobId: {job.JobId:D}\n{string.Join(Environment.NewLine, job.Completed)}" });
+                });
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
             {
@@ -244,28 +270,16 @@ public sealed partial class WorkspaceViewModel
         return RefreshRealOperationScopeAsync(scope, cancellationToken);
     }
 
-    private void EnsureRealOperationRecoveryPolling()
+    public async Task<bool> ReadPublishedRealInventoryAsync(OperationId? operationId = null,
+        CancellationToken cancellationToken = default)
     {
-        if (_agentConnection is null || _realOperationRecoveryPoll is not null
-            || _realOperationRecoveryCancellation.IsCancellationRequested
-            || !RealOperationSubmission.IsBlocked || IsRealOperationBusy) return;
-        _realOperationRecoveryPoll = PollRealOperationRecoveryAsync();
-    }
-
-    private async Task PollRealOperationRecoveryAsync()
-    {
-        var cancellationToken = _realOperationRecoveryCancellation.Token;
-        var delay = TimeSpan.FromSeconds(1);
-        try
-        {
-            while (RealOperationSubmission.IsBlocked)
-            {
-                await Task.Delay(delay, cancellationToken);
-                if (!IsRealOperationBusy) await RecoverRealOperationsAsync();
-                delay = TimeSpan.FromSeconds(Math.Min(5, delay.TotalSeconds + 1));
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        finally { _realOperationRecoveryPoll = null; }
+        bool Matches(StorageSystemDocument document) => operationId is null
+            || document.SourceFacts?.ScopedCollection is { Complete: true } scoped
+                && scoped.Scope.OperationId == operationId;
+        if (operationId is not null && Matches(ActiveDocument)) return true;
+        var document = await _machineRecordService.LoadLocalScanAsync(cancellationToken);
+        if (document is null || !Matches(document)) return false;
+        ApplyLocalInventory(document);
+        return true;
     }
 }

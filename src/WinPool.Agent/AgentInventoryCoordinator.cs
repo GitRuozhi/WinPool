@@ -11,13 +11,9 @@ namespace WinPool.Agent;
 
 internal sealed class AgentInventoryCoordinator
 {
-    private readonly IInventoryProvider nativeProvider;
-    private readonly IInventoryProvider legacyProvider;
     private readonly IHardwareInventoryProvider manageProvider;
     private readonly IPhysicalDiskDeviceResolver deviceResolver;
-    private readonly IInventoryComparer comparer;
     private readonly InventorySnapshotRepository snapshots;
-    private readonly InventoryComparisonRepository comparisons;
     private readonly LocalInventoryDocumentRepository localDocument;
     private readonly AgentLocalSystemIdentity localIdentity;
     private readonly ConcurrentDictionary<int, string> physicalDeviceIds = new();
@@ -26,26 +22,17 @@ internal sealed class AgentInventoryCoordinator
     private int startupStarted;
 
     public AgentInventoryCoordinator(
-        IInventoryProvider nativeProvider,
-        IInventoryProvider legacyProvider,
         IHardwareInventoryProvider manageProvider,
-        IInventoryComparer comparer,
         InventorySnapshotRepository snapshots,
-        InventoryComparisonRepository comparisons,
         LocalInventoryDocumentRepository localDocument,
-        LocalSystemIdentityResolver localIdentity,
+        AgentLocalSystemIdentity localIdentity,
         IPhysicalDiskDeviceResolver deviceResolver,
         Action<AgentEvent>? publish = null)
     {
-        this.nativeProvider = nativeProvider ?? throw new ArgumentNullException(nameof(nativeProvider));
-        this.legacyProvider = legacyProvider ?? throw new ArgumentNullException(nameof(legacyProvider));
         this.manageProvider = manageProvider ?? throw new ArgumentNullException(nameof(manageProvider));
-        this.comparer = comparer ?? throw new ArgumentNullException(nameof(comparer));
         this.snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
-        this.comparisons = comparisons ?? throw new ArgumentNullException(nameof(comparisons));
         this.localDocument = localDocument ?? throw new ArgumentNullException(nameof(localDocument));
-        ArgumentNullException.ThrowIfNull(localIdentity);
-        this.localIdentity = new AgentLocalSystemIdentity(localDocument, localIdentity);
+        this.localIdentity = localIdentity ?? throw new ArgumentNullException(nameof(localIdentity));
         this.deviceResolver = deviceResolver ?? throw new ArgumentNullException(nameof(deviceResolver));
         this.publish = publish ?? (_ => { });
     }
@@ -98,9 +85,27 @@ internal sealed class AgentInventoryCoordinator
         CorrelationId correlationId, CancellationToken cancellationToken) =>
         CaptureManageCoreAsync(new(correlationId, CollectionPurpose.Storage), cancellationToken, false, scope);
 
+    // A verified Windows post-state is raw evidence from the shared collector.
+    // Publishing it must not issue another provider call or feed merged UI facts
+    // back into a real preflight.
+    public async Task PublishFreshAsync(StorageSystemDocument document, StorageInventoryScope? scope,
+        CancellationToken cancellationToken = default)
+    {
+        if (document.Kind != StorageSystemKind.Local || document.SourceFacts is not { IsSimulation: false, IsMerged: false })
+            throw new InvalidDataException("Only raw local post-state facts can refresh inventory.");
+        var binding = await localIdentity.ResolveAsync(cancellationToken).ConfigureAwait(false);
+        if (document.SystemId != binding.SystemId || document.SourceFacts.SystemId != binding.SystemId)
+            throw new InvalidDataException("The verified post-state belongs to another local authority.");
+        var result = await CaptureManageCoreAsync(new(CorrelationId.New(), CollectionPurpose.Storage),
+            cancellationToken, true, scope, document).ConfigureAwait(false);
+        if (!result.IsSuccess)
+            throw new InventoryScanException("The verified post-state could not be published.",
+                result.Messages.FirstOrDefault()?.DiagnosticText ?? result.Status.ToString());
+    }
+
     private async Task<ApplicationResult<AgentResponse>> CaptureManageCoreAsync(
         CaptureAgentManageInventoryRequest request, CancellationToken cancellationToken, bool isAutomatic,
-        StorageInventoryScope? scope)
+        StorageInventoryScope? scope, StorageSystemDocument? suppliedDocument = null)
     {
         var queuedAt = Stopwatch.GetTimestamp();
         await localCaptureGate.WaitAsync(cancellationToken);
@@ -118,7 +123,7 @@ internal sealed class AgentInventoryCoordinator
             failureStage = "local_document.decode";
             var previous = cached is null ? null : LocalInventoryDocumentCodec.Decode(cached.Document);
             var generation = checked((previous?.SourceFacts?.Sources.Select(x => x.CaptureGeneration).DefaultIfEmpty(0).Max() ?? 0) + 1);
-            if (scope is not null)
+            if (scope is not null && suppliedDocument is null)
             {
                 failureStage = "inventory.scope.resolve";
                 scope.Validate();
@@ -142,26 +147,38 @@ internal sealed class AgentInventoryCoordinator
             publish(new AgentInventoryStartedEvent(request.Purpose, DateTimeOffset.UtcNow, isAutomatic));
             var captureAt = Stopwatch.GetTimestamp();
             failureStage = "inventory.provider.collect";
-            var document = scope is not null
+            var document = suppliedDocument ?? (scope is not null
                 ? await ((IScopedHardwareInventoryProvider)manageProvider).CollectScopedAsync(scope, cancellationToken)
                 : request.Purpose == CollectionPurpose.Hardware
                 ? await manageProvider.CollectHardwareAsync(cancellationToken)
-                : await manageProvider.CollectLocalAsync(cancellationToken);
+                : await manageProvider.CollectLocalAsync(cancellationToken));
             var capturedAt = Stopwatch.GetTimestamp();
-            StorageOperationTiming.Record("inventory.collect", captureAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString(), 1);
+            StorageOperationTiming.Record("inventory.collect", captureAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
             failureStage = "inventory.capture.validate";
             if (scope is not null && (document.SystemId != canonicalSystemId
                 || document.SourceFacts?.ScopedCollection?.Scope != scope || document.SourceFacts.IsMerged))
                 throw new InvalidDataException("Scoped inventory returned mismatched or merged evidence.");
+            // The verified raw batch keeps its observation generation. This copy
+            // joins the display cache's persisted sequence, including its scope
+            // marker and source coverage, so it supersedes the previous result.
+            var cacheScope = scope is null ? null : scope with { Generation = generation };
             document = document with
             {
                 SystemId = canonicalSystemId,
                 SourceFacts = document.SourceFacts is null ? null : document.SourceFacts with
                 {
                     SystemId = canonicalSystemId,
-                    Sources = document.SourceFacts.Sources.Select(x => x with { CaptureGeneration = generation }).ToImmutableArray()
+                    Sources = document.SourceFacts.Sources.Select(x => x with
+                    {
+                        CaptureGeneration = generation,
+                        Coverage = cacheScope is not null && x.Coverage is { } coverage
+                            ? coverage with { Generation = generation } : x.Coverage
+                    }).ToImmutableArray(),
+                    ScopedCollection = cacheScope is not null && document.SourceFacts.ScopedCollection is { } collected
+                        ? collected with { Scope = cacheScope } : document.SourceFacts.ScopedCollection
                 }
             };
+            scope = cacheScope;
             var incomplete = scope is not null && document.SourceFacts?.ScopedCollection?.Complete != true;
             failureStage = "inventory.facts.merge";
             if (previous is not null && document.SourceFacts is not null)
@@ -174,7 +191,7 @@ internal sealed class AgentInventoryCoordinator
             StorageOperationTiming.Record("inventory.merge", capturedAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
             var projectionAt = Stopwatch.GetTimestamp();
             failureStage = "inventory.snapshot.project";
-            var projected = EmbeddedPowerShellInventoryProvider.Project(
+            var projected = InventorySnapshotProjection.Project(
                 canonicalSystemId,
                 document.Snapshot);
             StorageOperationTiming.Record("inventory.project", projectionAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
@@ -188,13 +205,6 @@ internal sealed class AgentInventoryCoordinator
                 LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
             failureStage = "inventory.local_document.encode";
             var payload = LocalInventoryDocumentCodec.Encode(document);
-            failureStage = "inventory.local_document.verify";
-            if (LocalInventoryDocumentCodec.Decode(payload).SystemId != canonicalSystemId
-                || projected.SystemId != canonicalSystemId
-                || saved.Snapshot.SystemId != canonicalSystemId)
-            {
-                throw new InvalidDataException("The Local inventory identity is inconsistent.");
-            }
             failureStage = "inventory.local_document.save";
             await localDocument.SaveAsync(saved.SnapshotId, payload, cancellationToken);
             StorageOperationTiming.Record("inventory.persist", persistenceAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
@@ -206,11 +216,11 @@ internal sealed class AgentInventoryCoordinator
                 Complete = !incomplete }));
             publish(new AgentInventoryUpdatedEvent(request.Purpose, payload, DateTimeOffset.UtcNow, isAutomatic));
             if (incomplete)
-                return new(ApplicationStatus.PartiallyCompleted, new ManageInventoryCaptureResponse(saved.SnapshotId, payload),
+                return new(ApplicationStatus.PartiallyCompleted, new ManageInventoryCaptureResponse(saved.SnapshotId, payload.DocumentId, payload.Sha256, generation),
                     [new ApplicationMessage("agent.inventory.scope_incomplete", "agent.inventory.scope_incomplete",
                         "The target closure was not completely refreshed; prior facts remain retained.", ApplicationMessageSeverity.Warning, [])], request.CorrelationId);
             return Succeeded(
-                new ManageInventoryCaptureResponse(saved.SnapshotId, payload),
+                new ManageInventoryCaptureResponse(saved.SnapshotId, payload.DocumentId, payload.Sha256, generation),
                 request.CorrelationId,
                 identity.HasFragmentedHistory);
         }
@@ -243,7 +253,7 @@ internal sealed class AgentInventoryCoordinator
     }
 
     public async Task<ApplicationResult<AgentResponse>> LoadManageAsync(
-        LoadAgentManageInventoryRequest request,
+        LoadAgentInventoryCacheRequest request,
         CancellationToken cancellationToken)
     {
         try
@@ -262,109 +272,6 @@ internal sealed class AgentInventoryCoordinator
         }
     }
 
-    public async Task<ApplicationResult<AgentResponse>> CaptureComparisonAsync(
-        CaptureAgentInventoryRequest request,
-        CancellationToken cancellationToken)
-    {
-        await localCaptureGate.WaitAsync(cancellationToken);
-        var captureRequest = new InventoryRequest(
-            SystemId.New(),
-            InventoryCaptureReason.Comparison);
-        try
-        {
-            var native = await nativeProvider.CaptureAsync(captureRequest, cancellationToken);
-            if (!native.IsSuccess || native.Value is null)
-            {
-                return new(native.Status, null, native.Messages, request.CorrelationId);
-            }
-
-            try
-            {
-                var identity = await localIdentity.ResolveAsync(cancellationToken);
-                var canonicalSystemId = identity.SystemId;
-                var nativeSnapshot = Rebind(native.Value, canonicalSystemId);
-                var savedNative = await snapshots.SaveAsync(
-                    nativeSnapshot,
-                    PersistedSystemKind.Local,
-                    Environment.MachineName,
-                    cancellationToken,
-                    LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
-                if (!request.IncludeLegacyComparison)
-                {
-                    return Succeeded(
-                        new InventoryCaptureResponse(
-                            savedNative.SnapshotId,
-                            savedNative.Snapshot,
-                            null,
-                            null,
-                            null,
-                            null),
-                        request.CorrelationId,
-                        identity.HasFragmentedHistory);
-                }
-
-                var legacy = await legacyProvider.CaptureAsync(captureRequest, cancellationToken);
-                if (!legacy.IsSuccess || legacy.Value is null)
-                {
-                    return new(
-                        ApplicationStatus.PartiallyCompleted,
-                        new InventoryCaptureResponse(
-                            savedNative.SnapshotId,
-                            savedNative.Snapshot,
-                            null,
-                            null,
-                            null,
-                            null),
-                        legacy.Messages,
-                        request.CorrelationId);
-                }
-
-                var savedLegacy = await snapshots.SaveAsync(
-                    Rebind(legacy.Value, canonicalSystemId),
-                    PersistedSystemKind.Local,
-                    Environment.MachineName,
-                    cancellationToken,
-                    LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
-                var comparison = comparer.Compare(savedLegacy.Snapshot, savedNative.Snapshot);
-                var savedComparison = await comparisons.SaveAsync(
-                    savedLegacy.SnapshotId,
-                    savedNative.SnapshotId,
-                    comparison,
-                    cancellationToken);
-                return Succeeded(
-                    new InventoryCaptureResponse(
-                        savedNative.SnapshotId,
-                        savedNative.Snapshot,
-                        savedLegacy.SnapshotId,
-                        savedLegacy.Snapshot,
-                        savedComparison.ComparisonId,
-                        savedComparison.Comparison),
-                    request.CorrelationId,
-                    identity.HasFragmentedHistory);
-            }
-            catch (Exception exception) when (
-                exception is IOException
-                    or InvalidDataException
-                    or Microsoft.Data.Sqlite.SqliteException
-                    or ArgumentException)
-            {
-                return ApplicationResult<AgentResponse>.FromStatus(
-                    ApplicationStatus.Failed,
-                    request.CorrelationId,
-                    new ApplicationMessage(
-                        "agent.inventory.persistence_or_comparison_failed",
-                        "agent.inventory.persistence_or_comparison_failed",
-                        exception.Message,
-                        ApplicationMessageSeverity.Error,
-                        []));
-            }
-        }
-        finally
-        {
-            localCaptureGate.Release();
-        }
-    }
-
     private void CachePhysicalDeviceIds(StorageSystemDocument document)
     {
         physicalDeviceIds.Clear();
@@ -376,38 +283,6 @@ internal sealed class AgentInventoryCoordinator
                 physicalDeviceIds[diskNumber] = disk.PnpDeviceId;
             }
         }
-    }
-
-    private static InventorySnapshot Rebind(
-        InventorySnapshot snapshot,
-        SystemId systemId)
-    {
-        if (snapshot.SystemId == systemId)
-        {
-            return snapshot;
-        }
-
-        StorageObjectId RebindId(StorageObjectId id) =>
-            new(systemId, id.Kind, id.ProviderKey);
-
-        return snapshot with
-        {
-            SystemId = systemId,
-            Objects = snapshot.Objects.Select(item => item with
-            {
-                Id = RebindId(item.Id),
-                ParentId = item.ParentId is { } parent ? RebindId(parent) : null
-            }).ToArray(),
-            IdentityDiagnostics = snapshot.IdentityDiagnostics.Select(item => item with
-            {
-                ObjectId = RebindId(item.ObjectId)
-            }).ToArray(),
-            Relationships = snapshot.Relationships?.Select(item => item with
-            {
-                FromObjectId = RebindId(item.FromObjectId),
-                ToObjectId = RebindId(item.ToObjectId)
-            }).ToArray()
-        };
     }
 
     private static ApplicationResult<AgentResponse> Failed(

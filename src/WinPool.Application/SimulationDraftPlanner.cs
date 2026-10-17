@@ -51,7 +51,11 @@ public static class SimulationDraftPlanner
         return steps;
     }
 
-    public static SimulationDraftPlan Build(StorageSnapshot committed, StorageSnapshot working)
+    public static SimulationDraftPlan Build(StorageSnapshot committed, StorageSnapshot working) =>
+        Precheck(committed, BuildEdits(committed, working).Steps);
+
+    /// <summary>Generate intent only. Callers enrich the final steps before the single preview.</summary>
+    public static SimulationDraftPlan BuildEdits(StorageSnapshot committed, StorageSnapshot working)
     {
         ArgumentNullException.ThrowIfNull(committed);
         ArgumentNullException.ThrowIfNull(working);
@@ -458,7 +462,7 @@ public static class SimulationDraftPlanner
         }
 
         AppendPartitionAndVolumeSteps(committed, working, steps, dissolvedPartitionIds);
-        return BuildPlanWithItems(committed, steps, dissolvedPoolIds);
+        return new SimulationDraftPlan(SimulationEditIntent.Hash(steps)[..32], steps);
     }
 
     public static SimulationDraftPlan Precheck(
@@ -472,19 +476,29 @@ public static class SimulationDraftPlanner
         return BuildPlanWithItems(committed, steps, dissolvedPoolIds);
     }
 
+    public static SimulationDraftPlan Precheck(StorageSystemDocument baseline, IReadOnlyList<SimulationEditRequest> steps)
+    {
+        var dissolved = steps.Where(item => item.Kind == SimulationEditKind.DeleteEmptyStoragePool)
+            .Select(item => item.TargetProviderKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return BuildPlanWithItems(baseline.Snapshot, steps, dissolved, baseline);
+    }
+
     private static SimulationDraftPlan BuildPlanWithItems(
         StorageSnapshot committed,
         IReadOnlyList<SimulationEditRequest> steps,
-        IReadOnlySet<string> dissolvedPoolIds)
+        IReadOnlySet<string> dissolvedPoolIds,
+        StorageSystemDocument? baseline = null)
     {
-        var document = new StorageSystemDocument(
+        var at = steps.FirstOrDefault()?.FrozenAtUtc ?? DateTimeOffset.UtcNow;
+        steps = SimulationEditIntent.Freeze(steps, SimulationEditIntent.Hash(steps), at);
+        var document = baseline ?? new StorageSystemDocument(
             StorageSystemDocument.CurrentSchemaVersion,
             "simulation:plan-preview",
             StorageSystemKind.Simulation,
             committed.Computer.Name,
             committed,
             [],
-            DateTimeOffset.UtcNow);
+            at);
         var service = new SimulationOperationService();
         var childItems = new List<SimulationPlanItem>();
         var failedDissolveSteps = new List<(string PoolId, SimulationEditRequest Step, string Reason)>();
@@ -512,23 +526,14 @@ public static class SimulationDraftPlanner
             }
             else
             {
-                decision = StorageEditRules.Evaluate(document.Snapshot, operation);
-                if (decision.Verdict == StorageRuleVerdict.Allow)
+                var applied = service.Reduce(document, operation);
+                decision = applied.Decision ?? new StorageRuleDecision(
+                    applied.Succeeded ? StorageRuleVerdict.Allow : StorageRuleVerdict.Deny,
+                    "storage.rule.plan-apply", applied.Error, step.TargetProviderKey);
+                if (applied.Succeeded)
                 {
-                    var applied = service.Apply(document, operation);
-                    if (applied.Succeeded)
-                    {
-                        commandPreview = applied.Commands;
-                        document = applied.Document;
-                    }
-                    else
-                    {
-                        decision = new StorageRuleDecision(
-                            StorageRuleVerdict.Deny,
-                            "storage.rule.plan-apply",
-                            applied.Error,
-                            step.TargetProviderKey);
-                    }
+                    commandPreview = applied.Commands;
+                    document = applied.Document;
                 }
             }
 
@@ -598,9 +603,16 @@ public static class SimulationDraftPlanner
             items.Add(item);
         }
 
-        var planBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(steps));
+        var planBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(steps.Select(step => step with { FrozenAtUtc = null })));
         var planId = Convert.ToHexString(SHA256.HashData(planBytes)).ToLowerInvariant()[..32];
-        return new SimulationDraftPlan(planId, steps, items);
+        return new SimulationDraftPlan(planId, steps, items)
+        {
+            BaselineSystemId = baseline?.SystemId,
+            BaselineRevision = baseline?.Revision,
+            BaselineInventoryVersion = baseline?.InventoryVersion,
+            PreviewDocument = baseline is not null && items.All(item => item.Decision?.Verdict == StorageRuleVerdict.Allow)
+                ? document with { Revision = checked(baseline.Revision + 1) } : null
+        };
     }
 
     private static bool DependsOn(

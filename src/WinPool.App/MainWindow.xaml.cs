@@ -50,7 +50,7 @@ public sealed partial class MainWindow : Window
     private string? _pendingSystemSelectionId;
     private readonly EditorInventoryRefreshState _editorInventoryRefresh = new();
     private bool _requestingElevation;
-    private bool _closingForElevationHandoff;
+    private bool _closingAfterAgentShutdown;
     private bool _closePreparationStarted;
     private bool _allowWindowClose;
     private bool _windowClosed;
@@ -138,31 +138,24 @@ public sealed partial class MainWindow : Window
 
     public MainWindow(
         ApplicationStartupOptions startupOptions,
-        IAgentConnection? agentConnection = null)
+        IAgentConnection agentConnection)
     {
+        ArgumentNullException.ThrowIfNull(agentConnection);
         NotificationService = new GlobalNotificationService();
         _elevationRestartService = new WindowsElevationRestartService();
-        _workspaceStateService = agentConnection is null
-            ? new EphemeralWorkspaceStateService()
-            : new AgentBackedWorkspaceStateService(agentConnection);
+        _workspaceStateService = new AgentBackedWorkspaceStateService(agentConnection);
         _startupTarget = startupOptions.Target;
         _enteredRealModeAfterElevation = startupOptions.EnterRealModeAfterElevation;
         var importExportService = new DesktopExportService();
         ViewModel = new WorkspaceViewModel(
-            agentConnection is null
-                ? new WindowsHardwareInventoryProvider()
-                : new AgentBackedHardwareInventoryProvider(agentConnection),
+            new AgentBackedHardwareInventoryProvider(agentConnection),
             new WindowsPrivilegeService(),
             new LocalUserPreferencesService(),
             importExportService,
-            agentConnection is null
-                ? new LocalStorageSystemRepository()
-                : new AgentBackedStorageSystemRepository(agentConnection),
+            new AgentBackedStorageSystemRepository(agentConnection),
             new SimulationOperationService(),
             NotificationService,
-            agentConnection is null
-                ? new EphemeralMachineRecordService()
-                : new AgentBackedMachineRecordService(agentConnection),
+            new AgentBackedMachineRecordService(agentConnection),
             new GlobalCommandLogService(),
             _workspaceStateService,
             agentConnection);
@@ -579,13 +572,14 @@ public sealed partial class MainWindow : Window
     /// Agent exit, elevation handoff, data-location replacement, and the title
     /// bar all enter here before the native window is destroyed.
     /// </summary>
-    internal void RequestClose()
+    internal void RequestClose(bool agentAlreadyStopped = false, bool lastActivePageAlreadySaved = false)
     {
         if (_closePreparationStarted || _allowWindowClose || _windowClosed)
         {
             return;
         }
 
+        _closingAfterAgentShutdown |= agentAlreadyStopped;
         _closePreparationStarted = true;
         RootGrid.IsHitTestVisible = false;
         RootFrame.IsHitTestVisible = false;
@@ -606,7 +600,7 @@ public sealed partial class MainWindow : Window
         _agentInventorySynchronizer.Dispose();
         var monitorObserverStop = _monitorAlertObserver.StopAsync();
         NotificationService.ClearHistory();
-        _ = PrepareCloseAndCloseAsync(monitorObserverStop);
+        _ = PrepareCloseAndCloseAsync(monitorObserverStop, lastActivePageAlreadySaved);
     }
 
     private void StopCloseTimeUiSources()
@@ -626,42 +620,38 @@ public sealed partial class MainWindow : Window
         _notificationExitFallbackTimer.Stop();
     }
 
-    private async Task PrepareCloseAndCloseAsync(Task monitorObserverStop)
+    private async Task PrepareCloseAndCloseAsync(Task monitorObserverStop, bool lastActivePageAlreadySaved)
     {
         try
         {
             await monitorObserverStop;
 
-            if (_closingForElevationHandoff)
+            // Handoffs saved before shutdown; tray exit relies on saves-on-change.
+            // A shutting-down Agent no longer accepts a final workspace save.
+            if (!_closingAfterAgentShutdown)
             {
-                // The old Agent owns the ordered monitoring stop, endpoint release
-                // and SQLite lease release. The App already persisted its
-                // workspace before authorizing that Agent shutdown.
-                ViewModel.Monitoring.Dispose();
-                return;
-            }
-
-            // Keep the existing order: save workspace state before detaching
-            // the monitoring client from the Agent.
-            try
-            {
-                if (ViewModel.CanPersistWorkspaceUiState)
+                try
                 {
-                    await _workspaceStateService.SaveAsync(
-                        ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()));
+                    if (ViewModel.CanPersistWorkspaceUiState)
+                    {
+                        await _workspaceStateService.SaveAsync(
+                            ViewModel.CaptureUiState());
+                    }
+                }
+                catch (Exception exception) when (
+                    exception is IOException
+                        or UnauthorizedAccessException
+                        or InvalidOperationException
+                        or InvalidDataException
+                        or OperationCanceledException)
+                {
+                    LogRecoverableWorkspaceStateFailure(exception);
                 }
             }
-            catch (Exception exception) when (
-                exception is IOException
-                    or UnauthorizedAccessException
-                    or InvalidOperationException
-                    or InvalidDataException
-                    or OperationCanceledException)
-            {
-                LogRecoverableWorkspaceStateFailure(exception);
-            }
 
-            if (_workspaceInitializationComplete)
+            // Data-root/elevation handoffs already saved this locally. In
+            // particular, migration must not write preferences into the old root.
+            if (_workspaceInitializationComplete && !lastActivePageAlreadySaved)
             {
                 try
                 {
@@ -674,6 +664,16 @@ public sealed partial class MainWindow : Window
                         or InvalidOperationException)
                 {
                 }
+            }
+
+            if (_closingAfterAgentShutdown)
+            {
+                ViewModel.Monitoring.Dispose();
+                if (ViewModel.AgentConnection is IAsyncDisposable connection)
+                {
+                    await connection.DisposeAsync();
+                }
+                return;
             }
 
             try
@@ -898,7 +898,7 @@ public sealed partial class MainWindow : Window
         {
             ActiveSystemSelector.Items.Clear();
             ComboBoxItem? selected = null;
-            foreach (var candidate in ViewModel.SystemCatalog.Systems)
+            foreach (var candidate in ViewModel.SystemCatalog.Entries)
             {
                 var prefix = candidate.IsLocal
                     ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
@@ -929,7 +929,7 @@ public sealed partial class MainWindow : Window
         QueueTitleBarPassthroughRegionUpdate();
     }
 
-    private void ActiveSystemSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void ActiveSystemSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_updatingSystemSelector
             || ActiveSystemSelector.SelectedItem is not ComboBoxItem { Tag: string systemId }) return;
@@ -940,15 +940,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        ViewModel.SelectSystem(systemId);
+        await ViewModel.SelectSystemAsync(systemId);
+        UpdateActiveSystemName();
     }
 
-    private void ActiveSystemSelector_DropDownClosed(object sender, object e)
+    private async void ActiveSystemSelector_DropDownClosed(object sender, object e)
     {
         if (_pendingSystemSelectionId is { } systemId)
         {
             _pendingSystemSelectionId = null;
-            ViewModel.SelectSystem(systemId);
+            await ViewModel.SelectSystemAsync(systemId);
+            UpdateActiveSystemName();
         }
 
         if (_systemSelectorRefreshPending)
@@ -1141,9 +1143,8 @@ public sealed partial class MainWindow : Window
                     return false;
                 }
 
-                _closingForElevationHandoff = true;
                 LogElevationPhase("close_requested");
-                RequestClose();
+                RequestClose(agentAlreadyStopped: true, lastActivePageAlreadySaved: true);
                 return true;
             }
 
@@ -1169,9 +1170,9 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            LogElevationPhase("request_complete", $"closing={_closingForElevationHandoff}");
+            LogElevationPhase("request_complete", $"closing={_closingAfterAgentShutdown}");
             _requestingElevation = false;
-            if (!_closingForElevationHandoff && !_closePreparationStarted && !_windowClosed)
+            if (!_closingAfterAgentShutdown && !_closePreparationStarted && !_windowClosed)
             {
                 SyncModeSwitch();
             }
@@ -1232,6 +1233,20 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    internal async Task SaveWorkspaceBeforeAgentShutdownAsync(CancellationToken cancellationToken)
+    {
+        if (!_workspaceInitializationComplete)
+        {
+            return;
+        }
+        if (ViewModel.CanPersistWorkspaceUiState)
+        {
+            await _workspaceStateService.SaveAsync(ViewModel.CaptureUiState(), cancellationToken);
+        }
+        await ViewModel.SetLastActivePageAsync(
+            (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString(), cancellationToken);
+    }
+
     private async Task<bool> PersistWorkspaceForElevationHandoffAsync(
         LocalizationService localization)
     {
@@ -1251,7 +1266,7 @@ public sealed partial class MainWindow : Window
             {
                 LogElevationPhase("workspace_save_wait");
                 await _workspaceStateService.SaveAsync(
-                    ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString()), timeout.Token);
+                    ViewModel.CaptureUiState(), timeout.Token);
                 LogElevationPhase("workspace_save_complete");
             }
 
@@ -1750,8 +1765,8 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Saves-on-change run fire-and-forget on UI-driven triggers. The awaited
-    /// close-time awaited save in PrepareCloseAndCloseAsync remains the safety net.
+    /// Saves-on-change run fire-and-forget on UI-driven triggers. Ordinary App
+    /// close awaits a final save; an Agent-initiated exit cannot save after shutdown begins.
     /// </summary>
     private static async void FireAndForget(Func<Task> action)
     {
@@ -1794,7 +1809,7 @@ public sealed partial class MainWindow : Window
         }
 
         FireAndForget(() => _workspaceStateService.SaveAsync(
-            ViewModel.CaptureUiState((SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString())));
+            ViewModel.CaptureUiState()));
     }
 
     private void PersistLastActivePage(ShellPageKind page) =>

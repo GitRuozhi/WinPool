@@ -3,11 +3,6 @@ namespace WinPool.Application;
 using System.Collections.ObjectModel;
 using WinPool.Domain;
 
-public interface IStorageInventoryProvider
-{
-    Task<StorageSnapshot> ScanAsync(CancellationToken cancellationToken);
-}
-
 public interface IHardwareInventoryProvider
 {
     Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken);
@@ -27,8 +22,10 @@ public sealed record ReadOnlyCommandResult(
 
 public interface IStorageSystemRepository
 {
-    Task<IReadOnlyList<StorageSystemDocument>> LoadSimulationsAsync(
+    Task<IReadOnlyList<SimulationDocumentMetadata>> LoadSimulationsAsync(
         CancellationToken cancellationToken = default);
+
+    Task<StorageSystemDocument?> LoadSimulationAsync(string documentId, CancellationToken cancellationToken = default);
 
     Task SaveSimulationAsync(
         StorageSystemDocument document,
@@ -59,7 +56,6 @@ public interface IMachineRecordService
 }
 
 public sealed record WorkspaceUiState(
-    string ShellPage = "",
     string ActiveSystemId = "",
     ManageWorkspaceCategory Category = ManageWorkspaceCategory.System,
     IReadOnlyDictionary<ManageWorkspaceCategory, string>? CategorySelections = null,

@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using WinPool.Application;
-using WinPool.Execution;
 
 namespace WinPool.Infrastructure.Sqlite;
 
@@ -13,8 +12,6 @@ public sealed class SimulationDocumentConflictException(string message)
 public sealed class SimulationDocumentRepository
 {
     private const int MaximumDocumentBytes = 3 * 1024 * 1024;
-    private static readonly JsonSerializerOptions JsonOptions =
-        new(JsonSerializerDefaults.Web);
     private readonly WinPoolSqliteStore store;
     private readonly AgentWriteOwnerLease writeOwner;
 
@@ -154,119 +151,68 @@ public sealed class SimulationDocumentRepository
     }
 
     public async Task<SimulationCommitReceipt?> FindByCommitIdAsync(
-        string commitId,
-        CancellationToken cancellationToken = default)
+        string commitId, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(commitId))
-        {
-            return null;
-        }
-
+        if (string.IsNullOrWhiteSpace(commitId)) return null;
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT c.commit_id, c.operation_id, c.before_sha256, p.plan_hash,
-                   c.document_id, c.document_schema_version, c.display_name,
-                   c.sanitized_json, c.after_sha256, c.document_revision,
-                   c.updated_at_utc_ms, c.committed_at_utc_ms
-            FROM simulation_edit_commits c
-            JOIN operation_plans p ON p.operation_id = c.operation_id
-            WHERE c.commit_id = $commit;
+            SELECT commit_id, document_id, before_revision, document_revision,
+                   before_sha256, after_sha256, intent_hash, committed_at_utc_ms
+            FROM simulation_edit_commits WHERE commit_id=$commit;
             """;
         command.Parameters.AddWithValue("$commit", commitId.Trim());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-        {
-            return null;
-        }
-        var document = new SimulationDocumentPayload(
-            reader.GetString(4),
-            reader.GetInt32(5),
-            reader.GetString(6),
-            reader.GetString(7),
-            reader.GetString(8),
-            reader.GetInt64(9),
-            DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(10)));
-        Validate(document);
-        return new SimulationCommitReceipt(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            document,
-            DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(11)));
+        return await reader.ReadAsync(cancellationToken)
+            ? new SimulationCommitReceipt(reader.GetString(0), reader.GetString(1),
+                reader.GetInt64(2), reader.GetInt64(3), reader.GetString(4), reader.GetString(5),
+                reader.GetString(6), DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(7)))
+            : null;
     }
 
-    public async Task<SimulationDocumentPayload> CommitEditAsync(
-        SimulationDocumentPayload document,
-        string expectedPreviousSha256,
-        OperationPlan plan,
-        IReadOnlyList<ExecutionEvent> events,
-        string commitId = "",
-        CancellationToken cancellationToken = default)
+    public async Task<SimulationCommitReceipt> CommitEditAsync(
+        SimulationDocumentPayload document, string expectedPreviousSha256,
+        SimulationCommitIntent intent, CancellationToken cancellationToken = default)
     {
         Validate(document);
         ValidateExpectedHash(expectedPreviousSha256, allowNull: false);
-        if (document.Revision < 2)
-        {
-            throw new ArgumentException(
-                "A simulation edit must advance its document revision.",
-                nameof(document));
-        }
-        ValidatePlan(plan, events);
-        var normalizedCommitId = string.IsNullOrWhiteSpace(commitId)
-            ? Id(plan.OperationId.Value)
-            : commitId.Trim();
-        var existing = await FindByCommitIdAsync(normalizedCommitId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(intent.CommitId) || intent.CommitId.Length > 128
+            || intent.DocumentId != document.DocumentId
+            || intent.ExpectedRevision < 1 || document.Revision != checked(intent.ExpectedRevision + 1)
+            || intent.Edits.Count == 0)
+            throw new ArgumentException("The simulation commit intent is inconsistent.");
+        var existing = await FindByCommitIdAsync(intent.CommitId, cancellationToken);
         if (existing is not null)
         {
-            if (DocumentsMatch(existing.Document, document)
-                && existing.BeforeSha256 == expectedPreviousSha256
-                && existing.OperationId == Id(plan.OperationId.Value)
-                && existing.PlanHash == plan.PlanHash)
-            {
-                return existing.Document;
-            }
-            throw new SimulationDocumentConflictException(
-                "The simulation commit ID is already bound to a different edit.");
+            if (existing.DocumentId == intent.DocumentId && existing.IntentHash == intent.IntentHash)
+                return existing;
+            throw new SimulationDocumentConflictException("The commit ID is already bound to a different intent.");
         }
         writeOwner.AssertOwnership(store);
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
-        await using var transaction =
-            (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-
-        var saved = await UpsertAsync(
-            connection,
-            transaction,
-            document,
-            expectedPreviousSha256,
-            cancellationToken);
-        await InsertPlanAsync(connection, transaction, plan, cancellationToken);
-        await InsertEventsAsync(connection, transaction, events, cancellationToken);
-        await using var link = connection.CreateCommand();
-        link.Transaction = transaction;
-        link.CommandText = """
-            INSERT INTO simulation_edit_commits(
-                operation_id, commit_id, document_id, before_sha256, after_sha256,
-                document_revision, document_schema_version, display_name,
-                sanitized_json, updated_at_utc_ms, committed_at_utc_ms)
-            VALUES($operation, $commit, $document, $before, $after, $revision,
-                   $schema, $name, $json, $updated, $committed);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var saved = await UpsertAsync(connection, transaction, document, expectedPreviousSha256, cancellationToken);
+        var receipt = new SimulationCommitReceipt(intent.CommitId, saved.DocumentId,
+            intent.ExpectedRevision, saved.Revision, expectedPreviousSha256, saved.Sha256,
+            intent.IntentHash, DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO simulation_edit_commits(commit_id,document_id,before_revision,document_revision,
+                before_sha256,after_sha256,intent_hash,committed_at_utc_ms)
+            VALUES($commit,$document,$beforeRevision,$revision,$before,$after,$intent,$at);
             """;
-        link.Parameters.AddWithValue("$operation", Id(plan.OperationId.Value));
-        link.Parameters.AddWithValue("$commit", normalizedCommitId);
-        link.Parameters.AddWithValue("$document", saved.DocumentId);
-        link.Parameters.AddWithValue("$before", expectedPreviousSha256);
-        link.Parameters.AddWithValue("$after", saved.Sha256);
-        link.Parameters.AddWithValue("$revision", saved.Revision);
-        link.Parameters.AddWithValue("$schema", saved.DocumentSchemaVersion);
-        link.Parameters.AddWithValue("$name", saved.DisplayName);
-        link.Parameters.AddWithValue("$json", saved.Json);
-        link.Parameters.AddWithValue("$updated", saved.UpdatedAtUtc.ToUnixTimeMilliseconds());
-        link.Parameters.AddWithValue("$committed", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-        await link.ExecuteNonQueryAsync(cancellationToken);
+        command.Parameters.AddWithValue("$commit", receipt.CommitId);
+        command.Parameters.AddWithValue("$document", receipt.DocumentId);
+        command.Parameters.AddWithValue("$beforeRevision", receipt.BeforeRevision);
+        command.Parameters.AddWithValue("$revision", receipt.AfterRevision);
+        command.Parameters.AddWithValue("$before", receipt.BeforeSha256);
+        command.Parameters.AddWithValue("$after", receipt.AfterSha256);
+        command.Parameters.AddWithValue("$intent", receipt.IntentHash);
+        command.Parameters.AddWithValue("$at", receipt.CommittedAtUtc.ToUnixTimeMilliseconds());
+        await command.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return saved;
+        return receipt;
     }
 
     private static async Task<SimulationDocumentPayload> UpsertAsync(
@@ -312,7 +258,7 @@ public sealed class SimulationDocumentRepository
 
         command.Parameters.AddWithValue("$id", document.DocumentId);
         command.Parameters.AddWithValue("$schema", document.DocumentSchemaVersion);
-        command.Parameters.AddWithValue("$name", document.DisplayName.Trim());
+        command.Parameters.AddWithValue("$name", document.DisplayName);
         command.Parameters.AddWithValue("$json", document.Json);
         command.Parameters.AddWithValue("$sha", document.Sha256);
         command.Parameters.AddWithValue("$targetRevision", document.Revision);
@@ -324,102 +270,10 @@ public sealed class SimulationDocumentRepository
                 "The simulation document was created or changed by another client.");
         }
 
-        await using var read = connection.CreateCommand();
-        read.Transaction = transaction;
-        read.CommandText = """
-            SELECT document_id, document_schema_version, display_name,
-                   sanitized_json, sha256, revision, updated_at_utc_ms
-            FROM simulation_documents WHERE document_id = $id;
-            """;
-        read.Parameters.AddWithValue("$id", document.DocumentId);
-        await using var reader = await read.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+        return document with
         {
-            throw new InvalidDataException("The saved simulation document could not be read.");
-        }
-
-        return Read(reader);
-    }
-
-    private static async Task InsertPlanAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        OperationPlan plan,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO operation_plans(
-                operation_id, plan_hash, environment_id, risk, state,
-                sanitized_json, created_at_utc_ms)
-            VALUES($operation, $hash, $environment, $risk, $state, $json, $created);
-            """;
-        command.Parameters.AddWithValue("$operation", Id(plan.OperationId.Value));
-        command.Parameters.AddWithValue("$hash", plan.PlanHash);
-        command.Parameters.AddWithValue("$environment", Id(plan.EnvironmentId.Value));
-        command.Parameters.AddWithValue("$risk", (int)plan.Risk);
-        command.Parameters.AddWithValue("$state", (int)PersistedOperationState.Completed);
-        command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(plan, JsonOptions));
-        command.Parameters.AddWithValue("$created", plan.CreatedAt.ToUnixTimeMilliseconds());
-        await command.ExecuteNonQueryAsync(cancellationToken);
-
-        for (var index = 0; index < plan.Steps.Count; index++)
-        {
-            await using var step = connection.CreateCommand();
-            step.Transaction = transaction;
-            step.CommandText = """
-                INSERT INTO operation_steps(
-                    operation_id, step_id, sequence_no, state, sanitized_json)
-                VALUES($operation, $step, $sequence, $state, $json);
-                """;
-            step.Parameters.AddWithValue("$operation", Id(plan.OperationId.Value));
-            step.Parameters.AddWithValue("$step", plan.Steps[index].Id);
-            step.Parameters.AddWithValue("$sequence", index);
-            step.Parameters.AddWithValue("$state", (int)ApplicationTaskState.Succeeded);
-            step.Parameters.AddWithValue("$json", JsonSerializer.Serialize(plan.Steps[index], JsonOptions));
-            await step.ExecuteNonQueryAsync(cancellationToken);
-        }
-    }
-
-    private static async Task InsertEventsAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        IReadOnlyList<ExecutionEvent> events,
-        CancellationToken cancellationToken)
-    {
-        foreach (var item in events)
-        {
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                INSERT INTO execution_events(
-                    operation_id, timestamp_utc_ms, kind, code, sanitized_message)
-                VALUES($operation, $timestamp, $kind, $code, $message);
-                """;
-            command.Parameters.AddWithValue("$operation", Id(item.OperationId.Value));
-            command.Parameters.AddWithValue("$timestamp", item.At.ToUnixTimeMilliseconds());
-            command.Parameters.AddWithValue("$kind", (int)item.Kind);
-            command.Parameters.AddWithValue("$code", item.Code.Trim());
-            command.Parameters.AddWithValue("$message", item.Message ?? string.Empty);
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-    }
-
-    private static void ValidatePlan(OperationPlan plan, IReadOnlyList<ExecutionEvent> events)
-    {
-        ArgumentNullException.ThrowIfNull(plan);
-        ArgumentNullException.ThrowIfNull(events);
-        if (plan.OperationId.Value == Guid.Empty || string.IsNullOrWhiteSpace(plan.PlanHash))
-        {
-            throw new ArgumentException("The operation plan identity is incomplete.", nameof(plan));
-        }
-        if (events.Count == 0
-            || events.Any(item => item.OperationId != plan.OperationId)
-            || events[^1].Kind != ExecutionEventKind.Completed)
-        {
-            throw new ArgumentException("A completed, operation-matched event stream is required.", nameof(events));
-        }
+            UpdatedAtUtc = DateTimeOffset.FromUnixTimeMilliseconds(document.UpdatedAtUtc.ToUnixTimeMilliseconds())
+        };
     }
 
     private static void Validate(SimulationDocumentPayload document)
@@ -512,17 +366,4 @@ public sealed class SimulationDocumentRepository
         return document;
     }
 
-    private static bool DocumentsMatch(
-        SimulationDocumentPayload left,
-        SimulationDocumentPayload right) =>
-        left.DocumentId == right.DocumentId
-        && left.DocumentSchemaVersion == right.DocumentSchemaVersion
-        && left.DisplayName == right.DisplayName
-        && left.Json == right.Json
-        && left.Sha256 == right.Sha256
-        && left.Revision == right.Revision
-        && left.UpdatedAtUtc.ToUnixTimeMilliseconds()
-            == right.UpdatedAtUtc.ToUnixTimeMilliseconds();
-
-    private static string Id(Guid value) => value.ToString("N");
 }

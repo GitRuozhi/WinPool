@@ -32,11 +32,3 @@ public enum WorkspacePage
     Development,
     Settings
 }
-
-public sealed record WorkspaceState(
-    WorkspacePage ActivePage,
-    SystemId? ActiveSystemId,
-    StorageObjectKind ActiveCategory,
-    StorageObjectId? SelectedObjectId,
-    StorageObjectId? HighlightedTopologyObjectId,
-    IReadOnlyDictionary<StorageObjectKind, StorageObjectId> RememberedSelections);

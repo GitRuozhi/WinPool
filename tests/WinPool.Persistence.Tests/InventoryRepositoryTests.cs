@@ -87,49 +87,6 @@ public sealed class InventoryRepositoryTests
     }
 
     [Fact]
-    public async Task ComparisonRoundTripPreservesDifferenceValues()
-    {
-        await using var database = await InventoryDatabase.CreateAsync();
-        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var snapshots = new InventorySnapshotRepository(database.Store, lease);
-        var systemId = SystemId.New();
-        var reference = await snapshots.SaveAsync(
-            CreateSnapshot("left", DateTimeOffset.UtcNow, systemId),
-            PersistedSystemKind.Local,
-            "Test");
-        var candidate = await snapshots.SaveAsync(
-            CreateSnapshot("right", DateTimeOffset.UtcNow.AddSeconds(1), systemId),
-            PersistedSystemKind.Local,
-            "Test");
-        var comparison = new InventoryComparison(
-            "left",
-            "right",
-            false,
-            [
-                new(
-                    InventoryDifferenceKind.PropertyMismatch,
-                    null,
-                    null,
-                    "serialNumber",
-                    "SECRET-LEFT",
-                    "SECRET-RIGHT")
-            ]);
-        var writer = new InventoryComparisonRepository(database.Store, lease);
-
-        var saved = await writer.SaveAsync(
-            reference.SnapshotId,
-            candidate.SnapshotId,
-            comparison);
-        var loaded = await new InventoryComparisonRepository(database.Store)
-            .GetAsync(saved.ComparisonId);
-
-        Assert.NotNull(loaded);
-        var difference = Assert.Single(loaded.Comparison.Differences);
-        Assert.Equal("SECRET-LEFT", difference.ReferenceValue);
-        Assert.Equal("SECRET-RIGHT", difference.CandidateValue);
-    }
-
-    [Fact]
     public async Task ReadOnlyInventoryRepositoriesCannotWrite()
     {
         await using var database = await InventoryDatabase.CreateAsync();
@@ -182,7 +139,7 @@ public sealed class InventoryRepositoryTests
 
     [Theory]
     [InlineData(16)]
-    [InlineData(20)]
+    [InlineData(21)]
     public async Task StartupHistoryRejectsOtherSchemasWithoutChangingThem(int version)
     {
         await using var database = await InventoryDatabase.CreateAsync();

@@ -36,6 +36,16 @@ public sealed record QueryAgentRealOperationRequest(
     OperationId OperationId,
     CorrelationId CorrelationId) : AgentRequest(CorrelationId);
 
+public sealed record ReconcileAgentRealOperationRequest(
+    OperationId OperationId,
+    CorrelationId CorrelationId) : AgentRequest(CorrelationId);
+
+public sealed record LoadAgentRealOperationEvidenceRequest(
+    OperationId OperationId,
+    int Offset,
+    int Limit,
+    CorrelationId CorrelationId) : AgentRequest(CorrelationId);
+
 public sealed record QueryAgentRealPartitionResizeRangeRequest(
     StorageObjectId Partition,
     string ProductSessionId,
@@ -49,7 +59,8 @@ public sealed record ListAgentRecoverableRealOperationsRequest(
     CorrelationId CorrelationId) : AgentRequest(CorrelationId);
 
 public sealed record AgentRecoverableRealOperationsResponse(
-    IReadOnlyList<AgentRealOperationResponse> Operations) : AgentResponse;
+    IReadOnlyList<AgentRealOperationStatusResponse> Operations,
+    IReadOnlyList<AgentRealStructureJobResponse>? StructureJobs = null) : AgentResponse;
 
 public sealed record AgentRealVirtualDiskCreationRangeResponse(
     RealVirtualDiskCreationRange Range) : AgentResponse;
@@ -124,8 +135,36 @@ public sealed record AgentRealOperationResponse(
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     RealOperationReconciliationDiagnostic? ReconciliationDiagnostic = null) : AgentResponse;
 
-public interface IRealOperationService
+/// <summary>Durable status changes carry no plan or evidence history.</summary>
+public sealed record AgentRealOperationStatusResponse(
+    OperationId OperationId,
+    long Revision,
+    RealOperationState State,
+    IReadOnlyList<RealOperationStepProgress> Steps,
+    string? Code,
+    bool RequiresReconciliation,
+    RealOperationReconciliationDiagnostic? ReconciliationDiagnostic = null) : AgentResponse;
+
+public sealed record AgentRealOperationEvidenceResponse(
+    AgentRealOperationResponse Operation,
+    int Offset,
+    int? NextOffset) : AgentResponse;
+
+public sealed record AgentRealOperationStatusEvent(
+    AgentRealOperationStatusResponse Status,
+    DateTimeOffset OccurredAtUtc) : AgentEvent(OccurredAtUtc);
+
+public partial interface IRealOperationService
 {
+    Task<ApplicationResult<AgentResponse>> RecheckAsync(
+        ReconcileAgentRealOperationRequest request, TrustedRealSession session,
+        CancellationToken cancellationToken) => Task.FromException<ApplicationResult<AgentResponse>>(
+            new NotSupportedException("Explicit reconciliation is unavailable."));
+
+    Task<ApplicationResult<AgentResponse>> LoadEvidenceAsync(
+        LoadAgentRealOperationEvidenceRequest request, TrustedRealSession session,
+        CancellationToken cancellationToken) => Task.FromException<ApplicationResult<AgentResponse>>(
+            new NotSupportedException("Evidence loading is unavailable."));
     Task<ApplicationResult<AgentResponse>> QueryStructureCreationSupportAsync(
         QueryAgentRealStructureCreationSupportRequest request, TrustedRealSession session,
         CancellationToken cancellationToken) => Task.FromException<ApplicationResult<AgentResponse>>(

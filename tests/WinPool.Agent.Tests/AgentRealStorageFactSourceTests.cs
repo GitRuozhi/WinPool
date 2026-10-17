@@ -4,7 +4,6 @@ using WinPool.Domain;
 using WinPool.Execution;
 using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
-using WinPool.Inventory;
 
 namespace WinPool.Agent.Tests;
 
@@ -15,21 +14,65 @@ public sealed class AgentRealStorageFactSourceTests
     private const string PhysicalId = "physical:7";
 
     [Fact]
+    public async Task SameGenerationCoalescesCompleteRawCaptureAndVerifiedMonitorReusesIt()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<StorageSystemDocument>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new AsyncHardwareProvider(async () =>
+        {
+            entered.TrySetResult();
+            return await release.Task;
+        });
+        var collector = harness.Wrap(provider);
+        var generation = collector.BeginGeneration();
+        var first = collector.CollectAsync(CollectionPurpose.Storage, null, generation, CancellationToken.None);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = collector.CollectAsync(CollectionPurpose.Storage, null, generation, CancellationToken.None);
+        Assert.Equal(1, provider.CaptureCount);
+        release.TrySetResult(Document(SystemId.New()));
+        var documents = await Task.WhenAll(first, second);
+        Assert.Same(documents[0], documents[1]);
+        var raw = documents[0];
+        var target = new StorageObjectId(raw.SystemId, StorageObjectKind.PhysicalDisk, PhysicalId);
+        var scope = StorageInventoryScopeFactory.Create(raw.SourceFacts!, OperationId.New(), "monitor", [target], 17);
+        collector.AcceptVerifiedPostState(raw, null);
+        var monitor = await collector.CollectForMonitorAsync(scope, CancellationToken.None);
+        Assert.Equal(1, provider.CaptureCount);
+        Assert.False(monitor.SourceFacts!.IsMerged);
+        Assert.True(monitor.SourceFacts.ScopedCollection!.Complete);
+        Assert.Equal(scope, monitor.SourceFacts.ScopedCollection.Scope);
+        monitor.SourceFacts.Validate();
+    }
+
+    [Fact]
+    public async Task RealFreshReadAdvancesGenerationAndNeverReusesVerifiedPostState()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var source = new FixedFactSource(() => Document(SystemId.New()));
+        var collector = harness.Wrap(source);
+        var before = await collector.CaptureFreshAsync(CancellationToken.None);
+        collector.AcceptVerifiedPostState(before, null);
+        Assert.Same(before, await collector.CollectForMonitorAsync(null, CancellationToken.None));
+        var after = await collector.CaptureFreshAsync(CancellationToken.None);
+        Assert.Equal(2, source.CaptureCount);
+        Assert.True(after.SourceFacts!.Sources.Min(x => x.CaptureGeneration)
+            > before.SourceFacts!.Sources.Max(x => x.CaptureGeneration));
+    }
+
+    [Fact]
     public async Task InventoryAndFreshFactsSharePersistedIdentityWithoutMergingCachedFacts()
     {
         await using var harness = await Harness.CreateAsync();
         var cached = Document(SystemId.New(), serial: "CACHED-SERIAL");
-        var unused = new UnusedInventoryProvider();
-        var coordinator = new AgentInventoryCoordinator(unused, unused,
-            new FixedHardwareProvider(cached), new InventoryComparer(),
+        var coordinator = new AgentInventoryCoordinator(new FixedHardwareProvider(cached),
             new InventorySnapshotRepository(harness.Store, harness.Lease),
-            new InventoryComparisonRepository(harness.Store, harness.Lease),
-            harness.LocalDocument, harness.Resolver, new UnusedDeviceResolver());
+            harness.LocalDocument, harness.Identity, new UnusedDeviceResolver());
         var inventory = await coordinator.CaptureManageAsync(
             new(CorrelationId.New(), CollectionPurpose.Storage), CancellationToken.None);
         Assert.Equal(ApplicationStatus.Succeeded, inventory.Status);
         var saved = LocalInventoryDocumentCodec.Decode(
-            Assert.IsType<ManageInventoryCaptureResponse>(inventory.Value).Document);
+            (await harness.LocalDocument.LoadAsync())!.Document);
 
         var raw = Document(SystemId.New(), serial: "FRESH-SERIAL");
         var source = new FixedFactSource(() => raw);
@@ -39,12 +82,13 @@ public sealed class AgentRealStorageFactSourceTests
         Assert.Equal("FRESH-SERIAL", Assert.Single(rebound.Snapshot.PhysicalDisks).SerialNumber);
         Assert.Equal(LocalInventoryDocumentCodec.Encode(raw).Json,
             LocalInventoryDocumentCodec.Encode(rebound with
-                { SystemId = raw.SystemId, SourceFacts = raw.SourceFacts }).Json);
+                { SystemId = raw.SystemId, SourceFacts = rebound.SourceFacts! with
+                    { SystemId = raw.SystemId, Sources = raw.SourceFacts!.Sources } }).Json);
         Assert.NotEqual(raw.SystemId, saved.SystemId);
 
         // New helper/resolver instances use the durable authority after restart.
         raw = Document(SystemId.New(), serial: "NEXT-FRESH-SERIAL");
-        var restarted = new AgentRealStorageFactSource(source,
+        var restarted = new AgentInventoryCollector(source,
             new AgentLocalSystemIdentity(harness.LocalDocument,
                 new LocalSystemIdentityResolver(harness.Store, harness.Lease)));
         var next = await restarted.CaptureFreshAsync(CancellationToken.None);
@@ -185,9 +229,10 @@ public sealed class AgentRealStorageFactSourceTests
             Origin = source.ClassName.StartsWith("MSFT_", StringComparison.Ordinal)
                 ? FactOrigin.StorageCim : FactOrigin.Win32
         }).ToImmutableArray();
-        foreach (var className in new[] { "MSFT_Partition", "MSFT_Volume" })
-            sources = sources.Add(new("empty:" + className, FactOrigin.StorageCim,
-                "root/microsoft/windows/storage", className, Now, CollectionPurpose.Storage));
+        foreach (var className in new[] { "MSFT_Partition", "MSFT_Volume", "MSFT_VirtualDisk", "MSFT_StorageTier" })
+            if (!sources.Any(x => x.ClassName == className))
+                sources = sources.Add(new("empty:" + className, FactOrigin.StorageCim,
+                    "root/microsoft/windows/storage", className, Now, CollectionPurpose.Storage));
         facts = facts with
         {
             IsSimulation = false, InventoryVersion = "fixture-fresh", InventoryCapturedAt = Now,
@@ -224,27 +269,38 @@ public sealed class AgentRealStorageFactSourceTests
             return new(store, AgentWriteOwnerLease.Acquire(store, "identity-regression"));
         }
 
-        public AgentRealStorageFactSource Wrap(IWindowsRealStorageFactSource source) => new(source, Identity);
+        public AgentInventoryCollector Wrap(IHardwareInventoryProvider source) => new(source, Identity);
 
         public async Task SaveAsync(StorageSystemDocument document)
         {
-            var snapshot = EmbeddedPowerShellInventoryProvider.Project(document.SystemId, document.Snapshot);
+            var snapshot = InventorySnapshotProjection.Project(document.SystemId, document.Snapshot);
             var saved = await new InventorySnapshotRepository(Store, Lease).SaveAsync(snapshot,
                 PersistedSystemKind.Local, document.Snapshot.Computer.Name, CancellationToken.None);
             await LocalDocument.SaveAsync(saved.SnapshotId, LocalInventoryDocumentCodec.Encode(document));
+            Identity.Invalidate();
         }
 
         // Preserve isolated fixture databases for diagnosis; never use a user data root.
         public ValueTask DisposeAsync() => Lease.DisposeAsync();
     }
 
-    private sealed class FixedFactSource(Func<StorageSystemDocument> capture) : IWindowsRealStorageFactSource
+    private sealed class FixedFactSource(Func<StorageSystemDocument> capture) : IHardwareInventoryProvider
     {
         public int CaptureCount { get; private set; }
-        public Task<StorageSystemDocument> CaptureFreshAsync(CancellationToken cancellationToken)
+        public Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken)
         {
             CaptureCount++;
             return Task.FromResult(capture());
+        }
+    }
+
+    private sealed class AsyncHardwareProvider(Func<Task<StorageSystemDocument>> capture) : IHardwareInventoryProvider
+    {
+        public int CaptureCount { get; private set; }
+        public Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken)
+        {
+            CaptureCount++;
+            return capture();
         }
     }
 
@@ -253,13 +309,6 @@ public sealed class AgentRealStorageFactSourceTests
         public Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken) => Task.FromResult(document);
         public Task<StorageSystemDocument> CollectHardwareAsync(CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Hardware capture is outside this fixture.");
-    }
-
-    private sealed class UnusedInventoryProvider : IInventoryProvider
-    {
-        public InventoryProviderKind Kind => InventoryProviderKind.Replay;
-        public Task<ApplicationResult<InventorySnapshot>> CaptureAsync(InventoryRequest request,
-            CancellationToken cancellationToken) => throw new InvalidOperationException("No hardware query is allowed.");
     }
 
     private sealed class UnusedDeviceResolver : IPhysicalDiskDeviceResolver

@@ -10,6 +10,28 @@ public sealed class MonitorTargetIdentityTests
     private readonly SystemId system = SystemId.New();
 
     [Fact]
+    public void PoolMemberWithoutIndependentOsCounterReportsUnsupportedRole()
+    {
+        var facts = Facts(3, 4);
+        var pool = facts.Objects[0] with
+        {
+            Id = "pool", ObjectType = FactObjectType.StoragePool,
+            Fields = [.. facts.Objects[0].Fields,
+                WinPoolSourceField.Returned("IsPrimordial", false, FactValueType.Boolean, "storage")]
+        };
+        facts = facts with
+        {
+            Objects = [.. facts.Objects, pool],
+            Relationships = [new("pool", "physical-a", "pool-member"), new("physical-b", "disk-b", "same-device")]
+        };
+        var resolved = WindowsMonitorTargetIdentityResolver.ResolveFacts(Request(), facts, null);
+        Assert.DoesNotContain(resolved.Targets, target => target.ObjectId.ProviderKey == "physical-a");
+        var unsupported = Assert.Single(resolved.UnresolvedTargets);
+        Assert.Equal(MonitorEditTargetStatus.Unsupported, unsupported.Status);
+        Assert.Equal("monitor.counter.pool_member_has_no_independent_os_disk", unsupported.ReasonCode);
+    }
+
+    [Fact]
     public void HexProviderIdentityBindsStateCountersThroughItsExactCurrentOsDisk()
     {
         var facts = VirtualFacts(3, "current-vd", "47589F7504BDB54583984EF9C2D51F43", "current-disk");

@@ -10,7 +10,6 @@ namespace WinPool.Infrastructure.Windows;
 /// applied by the App from the presentation hint.
 /// </summary>
 public sealed class ManageComparisonProjector
-    : IManageComparisonProjector<StorageSystemDocument>
 {
     public ManageObjectComparisonView Project(
         StorageSystemDocument document,

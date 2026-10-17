@@ -43,12 +43,8 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
 
     internal static WorkspaceSessionState Encode(WorkspaceUiState state)
     {
-        var page = Enum.TryParse<WorkspacePage>(state.ShellPage, out var parsedPage)
-            ? parsedPage
-            : WorkspacePage.Manage;
         return new WorkspaceSessionState(
             WorkspaceSessionState.CurrentSchemaVersion,
-            page,
             state.ActiveSystemId?.Trim() ?? string.Empty,
             state.Category,
             (state.CategorySelections ?? new Dictionary<ManageWorkspaceCategory, string>())
@@ -65,7 +61,6 @@ public sealed class AgentBackedWorkspaceStateService(IAgentConnection connection
             throw new InvalidDataException("The stored workspace state is invalid.");
         }
         return new WorkspaceUiState(
-            state.ActivePage.ToString(),
             state.ActiveDocumentId,
             state.ActiveCategory,
             state.RememberedProviderKeys.ToDictionary(

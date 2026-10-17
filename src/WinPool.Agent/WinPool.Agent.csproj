@@ -16,7 +16,6 @@
     <ProjectReference Include="..\WinPool.Infrastructure.Sqlite\WinPool.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\WinPool.Ipc\WinPool.Ipc.csproj" />
-    <ProjectReference Include="..\WinPool.Inventory\WinPool.Inventory.csproj" />
     <ProjectReference Include="..\WinPool.Monitoring\WinPool.Monitoring.csproj" />
   </ItemGroup>
   <ItemGroup>

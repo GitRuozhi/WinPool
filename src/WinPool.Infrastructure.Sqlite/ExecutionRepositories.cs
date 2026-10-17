@@ -381,15 +381,20 @@ public sealed partial class OperationPlanRepository
 
     public async Task<IReadOnlyList<PersistedOperationStep>> GetStepsAsync(
         OperationId operationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, bool includeEvidence = true, int offset = 0, int? limit = null)
     {
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = includeEvidence ? """
             SELECT step_id, sequence_no, state, target_json, evidence_json, updated_at_utc_ms
-            FROM operation_steps WHERE operation_id = $operation ORDER BY sequence_no;
+            FROM operation_steps WHERE operation_id = $operation ORDER BY sequence_no LIMIT $limit OFFSET $offset;
+            """ : """
+            SELECT step_id, sequence_no, state, NULL, NULL, updated_at_utc_ms
+            FROM operation_steps WHERE operation_id = $operation ORDER BY sequence_no LIMIT $limit OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$operation", Id(operationId.Value));
+        command.Parameters.AddWithValue("$offset", offset);
+        command.Parameters.AddWithValue("$limit", limit ?? -1);
         var result = new List<PersistedOperationStep>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -675,6 +680,32 @@ public sealed class ExecutionEventRepository
         command.Parameters.AddWithValue("$code", executionEvent.Code.Trim());
         command.Parameters.AddWithValue("$message", executionEvent.Message ?? string.Empty);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<(long Revision, string? Code, IReadOnlyDictionary<string, string> StepCodes)> ReadStatusAsync(
+        OperationId operationId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT event_id, code, sanitized_message FROM execution_events
+            WHERE operation_id = $operation AND event_id IN (
+                SELECT MAX(event_id) FROM execution_events WHERE operation_id = $operation
+                GROUP BY sanitized_message)
+            ORDER BY event_id;
+            """;
+        command.Parameters.AddWithValue("$operation", OperationPlanRepository.Id(operationId.Value));
+        var codes = new Dictionary<string, string>(StringComparer.Ordinal);
+        long revision = 0;
+        string? code = null;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            revision = reader.GetInt64(0);
+            code = reader.GetString(1);
+            codes[reader.GetString(2)] = code;
+        }
+        return (revision, code, codes);
     }
 
     public async Task<IReadOnlyList<PersistedExecutionEvent>> ListAsync(

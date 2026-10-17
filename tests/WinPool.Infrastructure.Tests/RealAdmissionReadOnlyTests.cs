@@ -10,12 +10,9 @@ namespace WinPool.Infrastructure.Tests;
 
 public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
 {
-    [Fact]
+    [EnvironmentEnabledFact("WINPOOL_READ_ONLY_ADMISSION")]
     public async Task CaptureCurrentHostAdmissionFactsOnlyWhenExplicitlySelected()
     {
-        if (Environment.GetEnvironmentVariable("WINPOOL_READ_ONLY_ADMISSION") != "1")
-            return;
-
         var repositoryRoot = FindRepositoryRoot();
         var document = await new WindowsRealStorageFactSource()
             .CaptureFreshAsync(CancellationToken.None);
@@ -255,5 +252,14 @@ public sealed class RealAdmissionReadOnlyTests(ITestOutputHelper output)
         throw new InvalidOperationException(
             "WinPool.slnx was not found above the test binary directory: "
             + AppContext.BaseDirectory);
+    }
+}
+
+public sealed class EnvironmentEnabledFactAttribute : FactAttribute
+{
+    public EnvironmentEnabledFactAttribute(string environmentVariable)
+    {
+        if (Environment.GetEnvironmentVariable(environmentVariable) != "1")
+            Skip = $"Set {environmentVariable}=1 to run this host read-only probe.";
     }
 }

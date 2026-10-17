@@ -1,4 +1,4 @@
-﻿using WinPool.App.Services;
+using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
@@ -236,35 +236,44 @@ public sealed class RealOperationUiFlowTests
     }
 
     [Fact]
-    public async Task RecoveryQueriesDiscoveredOperationAgainAfterAsynchronousReconciliationClosesIt()
+    public async Task ReadOnlyRecoveryDoesNotReconcileUntilExplicitRecheck()
     {
         var (_, plan) = CreatePlan();
         var state = new RealOperationSubmissionState();
-        var queryCount = 0;
+        var closed = false;
+        AgentRealOperationResponse Full() => new(plan,
+            closed ? RealOperationState.Failed : RealOperationState.OutcomeUnknown,
+            [], closed ? "real.reconciliation_observed_no_effect" : null, !closed);
+        AgentRealOperationStatusResponse Status() => new(plan.OperationId, closed ? 2 : 1,
+            Full().State, [], Full().Code, !closed);
         var connection = new RecordingConnection(request =>
         {
-            AgentResponse response = request switch
+            AgentResponse response;
+            if (request is ReconcileAgentRealOperationRequest)
             {
-                ListAgentRecoverableRealOperationsRequest => new AgentRecoverableRealOperationsResponse(queryCount > 1
-                    ? [] : [new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true)]),
-                QueryAgentRealOperationRequest => ++queryCount == 1
-                    ? new AgentRealOperationResponse(plan, RealOperationState.OutcomeUnknown, [], null, true)
-                    : new AgentRealOperationResponse(plan, RealOperationState.Failed,
-                        [new(plan.RealOperation!.Steps[0].Id, RealOperationStepState.Failed, "operation.step.failed_no_effect", null, null)],
-                        "real.reconciliation_observed_no_effect", false),
-                _ => throw new InvalidOperationException("Recovery must remain read-only.")
+                closed = true;
+                response = Status();
+            }
+            else response = request switch
+            {
+                ListAgentRecoverableRealOperationsRequest => new AgentRecoverableRealOperationsResponse([Status()]),
+                QueryAgentRealOperationRequest => Status(),
+                LoadAgentRealOperationEvidenceRequest => new AgentRealOperationEvidenceResponse(Full(), 0, null),
+                _ => throw new InvalidOperationException("Unexpected recovery request.")
             };
             return ApplicationResult<AgentResponse>.Succeeded(response, request.CorrelationId);
         });
         await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None);
-        Assert.True(state.IsBlocked);
         await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None);
-        Assert.False(state.IsBlocked);
-        Assert.Equal(2, queryCount);
-        Assert.All(connection.Requests, request => Assert.True(request is
-            QueryAgentRealOperationRequest or ListAgentRecoverableRealOperationsRequest));
-    }
+        Assert.True(state.IsBlocked);
+        Assert.False(closed);
+        Assert.DoesNotContain(connection.Requests, request => request is ReconcileAgentRealOperationRequest);
 
+        await RealOperationRecovery.RecheckAsync(connection, state, status => state.Observe(status), CancellationToken.None);
+        Assert.False(state.IsBlocked);
+        Assert.Single(connection.Requests.OfType<ReconcileAgentRealOperationRequest>());
+        Assert.Equal(2, connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>().Count());
+    }
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -323,12 +332,19 @@ public sealed class RealOperationUiFlowTests
         var closed = new AgentRealOperationResponse(plan, RealOperationState.Succeeded, [], null, false);
         var unfinished = new AgentRealOperationResponse(otherPlan, RealOperationState.OutcomeUnknown, [], null, true);
         var connection = new RecordingConnection(request => ApplicationResult<AgentResponse>.Succeeded(
-            request is QueryAgentRealOperationRequest ? closed : new AgentRecoverableRealOperationsResponse([unfinished]),
+            request switch
+            {
+                QueryAgentRealOperationRequest => closed,
+                ListAgentRecoverableRealOperationsRequest => new AgentRecoverableRealOperationsResponse([
+                    new(otherPlan.OperationId, 1, unfinished.State, unfinished.Steps, unfinished.Code, true)]),
+                LoadAgentRealOperationEvidenceRequest => new AgentRealOperationEvidenceResponse(unfinished, 0, null),
+                _ => throw new InvalidOperationException()
+            },
             request.CorrelationId));
         var observations = new List<AgentRealOperationResponse>();
         await RealOperationRecovery.RefreshAsync(connection, state, observations.Add, CancellationToken.None);
 
-        Assert.Equal([closed, unfinished], observations);
+        Assert.Equal([plan.OperationId, otherPlan.OperationId], observations.Select(status => status.Plan.OperationId));
         Assert.True(state.IsBlocked);
         // Once the first operation's scoped refresh completes, the other
         // listed identity remains available to retain the global barrier.
@@ -336,6 +352,23 @@ public sealed class RealOperationUiFlowTests
         Assert.True(state.Observe(observations[1]));
         Assert.True(state.IsBlocked);
         Assert.Equal(otherPlan.OperationId, state.OperationId);
+    }
+
+    [Fact]
+    public void DataLocationReplacementWaitsForOldAppAndReopensSettingsWithoutRealMode()
+    {
+        var executable = Path.Combine(Path.GetTempPath(), "WinPool", "WinPool.App.exe");
+        var start = DataLocationSwitchRuntime.CreateReplacementStartInfo(executable, 42);
+        var arguments = start.ArgumentList.ToArray();
+
+        Assert.Equal(executable, start.FileName);
+        Assert.Equal(Path.GetDirectoryName(executable), start.WorkingDirectory);
+        Assert.True(start.UseShellExecute);
+        Assert.True(ApplicationStartupOptions.RequestsProcessHandoff(arguments));
+        Assert.Equal(42, ApplicationStartupOptions.GetHandoffProcessId(arguments));
+        var options = ApplicationStartupOptions.Parse(arguments, PrivilegeState.Administrator);
+        Assert.Equal(ApplicationStartupTarget.Settings, options.Target);
+        Assert.False(options.EnterRealModeAfterElevation);
     }
 
     [Fact]
@@ -490,8 +523,8 @@ public sealed class RealOperationUiFlowTests
         var system = SystemId.New();
         var physical = new StorageObjectId(system, StorageObjectKind.PhysicalDisk,
             "selected-physical-id");
-        var proposal = RealOperationProposalFactory.CreateSingleMemberPool(
-            system, physical, "NewPool", null);
+        var proposal = RealOperationProposalFactory.CreatePoolWithMembers(
+            system, [physical], "NewPool");
 
         Assert.Equal(OperationIntent.CreateStoragePool, proposal.Intent);
         Assert.Equal(physical, Assert.Single(proposal.Targets));
@@ -500,43 +533,8 @@ public sealed class RealOperationUiFlowTests
         Assert.Empty(step.DependsOn);
         var command = Assert.IsType<CreatePoolCommand>(step.Command);
         Assert.Equal(physical, command.PhysicalDisk.Existing);
+        Assert.Equal([RealTargetReference.ForExisting(physical)], command.EffectiveMembers);
         Assert.Equal("NewPool", command.Name);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void AutomaticPoolVirtualDiskFreezesOptionsAndDependsOnCreatedPool(
-        bool autoCreatePartition)
-    {
-        var system = SystemId.New();
-        var physical = new StorageObjectId(system, StorageObjectKind.PhysicalDisk,
-            "selected-physical-id");
-        var options = new RealOperationProposalFactory.VirtualDiskOptions(
-            "ExactVD", 32L * 1024 * 1024 * 1024,
-            autoCreatePartition, autoCreatePartition, autoCreatePartition,
-            autoCreatePartition ? "ExactLabel" : null,
-            autoCreatePartition ? 'E' : null);
-        var proposal = RealOperationProposalFactory.CreateSingleMemberPool(
-            system, physical, "ExactPool", options);
-
-        Assert.Equal(autoCreatePartition ? 3 : 2, proposal.Steps.Count);
-        var pool = Assert.IsType<CreatePoolCommand>(proposal.Steps[0].Command);
-        Assert.Equal("ExactPool", pool.Name);
-        var create = Assert.IsType<CreateVirtualDiskCommand>(proposal.Steps[1].Command);
-        Assert.Equal("create-pool", create.Pool.CreatedByStep);
-        Assert.Equal(["create-pool"], proposal.Steps[1].DependsOn);
-        Assert.Equal("ExactVD", create.Name);
-        Assert.Equal(32L * 1024 * 1024 * 1024, create.SizeBytes);
-        Assert.Equal(65536, create.InterleaveBytes);
-        Assert.Equal(1, create.DataColumns);
-        if (!autoCreatePartition)
-            return;
-
-        Assert.Equal("create-vdisk",
-            Assert.IsType<InitializeGptCommand>(proposal.Steps[2].Command).Disk.CreatedByStep);
-        Assert.Equal(["create-vdisk"], proposal.Steps[2].DependsOn);
-        Assert.Contains("fresh read", proposal.ExpectedFinalState);
     }
 
     [Fact]
@@ -632,10 +630,11 @@ public sealed class RealOperationUiFlowTests
         var system = SystemId.New();
         var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "pool-id");
         var tier = new StorageObjectId(system, StorageObjectKind.StorageTier, "tier-id");
-        var createTier = RealOperationProposalFactory.CreateHddTierTemplate(
-            system, pool, "HDDTemplate");
+        var physical = new StorageObjectId(system, StorageObjectKind.PhysicalDisk, "member-id");
+        var createTier = RealOperationProposalFactory.CreateTierTemplate(
+            system, pool, [physical], "HDDTemplate", "HDD", StorageLayoutParameters.LegacyDefault);
         Assert.Equal(OperationIntent.CreateStorageTier, createTier.Intent);
-        Assert.Equal(pool, Assert.Single(createTier.Targets));
+        Assert.Equal([pool, physical], createTier.Targets);
         var createTierCommand = Assert.IsType<CreateTierCommand>(
             Assert.Single(createTier.Steps).Command);
         Assert.Equal(pool, createTierCommand.Pool.Existing);
@@ -644,23 +643,19 @@ public sealed class RealOperationUiFlowTests
         Assert.Equal(1, createTierCommand.DataColumns);
 
         var createVdisk = RealOperationProposalFactory.CreateTieredVirtualDisk(
-            system, pool, tier, "HDDData", 16L * 1024 * 1024 * 1024);
+            system, pool, [physical], [new(RealTargetReference.ForExisting(tier), null,
+                16L * 1024 * 1024 * 1024, false, StorageLayoutParameters.LegacyDefault, "HDD")], "HDDData");
         Assert.Equal(OperationIntent.CreateVirtualDisk, createVdisk.Intent);
-        Assert.Equal([pool, tier], createVdisk.Targets);
+        Assert.Equal([pool, physical, tier], createVdisk.Targets);
         var createVdiskCommand = Assert.IsType<CreateTieredVirtualDiskCommand>(
             Assert.Single(createVdisk.Steps).Command);
         Assert.Equal(pool, createVdiskCommand.Pool.Existing);
         Assert.Equal(tier, createVdiskCommand.Tier.Existing);
         Assert.Equal(16L * 1024 * 1024 * 1024, createVdiskCommand.SizeBytes);
 
-        var rename = RealOperationProposalFactory.RenameHddTier(system, tier, "Renamed");
-        Assert.Equal(OperationIntent.RenameStorageObject, rename.Intent);
-        Assert.Equal(tier, Assert.Single(rename.Targets));
-        Assert.Equal("Renamed", Assert.IsType<RenameTierCommand>(
-            Assert.Single(rename.Steps).Command).Name);
-        var delete = RealOperationProposalFactory.DeleteHddTierTemplate(system, tier);
+        var delete = RealOperationProposalFactory.DeleteHddTierTemplate(system, tier, pool, [physical]);
         Assert.Equal(OperationIntent.DeleteStorageTier, delete.Intent);
-        Assert.Equal(tier, Assert.Single(delete.Targets));
+        Assert.Equal([tier, pool, physical], delete.Targets);
         Assert.IsType<DeleteTierCommand>(Assert.Single(delete.Steps).Command);
     }
 
@@ -830,33 +825,6 @@ public sealed class RealOperationUiFlowTests
             exactCurrentBytes, mib, 200 * mib, false, out minimum, out maximum));
         Assert.Equal(1, minimum);
         Assert.Equal(100, maximum);
-    }
-
-    [Fact]
-    public void RebuildDeletionStageListsOnlyExactRemovalAndKeepsOnePhysicalMember()
-    {
-        var system = SystemId.New();
-        var physical = new StorageObjectId(system, StorageObjectKind.PhysicalDisk, "member-id");
-        var pool = new StorageObjectId(system, StorageObjectKind.StoragePool, "old-pool-id");
-        var disk = new StorageObjectId(system, StorageObjectKind.VirtualDisk, "old-vdisk-id");
-        var tier = new StorageObjectId(system, StorageObjectKind.StorageTier, "old-template-id");
-        var proposal = RealOperationProposalFactory.RebuildSingleMemberPool(
-            system, physical, pool, disk, "NewPool",
-            new RealOperationProposalFactory.VirtualDiskOptions(
-                "NewDisk", 16L * 1024 * 1024 * 1024,
-                true, true, true, "Data", 'E'), [tier]);
-
-        Assert.Equal(OperationIntent.RebuildStoragePool, proposal.Intent);
-        Assert.Equal([physical, pool, disk, tier], proposal.Targets);
-        Assert.Collection(proposal.Steps,
-            step => Assert.IsType<DeleteVirtualDiskCommand>(step.Command),
-            step => Assert.IsType<DeleteTierCommand>(step.Command),
-            step => Assert.IsType<DeletePoolCommand>(step.Command));
-        Assert.Equal(["delete-vdisk"], proposal.Steps[1].DependsOn);
-        Assert.Equal(["delete-tier-1"], proposal.Steps[2].DependsOn);
-        Assert.DoesNotContain(proposal.Steps, step => step.Command is
-            CreatePoolCommand or CreateVirtualDiskCommand or InitializeGptCommand or ClearDiskCommand);
-        Assert.Contains("separate frozen confirmations", proposal.ExpectedFinalState);
     }
 
     private static ApplicationResult<AgentResponse> AssertDisarmedAtExit(

@@ -2,12 +2,12 @@ using System.Globalization;
 using System.Numerics;
 using WinPool.Application;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
-internal readonly record struct RealVirtualDiskCreationCapacity(long SizeBytes, bool UseMaximumSize);
+public readonly record struct RealVirtualDiskCreationCapacity(long SizeBytes, bool UseMaximumSize);
 
 /// <summary>Preserves MAX intent for Agent-side freezing and search; explicit bytes are validated here.</summary>
-internal static class RealVirtualDiskCreationCapacityResolver
+public static class RealVirtualDiskCreationCapacityResolver
 {
     public static string FormatGigabytes(long? bytes, CultureInfo? culture = null)
     {

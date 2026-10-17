@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
@@ -106,53 +106,57 @@ public sealed partial class DiskActivityGraphControl : UserControl
 
         foreach (var series in _series)
         {
-            if (series.Points.Count < 2)
+            foreach (var segment in Segments(series.Points))
             {
-                continue;
+                if (segment.Count < 2)
+                {
+                    continue;
+                }
+
+                var brush = new SolidColorBrush(series.Color);
+                var fillBrush = new SolidColorBrush(Color.FromArgb(0x2E, series.Color.R, series.Color.G, series.Color.B));
+                var writePoints = BuildPoints(segment, windowStart, windowEnd, plotWidth, height, speedMax, x => x.WriteBytesPerSecond);
+                var readPoints = BuildPoints(segment, windowStart, windowEnd, plotWidth, height, speedMax, x => x.ReadBytesPerSecond);
+                var activityPoints = BuildPoints(segment, windowStart, windowEnd, plotWidth, height, 100.0, x => x.ActivityPercent);
+
+                var fill = new Polygon
+                {
+                    Fill = fillBrush,
+                    Points = ToPointCollection(writePoints)
+                };
+                fill.Points.Add(new Point(writePoints[^1].X, height));
+                fill.Points.Add(new Point(writePoints[0].X, height));
+                PlotCanvas.Children.Add(fill);
+
+                PlotCanvas.Children.Add(new Polyline
+                {
+                    Stroke = brush,
+                    StrokeThickness = 1.6,
+                    Points = ToPointCollection(writePoints)
+                });
+                PlotCanvas.Children.Add(new Polyline
+                {
+                    Stroke = brush,
+                    StrokeDashArray = new DoubleCollection { 4, 2.5 },
+                    StrokeThickness = 1.2,
+                    Points = ToPointCollection(readPoints)
+                });
+                PlotCanvas.Children.Add(new Polyline
+                {
+                    Stroke = brush,
+                    StrokeDashArray = new DoubleCollection { 0.4, 2.2 },
+                    StrokeDashCap = PenLineCap.Round,
+                    StrokeThickness = 1.2,
+                    Opacity = 0.85,
+                    Points = ToPointCollection(activityPoints)
+                });
+
+                if (!ReferenceEquals(segment[^1], series.Points[^1])) continue;
+                var last = segment[^1];
+                activityLabels.Add((CreateFlag(series.Color, $"{last.ActivityPercent:F0}%"), activityPoints[^1].Y));
+                readLabels.Add((CreateFlag(series.Color, $"R {FormatRate(last.ReadBytesPerSecond)}"), readPoints[^1].Y));
+                writeLabels.Add((CreateFlag(series.Color, $"W {FormatRate(last.WriteBytesPerSecond)}"), writePoints[^1].Y));
             }
-
-            var brush = new SolidColorBrush(series.Color);
-            var fillBrush = new SolidColorBrush(Color.FromArgb(0x2E, series.Color.R, series.Color.G, series.Color.B));
-            var writePoints = BuildPoints(series.Points, windowStart, windowEnd, plotWidth, height, speedMax, x => x.WriteBytesPerSecond);
-            var readPoints = BuildPoints(series.Points, windowStart, windowEnd, plotWidth, height, speedMax, x => x.ReadBytesPerSecond);
-            var activityPoints = BuildPoints(series.Points, windowStart, windowEnd, plotWidth, height, 100.0, x => x.ActivityPercent);
-
-            var fill = new Polygon
-            {
-                Fill = fillBrush,
-                Points = ToPointCollection(writePoints)
-            };
-            fill.Points.Add(new Point(writePoints[^1].X, height));
-            fill.Points.Add(new Point(writePoints[0].X, height));
-            PlotCanvas.Children.Add(fill);
-
-            PlotCanvas.Children.Add(new Polyline
-            {
-                Stroke = brush,
-                StrokeThickness = 1.6,
-                Points = ToPointCollection(writePoints)
-            });
-            PlotCanvas.Children.Add(new Polyline
-            {
-                Stroke = brush,
-                StrokeDashArray = new DoubleCollection { 4, 2.5 },
-                StrokeThickness = 1.2,
-                Points = ToPointCollection(readPoints)
-            });
-            PlotCanvas.Children.Add(new Polyline
-            {
-                Stroke = brush,
-                StrokeDashArray = new DoubleCollection { 0.4, 2.2 },
-                StrokeDashCap = PenLineCap.Round,
-                StrokeThickness = 1.2,
-                Opacity = 0.85,
-                Points = ToPointCollection(activityPoints)
-            });
-
-            var last = series.Points[^1];
-            activityLabels.Add((CreateFlag(series.Color, $"{last.ActivityPercent:F0}%"), activityPoints[^1].Y));
-            readLabels.Add((CreateFlag(series.Color, $"R {FormatRate(last.ReadBytesPerSecond)}"), readPoints[^1].Y));
-            writeLabels.Add((CreateFlag(series.Color, $"W {FormatRate(last.WriteBytesPerSecond)}"), writePoints[^1].Y));
         }
 
         foreach (var group in new[] { activityLabels, readLabels, writeLabels })
@@ -211,6 +215,18 @@ public sealed partial class DiskActivityGraphControl : UserControl
         return (0.2126 * Linearize(color.R))
              + (0.7152 * Linearize(color.G))
              + (0.0722 * Linearize(color.B));
+    }
+
+    private static IEnumerable<IReadOnlyList<MonitorSamplePoint>> Segments(IReadOnlyList<MonitorSamplePoint> points)
+    {
+        var start = 0;
+        for (var index = 1; index < points.Count; index++)
+        {
+            if (!points[index].GapBefore) continue;
+            yield return points.Skip(start).Take(index - start).ToArray();
+            start = index;
+        }
+        if (start < points.Count) yield return points.Skip(start).ToArray();
     }
 
     private static PointCollection ToPointCollection(List<Point> points)

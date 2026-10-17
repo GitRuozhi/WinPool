@@ -656,6 +656,7 @@ public sealed partial class MonitorPage : Page
                     MonitorEditTargetStatus.Editing => zh ? "编辑中" : "Editing",
                     MonitorEditTargetStatus.RemovedByEdit => zh ? "已删除" : "Removed by edit",
                     MonitorEditTargetStatus.NeedsSelection => zh ? "需重新选择" : "Needs selection",
+                    MonitorEditTargetStatus.Unsupported => zh ? "无独立计数器" : "No independent counter",
                     _ => zh ? "待核验" : "Pending verification"
                 };
         }

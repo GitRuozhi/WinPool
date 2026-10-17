@@ -87,6 +87,9 @@ public sealed record WindowsObservedUnchangedDeleteStepEvidence(
 /// </summary>
 public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMaximumCapacitySearchBackend
 {
+    private sealed record CallContext(OperationId OperationId, string StepId,
+        WindowsRealStorageTopology Before, WindowsStorageCommandTarget Target,
+        WindowsRealStorageSafetyEvidence? Safety) : RealStepCallContext(OperationId, StepId);
     private static readonly TimeSpan PostCallWindow = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan PostCallPoll = TimeSpan.FromSeconds(2);
     private readonly WindowsRealOperationPlanner planner;
@@ -180,9 +183,10 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         var request = new RealOperationIntentRequest(
             plan.Intent, plan.SystemId, plan.Targets,
             plan.RealOperation.Steps, plan.RealOperation.ExpectedFinalState);
+        WindowsRealStorageSafetyEvidence? safety = null;
         await planner.ValidateCurrentStepAsync(
             topology, closure, request, stored, cancellationToken,
-            verifiedStepOutputs).ConfigureAwait(false);
+            verifiedStepOutputs, onSafetyVerified: value => safety = value).ConfigureAwait(false);
 
         var target = WindowsRealStorageTargetBuilder.Build(
             topology, WindowsRealStorageTargetBuilder.GetReference(stored.Command),
@@ -237,7 +241,8 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             throw new InvalidDataException("The exact step target no longer belongs to the frozen physical member.");
         return new RealStepPreflight(
             JsonSerializer.Serialize(target), closure.Fingerprint,
-            closure.Fingerprint, closure.PhysicalMemberFingerprint);
+            closure.Fingerprint, closure.PhysicalMemberFingerprint)
+        { CallContext = new CallContext(plan.OperationId, step.Id, topology, target, safety) };
     }
 
     public async Task<RealStepResult> ExecuteStepAsync(
@@ -250,9 +255,10 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         if (IsMaximumCapacityMacro(stored.Command))
             return new RealStepResult(RealStepOutcome.FailedWithoutEffect, "real.maximum.journal_required",
                 JsonSerializer.Serialize(new WindowsNoEffectStepEvidence(true, "real.maximum.journal_required", plan.RealOperation!.PhysicalMemberFingerprint)));
-        var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(
-            preflight.TargetEvidenceJson)
-            ?? throw new InvalidDataException("The persisted exact target is unreadable.");
+        var context = preflight.CallContext as CallContext;
+        if (context is null || context.OperationId != plan.OperationId || context.StepId != stored.Id)
+            throw new InvalidDataException("The exact step requires its Agent-local validated call context.");
+        var target = context.Target;
         if (WindowsRealOperationPlanner.UsesExactMemberSet(plan))
             return await ExecuteExactMembersAsync(plan, stored, preflight, target, cancellationToken).ConfigureAwait(false);
         var physical = plan.Targets.Single(item => item.Kind == StorageObjectKind.PhysicalDisk);
@@ -260,7 +266,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         RealTargetClosure beforeClosure;
         try
         {
-            before = await CaptureOperationTopologyAsync(plan, step.Id, cancellationToken).ConfigureAwait(false);
+            before = context.Before;
             beforeClosure = before.RequireSinglePhysicalClosure([physical]);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -283,7 +289,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                     true, "real.pre_call_facts_changed",
                     beforeClosure.PhysicalMemberFingerprint)));
 
-        WindowsRealStorageSafetyEvidence? safetyEvidence;
+        WindowsRealStorageSafetyEvidence? safetyEvidence = context.Safety;
         try
         {
             if (stored.Command is FormatVolumeCommand createdFormat
@@ -291,8 +297,6 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                     || GuidEquals(target.PartitionTypeGuid, WindowsNativeMsrAttributesReader.EfiRole.ToString())))
             {
                 var createdPartition = RequireCreatedEfiFormatTarget(plan, stored, target, before);
-                safetyEvidence = await planner.ValidateCreatedPartitionFormatWithEvidenceAsync(
-                    before, beforeClosure, createdFormat, createdPartition, cancellationToken).ConfigureAwait(false);
                 if (safetyEvidence?.NativePartitionAttributes is not { } native
                     || native.PartitionStableId != createdPartition.ProviderKey
                     || native.InventoryVersion != before.InventoryVersion
@@ -308,9 +312,6 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                         | WindowsNativeMsrAttributes.ReadOnly | WindowsNativeMsrAttributes.ShadowCopy)) != 0)
                     throw new InvalidDataException("The newly created EFI format lacks current exact native safety evidence.");
             }
-            else
-                safetyEvidence = await planner.ValidatePartitionSafetyWithEvidenceAsync(
-                    before, beforeClosure, stored.Command, cancellationToken).ConfigureAwait(false);
             RequirePoolMemberRoleProof(before, beforeClosure, safetyEvidence);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -369,7 +370,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         {
             try
             {
-                var after = await CaptureOperationTopologyAsync(plan, step.Id, cancellationToken)
+                var after = await CaptureWithinWindowAsync(plan, step.Id, deadline, cancellationToken)
                     .ConfigureAwait(false);
                 var afterClosure = after.RequireSinglePhysicalClosure([physical]);
                 if (!StringComparer.Ordinal.Equals(afterClosure.PhysicalMemberFingerprint,
@@ -407,13 +408,14 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                         afterClosure.PoolMemberRoleEvidence, provider.TieredCreationInput);
                     return new RealStepResult(RealStepOutcome.Verified,
                         "real.step_verified", JsonSerializer.Serialize(evidence),
-                        evidence.CreatedObjectId);
+                        evidence.CreatedObjectId)
+                    { VerifiedPostState = PostState(after) };
                 }
             }
             catch (Exception exception) when (exception is InvalidDataException
                 or IOException or UnauthorizedAccessException or InvalidOperationException
                 or JsonException or NotSupportedException or ArgumentException
-                or System.Management.ManagementException or System.Runtime.InteropServices.COMException)
+                or System.Management.ManagementException or System.Runtime.InteropServices.COMException or TimeoutException)
             {
                 // A short-lived provider lag is possible. Failure to observe a
                 // complete post-state by the deadline becomes OutcomeUnknown.
@@ -1514,15 +1516,25 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(step);
-        if (!RealOperationValidator.IsValid(plan)
-            || !StringComparer.Ordinal.Equals(plan.PlanHash, OperationPlanHasher.Compute(plan)))
-            throw new InvalidDataException("The persisted real plan is invalid or changed.");
         var matches = plan.RealOperation!.Steps.Where(item => item.Id == step.Id).ToArray();
-        if (matches.Length != 1
-            || !StringComparer.Ordinal.Equals(
-                JsonSerializer.Serialize(matches[0]), JsonSerializer.Serialize(step)))
-            throw new InvalidDataException("The requested real step differs from the frozen plan.");
+        if (matches.Length != 1)
+            throw new InvalidDataException("The requested real step does not identify one frozen step.");
         return matches[0];
+    }
+
+    private static RealVerifiedPostState PostState(WindowsRealStorageTopology topology) =>
+        new(topology.Document, topology.Facts.ScopedCollection?.Scope, topology.Facts.InventoryCapturedAt);
+
+    private async Task<WindowsRealStorageTopology> CaptureWithinWindowAsync(OperationPlan plan,
+        string stepId, DateTimeOffset deadline, CancellationToken cancellationToken)
+    {
+        var remaining = deadline - timeProvider.GetUtcNow();
+        if (remaining <= TimeSpan.Zero) throw new TimeoutException("The read-only observation window expired.");
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        bounded.CancelAfter(remaining);
+        try { return await CaptureOperationTopologyAsync(plan, stepId, bounded.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { throw new TimeoutException("The read-only observation window expired."); }
     }
 
     private Task<WindowsRealStorageTopology> CaptureOperationTopologyAsync(
@@ -1533,11 +1545,11 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             var currentScope = scope with { StepId = stepId };
             return StorageOperationTiming.MeasureAsync("real.capture.scoped",
                 () => topologyReader.CaptureScopedAsync(currentScope, cancellationToken),
-                plan.OperationId, stepId, currentScope.Key, 1);
+                plan.OperationId, stepId, currentScope.Key);
         }
         return StorageOperationTiming.MeasureAsync("real.capture.full",
             () => topologyReader.CaptureAsync(cancellationToken), plan.OperationId, stepId,
-            topologyReader.SupportsScopedCapture ? "initial-safe-locator" : "source-scoped-unavailable", 1);
+            topologyReader.SupportsScopedCapture ? "initial-safe-locator" : "source-scoped-unavailable");
     }
 
     private static readonly string[] TieredLayoutFieldNames =

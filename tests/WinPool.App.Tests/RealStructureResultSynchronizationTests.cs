@@ -417,8 +417,8 @@ public sealed class RealStructureResultSynchronizationTests
         var draftPool = new StoragePoolInfo("draft:pool:pool-only", false, "Pool only", false, "Healthy", "OK", physical.Size, 0, null, [physical.StableId]);
         f.Session.Working = f.Session.Working with { StoragePools = [draftPool], PhysicalDisks = [physical with { PoolStableId = draftPool.StableId }] };
         f.Session.PoolIntents[draftPool.StableId] = new(false, false, "NTFS", 65536, "retained future label");
-        var proposal = RealOperationProposalFactory.CreateSingleMemberPool(baseline.SystemId,
-            new(baseline.SystemId, StorageObjectKind.PhysicalDisk, physical.StableId), draftPool.FriendlyName, null);
+        var proposal = RealOperationProposalFactory.CreatePoolWithMembers(baseline.SystemId,
+            [new(baseline.SystemId, StorageObjectKind.PhysicalDisk, physical.StableId)], draftPool.FriendlyName);
         var frozen = Freeze(proposal);
         Assert.True(f.Submission.TryReservePreparation());
         Assert.True(f.Submission.TrackPrepared(frozen));

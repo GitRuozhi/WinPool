@@ -83,6 +83,19 @@ public sealed class IpcProtocolTests
     }
 
     [Fact]
+    public async Task EscapedWireBudgetIsRejectedBeforeAnyFrameByteIsWritten()
+    {
+        var envelope = new IpcEnvelope(IpcProtocol.CurrentVersion, Guid.NewGuid(), Guid.NewGuid(),
+            "test", DateTimeOffset.UtcNow,
+            JsonSerializer.SerializeToElement(new { Text = new string('\u0001', IpcProtocol.MaximumFrameBytes / 5) }));
+        await using var stream = new MemoryStream();
+        var exception = await Assert.ThrowsAsync<IpcFrameTooLargeException>(
+            async () => await IpcFrameCodec.WriteAsync(stream, envelope));
+        Assert.True(exception.Length > IpcProtocol.MaximumFrameBytes);
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
     public void HandshakeBindsVersionNonceUserProcessAndTime()
     {
         var now = DateTimeOffset.UtcNow;

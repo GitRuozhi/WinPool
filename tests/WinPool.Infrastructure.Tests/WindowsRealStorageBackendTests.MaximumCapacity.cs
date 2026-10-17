@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
@@ -10,16 +10,51 @@ namespace WinPool.Infrastructure.Tests;
 public sealed partial class WindowsRealStorageBackendTests
 {
     [Theory]
+    [InlineData(false, "prepare", 0)]
+    [InlineData(true, "prepare", 0)]
+    [InlineData(false, "call-issued", 0)]
+    [InlineData(true, "call-issued", 0)]
+    [InlineData(false, "complete", 1)]
+    [InlineData(true, "complete", 1)]
+    [InlineData(false, "stop", 0)]
+    [InlineData(true, "stop", 0)]
+    public async Task MaximumSchedulersShareDurableCallBoundariesAndStopWithoutAnotherAttempt(bool multi, string boundary, int calls)
+    {
+        var setup = multi ? await MultiMaximumFixtureAsync(false) : await MaximumFixtureAsync(6);
+        setup.Journal.RejectBoundary = boundary;
+        setup.Journal.StopAfterPrepare = boundary == "stop";
+        var result = await setup.Fixture.Backend.ExecuteMaximumCapacitySearchAsync(setup.Plan, setup.Step,
+            setup.Preflight, setup.Journal, CancellationToken.None);
+        Assert.Equal(RealStepOutcome.OutcomeUnknown, result.Outcome);
+        Assert.Equal(calls, setup.Fixture.Adapter.CallCount);
+        if (boundary == "prepare") Assert.Empty(setup.Journal.Records);
+        else
+        {
+            var record = Assert.Single(setup.Journal.Records);
+            Assert.Equal(boundary switch
+            {
+                "complete" => MaximumCapacityAttemptState.CallIssued,
+                "stop" => MaximumCapacityAttemptState.FailedWithoutCall,
+                _ => MaximumCapacityAttemptState.PreparingCall
+            }, record.State);
+        }
+    }
+
+    [Theory]
     [InlineData(3, new long[] { 5, 4, 3 })]
     [InlineData(6, new long[] { 5, 6, 7 })]
     public async Task MaximumMacroSearchesExactWholeGibAndReadOnlyRecoveryNeverReplays(int supportedGib, long[] expectedGib)
     {
         var setup = await MaximumFixtureAsync(supportedGib);
+        var capturesBefore = setup.Fixture.Source.FullCalls;
         var result = await setup.Fixture.Backend.ExecuteMaximumCapacitySearchAsync(setup.Plan, setup.Step,
             setup.Preflight, setup.Journal, default);
         Assert.Equal(RealStepOutcome.Verified, result.Outcome);
         Assert.Equal(expectedGib, setup.Journal.Records.Select(item => item.Attempt.CandidateBytes / MaximumCapacityAlgorithm.GiB));
         Assert.Equal(expectedGib.Length, setup.Fixture.Adapter.CallCount);
+        var rejections = setup.Journal.Records.Count(item => item.State == MaximumCapacityAttemptState.CapacityRejectedUnchanged);
+        Assert.Equal(2 * expectedGib.Length + rejections - 1, setup.Fixture.Source.FullCalls - capturesBefore);
+        Assert.NotNull(result.VerifiedPostState);
         Assert.All(setup.Journal.Records, record => Assert.Contains(record.State,
             new[] { MaximumCapacityAttemptState.Verified, MaximumCapacityAttemptState.CapacityRejectedUnchanged }));
         var evidence = JsonSerializer.Deserialize<WindowsVerifiedStepEvidence>(result.ResultEvidenceJson)!;
@@ -221,12 +256,18 @@ public sealed partial class WindowsRealStorageBackendTests
             [pool, tier, physical], [step], "Whole GiB MAX"), OperationId.New(), environment, fixture.Session,
             closure.Fingerprint, closure.Fingerprint, closure.PhysicalMemberFingerprint, "Fixture provider proof",
             topology.Facts.InventoryCapturedAt, topology.Facts.InventoryCapturedAt.AddMinutes(5));
-        var target = WindowsRealStorageTargetBuilder.Build(topology, RealTargetReference.ForExisting(pool), new Dictionary<string, string>())
-            with { RelatedUniqueId = tier.ProviderKey, RelatedObjectId = tier.ProviderKey };
-        var preflight = new RealStepPreflight(JsonSerializer.Serialize(target), topology.InventoryVersion, closure.Fingerprint, closure.PhysicalMemberFingerprint);
+        var preflight = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation!.Steps[0],
+            new Dictionary<string, string>(), CancellationToken.None);
+        var target = WindowsRealStorageTargetBuilder.Build(topology, RealTargetReference.ForExisting(pool),
+            new Dictionary<string, string>()) with
+        {
+            RelatedUniqueId = tier.ProviderKey,
+            RelatedObjectId = tier.ProviderKey
+        };
         var journal = new MaximumMemoryJournal(topology.Facts.InventoryCapturedAt);
         fixture.Adapter.OnExecute = () =>
         {
+            Assert.Equal(MaximumCapacityAttemptState.CallIssued, journal.Records[^1].State);
             var candidate = journal.Records[^1].Attempt.CandidateBytes;
             if (candidate <= supportedGib * MaximumCapacityAlgorithm.GiB)
             {
@@ -251,20 +292,26 @@ public sealed partial class WindowsRealStorageBackendTests
     private sealed class MaximumMemoryJournal(DateTimeOffset timestamp) : IMaximumCapacityAttemptJournal
     {
         public List<MaximumCapacityAttemptRecord> Records { get; } = [];
-        public bool IsStopRequested => false;
+        public string? RejectBoundary { get; set; }
+        public bool StopAfterPrepare { get; set; }
+        public bool IsStopRequested { get; private set; }
         public Task<IReadOnlyList<MaximumCapacityAttemptRecord>> ReadAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<MaximumCapacityAttemptRecord>>(Records.ToArray());
         public Task<bool> PrepareAsync(MaximumCapacityAttempt attempt, CancellationToken ct)
         {
+            if (RejectBoundary == "prepare") return Task.FromResult(false);
             Records.Add(new(attempt, MaximumCapacityAttemptState.PreparingCall, null, timestamp));
+            IsStopRequested = StopAfterPrepare;
             return Task.FromResult(true);
         }
         public Task<bool> MarkCallIssuedAsync(int ordinal, CancellationToken ct)
         {
+            if (RejectBoundary == "call-issued") return Task.FromResult(false);
             Records[ordinal - 1] = Records[ordinal - 1] with { State = MaximumCapacityAttemptState.CallIssued };
             return Task.FromResult(true);
         }
         public Task<bool> CompleteAsync(int ordinal, MaximumCapacityAttemptResult result, CancellationToken ct)
         {
+            if (RejectBoundary == "complete") return Task.FromResult(false);
             Records[ordinal - 1] = Records[ordinal - 1] with { State = result.State, Result = result };
             return Task.FromResult(true);
         }

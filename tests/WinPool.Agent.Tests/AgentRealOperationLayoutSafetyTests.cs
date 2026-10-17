@@ -84,7 +84,7 @@ public sealed class AgentRealOperationLayoutSafetyTests
 
         var queried = await fixture.Service.QueryAsync(new QueryAgentRealOperationRequest(
             response.Plan.OperationId, CorrelationId.New()), fixture.Session, CancellationToken.None);
-        Assert.Equal(RealOperationState.Prepared, Assert.IsType<AgentRealOperationResponse>(queried.Value).State);
+        Assert.Equal(RealOperationState.Prepared, Assert.IsType<AgentRealOperationStatusResponse>(queried.Value).State);
         Assert.Equal(PersistedOperationState.Prepared,
             (await fixture.Plans.GetAsync(response.Plan.OperationId))!.State);
         Assert.All(await fixture.Plans.GetStepsAsync(response.Plan.OperationId),
@@ -98,7 +98,7 @@ public sealed class AgentRealOperationLayoutSafetyTests
                 response.Plan.PlanHash, fixture.Session.ProductSessionId, CorrelationId.New()),
             fixture.Session, CancellationToken.None);
         Assert.Equal(RealOperationState.Cancelled,
-            Assert.IsType<AgentRealOperationResponse>(cancelled.Value).State);
+            Assert.IsType<AgentRealOperationStatusResponse>(cancelled.Value).State);
         Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
         Assert.Equal(0, fixture.Queries.CallCount);
         AssertNoDispatch(fixture.Adapter);

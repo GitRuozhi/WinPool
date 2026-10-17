@@ -34,7 +34,7 @@ public sealed class ReadOnlyWorkspaceStartupReaderTests
 
         Assert.NotNull(preview);
         Assert.Equal(state.ActiveDocumentId, preview.State.ActiveDocumentId);
-        Assert.Equal(state.ActivePage, preview.State.ActivePage);
+
         Assert.Equal(state.ActiveCategory, preview.State.ActiveCategory);
         Assert.Equal(state.UpdatedAtUtc, preview.State.UpdatedAtUtc);
         Assert.Empty(preview.State.RememberedProviderKeys);
@@ -142,7 +142,7 @@ public sealed class ReadOnlyWorkspaceStartupReaderTests
 
     [Theory]
     [InlineData(16)]
-    [InlineData(20)]
+    [InlineData(21)]
     public async Task UnsupportedSchemasAreRejectedWithoutMutation(int schemaVersion)
     {
         await using var database = await TemporaryDatabase.CreateAsync();
@@ -179,7 +179,6 @@ public sealed class ReadOnlyWorkspaceStartupReaderTests
     private static WorkspaceSessionState State(string documentId) =>
         new(
             WorkspaceSessionState.CurrentSchemaVersion,
-            WorkspacePage.Manage,
             documentId,
             ManageWorkspaceCategory.System,
             new Dictionary<ManageWorkspaceCategory, string>(),

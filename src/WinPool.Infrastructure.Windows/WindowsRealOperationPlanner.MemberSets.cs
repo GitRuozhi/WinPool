@@ -97,16 +97,20 @@ public sealed partial class WindowsRealOperationPlanner
 
     internal async Task<string> ValidateExactMemberStepAsync(WindowsRealStorageTopology topology, RealExactPhysicalMemberSetClosure closure,
         RealOperationIntentRequest proposal, RealOperationStep step, CancellationToken ct,
-        IReadOnlyDictionary<string, string>? outputs = null)
+        IReadOnlyDictionary<string, string>? outputs = null,
+        Action<WindowsRealStorageSafetyEvidence?>? onSafetyVerified = null)
     {
         outputs ??= new Dictionary<string, string>();
         var safety = await safetyInspector.InspectAsync(topology, closure, step.Command, ct).ConfigureAwait(false);
+        onSafetyVerified?.Invoke(safety);
         if (safety?.PhysicalMemberRoleEvidence is not { } roles || roles.Count != closure.Members.Count)
             throw new InvalidDataException("Every physical member requires current Windows safety evidence.");
         foreach (var member in closure.Members)
         {
             var role = roles.SingleOrDefault(item => item.PhysicalStableId == member.PhysicalDiskId);
             if (role is null || role.InventoryVersion != topology.InventoryVersion || role.PoolStableId != member.PoolMemberRoleEvidence.PoolStableId
+                || role.VerificationMethod != "CompleteCurrentPoolAndOsDiskAssociations"
+                || !role.AssociatedOsDiskIds.SequenceEqual(member.PoolMemberRoleEvidence.AssociatedOsDiskIds, StringComparer.Ordinal)
                 || role.IsBoot || role.IsSystem || role.IsPageFile || role.IsCrashDump)
                 throw new InvalidDataException("Per-member safety evidence differs from the current exact closure.");
         }
@@ -197,7 +201,8 @@ public sealed partial class WindowsRealOperationPlanner
                 RequireConcretePool(pool);
                 return evidence;
             default:
-                return await ValidateCurrentStepAsync(topology, closure.AsComponentClosure(), proposal, step, ct, outputs, exactMemberSet: closure).ConfigureAwait(false);
+                return await ValidateCurrentStepAsync(topology, closure.AsComponentClosure(), proposal, step, ct, outputs,
+                    exactMemberSet: closure, verifiedSafety: safety).ConfigureAwait(false);
         }
     }
 

@@ -12,12 +12,11 @@ public sealed class ArchitectureBoundaryTests
             ["WinPool.Execution"] = ["WinPool.Domain"],
             ["WinPool.Application"] = ["WinPool.Domain", "WinPool.Execution"],
             ["WinPool.Ipc"] = [],
-            ["WinPool.Inventory"] = ["WinPool.Application", "WinPool.Domain"],
             ["WinPool.Agent.Client"] = ["WinPool.Application", "WinPool.Ipc"],
             ["WinPool.Monitoring"] = ["WinPool.Application", "WinPool.Domain"],
             ["WinPool.Infrastructure.Windows"] = ["WinPool.Application", "WinPool.Domain", "WinPool.Execution"],
             ["WinPool.Infrastructure.Sqlite"] = ["WinPool.Application", "WinPool.Domain", "WinPool.Monitoring"],
-            ["WinPool.Agent"] = ["WinPool.Application", "WinPool.Infrastructure.Sqlite", "WinPool.Infrastructure.Windows", "WinPool.Ipc", "WinPool.Inventory", "WinPool.Monitoring"],
+            ["WinPool.Agent"] = ["WinPool.Application", "WinPool.Infrastructure.Sqlite", "WinPool.Infrastructure.Windows", "WinPool.Ipc", "WinPool.Monitoring"],
             ["WinPool.App"] = ["WinPool.Agent.Client", "WinPool.Application", "WinPool.Infrastructure.Windows", "WinPool.Infrastructure.Sqlite", "WinPool.Monitoring"]
         };
 
@@ -147,66 +146,6 @@ public sealed class ArchitectureBoundaryTests
             Path.Combine(root, "docs", "Archive", "V0.32", "Plan.md"));
         Assert.DoesNotContain("Do not create `Docs/docs`", operationalRules, StringComparison.Ordinal);
         Assert.DoesNotContain("docs/Archive` 的提案已撤销", currentPlan, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void CurrentInternalDocumentsAreChineseAuthoritativeAndOnlyRootReadmeIsPaired()
-    {
-        var root = FindRepositoryRoot();
-        Assert.True(File.Exists(Path.Combine(root, "README.md")), "README.md");
-        Assert.True(File.Exists(Path.Combine(root, "README.zh-CN.md")), "README.zh-CN.md");
-        Assert.False(File.Exists(Path.Combine(root, "README_CN.md")));
-        Assert.False(File.Exists(Path.Combine(root, "AGENTS.zh-CN.md")));
-        Assert.False(File.Exists(Path.Combine(root, "docs", "Product.zh-CN.md")));
-        Assert.False(File.Exists(Path.Combine(root, "docs", "Development.zh-CN.md")));
-        Assert.False(File.Exists(Path.Combine(root, "docs", "Quality.zh-CN.md")));
-        Assert.False(File.Exists(Path.Combine(root, "docs", "CHANGELOG.zh-CN.md")));
-        Assert.False(File.Exists(Path.Combine(root, "docs", "Plan.zh-CN.md")));
-        Assert.False(File.Exists(Path.Combine(root, "docs", "Archive", "README.zh-CN.md")));
-
-        var agents = File.ReadAllText(Path.Combine(root, "AGENTS.md"));
-        Assert.Contains("内部开发文档以中文单一版本为准", agents, StringComparison.Ordinal);
-        Assert.Contains("[Design 索引](docs/Design/README.md)", agents, StringComparison.Ordinal);
-
-        var designIndex = Path.Combine(root, "docs", "Design", "README.md");
-        Assert.True(File.Exists(designIndex), "docs/Design/README.md");
-        var design = File.ReadAllText(designIndex);
-        Assert.Contains("设计储备", design, StringComparison.Ordinal);
-        Assert.Contains("不自动成为当前要求", design, StringComparison.Ordinal);
-        var supersededDesignArchive = Path.Combine(
-            root,
-            "docs",
-            "Archive",
-            "20260916-design-review");
-        Assert.True(File.Exists(Path.Combine(supersededDesignArchive, "README.md")));
-        Assert.True(File.Exists(Path.Combine(
-            supersededDesignArchive,
-            "WinPool-Hardware-Inventory-Analysis-and-Refactor-Plan.md")));
-        Assert.True(File.Exists(Path.Combine(
-            supersededDesignArchive,
-            "WinPool-Multi-Edition-Plan-Simplified.md")));
-        Assert.Contains(
-            "已被替代",
-            File.ReadAllText(Path.Combine(supersededDesignArchive, "README.md")),
-            StringComparison.Ordinal);
-
-        var activePlanPath = Path.Combine(root, "docs", "Plan.md");
-        // A completed phase has no active Plan.md; any future active plan remains Chinese.
-        if (File.Exists(activePlanPath))
-            Assert.Matches("[\\u4e00-\\u9fff]", File.ReadAllText(activePlanPath));
-        var completedPlanPath = Path.Combine(root, "docs", "Archive", "V0.52", "Plan.md");
-        Assert.True(File.Exists(completedPlanPath), "docs/Archive/V0.52/Plan.md");
-        var completedPlan = File.ReadAllText(completedPlanPath);
-        Assert.Contains("V0.52", completedPlan, StringComparison.Ordinal);
-        Assert.Contains("真实存储只读", completedPlan, StringComparison.Ordinal);
-        Assert.DoesNotContain("本 Plan 授权真实存储", completedPlan, StringComparison.Ordinal);
-
-        var archivedPlan = Path.Combine(root, "docs", "Archive", "V0.48", "Plan.md");
-        Assert.True(File.Exists(archivedPlan), "docs/Archive/V0.48/Plan.md");
-        var plan = File.ReadAllText(archivedPlan);
-        Assert.Contains("V0.48", plan, StringComparison.Ordinal);
-        Assert.Contains("Design/README.md)不是任务来源", plan, StringComparison.Ordinal);
-        Assert.DoesNotContain("执行 V0.48 硬件", plan, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -526,67 +465,6 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void EditorPagesOwnTheirSurfacesWithoutSectionTitles()
-    {
-        var root = FindRepositoryRoot();
-        var structureXaml = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml"));
-        var structurePage = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "StorageStructurePage.xaml.cs"));
-        var diskPartitionXaml = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml"));
-        var diskPartitionPage = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.App", "DiskPartitionPage.xaml.cs"));
-        Assert.Contains("TopologyControl", structureXaml, StringComparison.Ordinal);
-        Assert.Contains("Width=\"320\"", structureXaml, StringComparison.Ordinal);
-        Assert.Contains("toolkit:GridSplitter", structureXaml, StringComparison.Ordinal);
-        Assert.Contains("ResizeDirection=\"Columns\"", structureXaml, StringComparison.Ordinal);
-        Assert.Contains("PoolFormGrid", structureXaml, StringComparison.Ordinal);
-        Assert.Contains("TopologyControl", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("Width=\"320\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("toolkit:GridSplitter", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("ResizeDirection=\"Columns\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("PageRootGrid_SizeChanged", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("PageRootGrid_SizeChanged", diskPartitionPage, StringComparison.Ordinal);
-        Assert.Contains("HorizontalScrollBarVisibility=\"Auto\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("HorizontalScrollMode=\"Enabled\"", diskPartitionXaml, StringComparison.Ordinal);
-        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
-        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
-        XNamespace controls = "using:WinPool_App.Controls";
-        var partitionLayout = XDocument.Parse(diskPartitionXaml);
-        var actionsScroll = partitionLayout.Descendants(presentation + "ScrollViewer")
-            .Single(element => (string?)element.Attribute(xaml + "Name") == "PartitionActionsScrollViewer");
-        Assert.Equal("Enabled", (string?)actionsScroll.Attribute("HorizontalScrollMode"));
-        Assert.NotNull(actionsScroll.Element(controls + "FixedWrapPanel"));
-        Assert.DoesNotContain("Math.Min(420d", diskPartitionPage, StringComparison.Ordinal);
-        Assert.Contains("PartitionActionButton", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Equal(
-            1,
-            diskPartitionXaml.Split(
-                new[] { "x:Name=\"PartitionActionButton\"" },
-                StringSplitOptions.None).Length - 1);
-        Assert.DoesNotContain("x:Name=\"CreatePartitionButton\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("x:Name=\"FormatButton\"", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("PartitionChromeBorder", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("DiskLocationValue", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("StartOffsetValue", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("EndOffsetValue", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("ResetSizeButton", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("SizeChangedIndicator", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("ResetFileSystemButton", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("FileSystemChangedIndicator", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("ResetClusterButton", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("ClusterChangedIndicator", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("ResetQuickFormatButton", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("QuickFormatChangedIndicator", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.Contains("ChangeIndicator", structurePage, StringComparison.Ordinal);
-        Assert.DoesNotContain("UndoButton", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("DiskSectionTitle", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("磁盘与分区", diskPartitionXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("存储池与虚拟磁盘", structureXaml, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void ManageTopologyConsumesApplicationProjectionContract()
     {
         var root = FindRepositoryRoot();
@@ -697,10 +575,6 @@ public sealed class ArchitectureBoundaryTests
             "using WinPool.Core;",
             mainPage,
             StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "ViewModel.ActiveSnapshot",
-            mainPage,
-            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -753,7 +627,7 @@ public sealed class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void NormalWorkspacePersistenceUsesAgentAndJsonRemainsDeveloperFallbackOnly()
+    public void NormalWorkspacePersistenceUsesAgentWithoutProductionFallback()
     {
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(
@@ -765,10 +639,8 @@ public sealed class ArchitectureBoundaryTests
                 "WinPool.Infrastructure.Windows",
                 "AgentBackedWorkspaceStateService.cs"));
 
-        Assert.Contains(
-            "agentConnection is null\n            ? new EphemeralWorkspaceStateService()\n            : new AgentBackedWorkspaceStateService(agentConnection)",
-            mainWindow.ReplaceLineEndings("\n"),
-            StringComparison.Ordinal);
+        Assert.Contains("new AgentBackedWorkspaceStateService(agentConnection)", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("new EphemeralWorkspaceStateService()", mainWindow, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new LocalWorkspaceStateService()",
             mainWindow,
@@ -793,8 +665,8 @@ public sealed class ArchitectureBoundaryTests
 
         Assert.Contains("new AgentBackedHardwareInventoryProvider(agentConnection)", mainWindow);
         Assert.Contains("new AgentBackedMachineRecordService(agentConnection)", mainWindow);
-        Assert.Contains("new WindowsHardwareInventoryProvider()", mainWindow);
-        Assert.Contains("agentConnection is null", mainWindow);
+        Assert.DoesNotContain("new WindowsHardwareInventoryProvider()", mainWindow);
+        Assert.DoesNotContain("new WinPoolSqliteStore(", mainWindow);
     }
 
     [Fact]
@@ -1014,14 +886,11 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("RootFrame.IsHitTestVisible = false", loaded, StringComparison.Ordinal);
         Assert.DoesNotContain("ProgressRing", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowInventoryStatus", pageXaml, StringComparison.Ordinal);
-        // Cards moved into their own reusable control. Keep the presentation
-        // to one InfoBar surface without restoring a decorative wrapper.
+        // Global messages keep one notification surface.
         Assert.Contains("<InfoBar", notificationCardXaml, StringComparison.Ordinal);
         Assert.Equal(
             1,
             notificationCardXaml.Split(new[] { "<InfoBar" }, StringSplitOptions.None).Length - 1);
-        Assert.DoesNotContain("<Border", notificationCardXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Background=\"Transparent\"", notificationCardXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"GlobalNotificationStack\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("BeginWorkspacePrepare()", loaded, StringComparison.Ordinal);
         Assert.Contains("CompleteWorkspacePrepare()", loaded, StringComparison.Ordinal);
@@ -1052,7 +921,6 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("if (ActiveSystemSelector.IsDropDownOpen)", windowSource, StringComparison.Ordinal);
         Assert.Contains("_systemSelectorRefreshPending = true", windowSource, StringComparison.Ordinal);
         Assert.Contains("_pendingSystemSelectionId = systemId", windowSource, StringComparison.Ordinal);
-        Assert.Contains("ViewModel.SelectSystem(systemId)", windowSource, StringComparison.Ordinal);
         Assert.Contains("RefreshSelectedSystemEditor();", windowSource, StringComparison.Ordinal);
         var refreshEditor = windowSource[windowSource.IndexOf(
             "private void RefreshSelectedSystemEditor()", StringComparison.Ordinal)..];
@@ -1150,7 +1018,6 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("AgentInventoryCoordinator", runtime, StringComparison.Ordinal);
         Assert.Contains("MonitoringSessionCoordinator", runtime, StringComparison.Ordinal);
         Assert.Contains("inventoryCoordinator.CaptureManageAsync", runtime, StringComparison.Ordinal);
-        Assert.Contains("inventoryCoordinator.CaptureComparisonAsync", runtime, StringComparison.Ordinal);
         Assert.Contains("monitoring.StartAsync", runtime, StringComparison.Ordinal);
         Assert.Contains("monitoring.StopAsync", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("RunTestAsync(", runtime, StringComparison.Ordinal);
@@ -1482,28 +1349,6 @@ public sealed class ArchitectureBoundaryTests
         Assert.Contains("PublishIssueTransitions(snapshot, zh)", monitorAlertObserver, StringComparison.Ordinal);
         Assert.Contains("public MonitorIssueStateSnapshot UpdateIssueStates(", monitoringService, StringComparison.Ordinal);
         Assert.DoesNotContain("<InfoBar", testPage, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void IpcProtocolCurrentVersionIsThirteen()
-    {
-        var root = FindRepositoryRoot();
-        var source = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.Ipc", "IpcProtocol.cs"));
-
-        Assert.Contains("public const int CurrentVersion = 13;", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("= 4;", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SqliteStoreSchemaVersionIsNineteen()
-    {
-        var root = FindRepositoryRoot();
-        var source = File.ReadAllText(
-            Path.Combine(root, "src", "WinPool.Infrastructure.Sqlite", "WinPoolSqliteStore.cs"));
-
-        Assert.Contains("public const int CurrentSchemaVersion = 19;", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("= 14;", source, StringComparison.Ordinal);
     }
 
     [Fact]

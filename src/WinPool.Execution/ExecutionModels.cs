@@ -177,6 +177,9 @@ public sealed record ExecutionContext(
     // Diagnostic only. Real policy compares CurrentInventoryVersion as a closure
     // fingerprint of relevant target facts, not a timestamped raw snapshot hash.
     public string? RawInventorySnapshotVersion { get; init; }
+    // Confirmation verifies the frozen plan/session only. Fresh target facts
+    // are verified by the backend immediately before its durable CallIssued.
+    public bool FrozenRealConfirmation { get; init; }
 }
 
 public enum ExecutionEventKind

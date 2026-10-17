@@ -24,6 +24,7 @@ internal sealed class DesktopAgentRuntime :
     private readonly WorkspaceSessionStateRepository workspaceState;
     private readonly SimulationDocumentRepository simulationDocuments;
     private readonly AgentInventoryCoordinator inventoryCoordinator;
+    internal AgentInventoryCoordinator InventoryCoordinator => inventoryCoordinator;
     private readonly IStorageHealthEventSource storageHealthEventSource;
     private readonly StorageHealthEventRepository storageHealthEventRepository;
     private readonly AgentEventHub agentEvents;
@@ -40,6 +41,9 @@ internal sealed class DesktopAgentRuntime :
     private readonly Task storageHealthEventTask;
     private readonly CancellationTokenSource inventoryCancellation = new();
     private Task startupInventoryTask = Task.CompletedTask;
+    private readonly CancellationTokenSource monitorEventCancellation = new();
+    private Task monitorSamplesTask = Task.CompletedTask;
+    private readonly Task monitorStateTask;
 
     public DesktopAgentRuntime(
         TrayApplicationContext tray,
@@ -49,14 +53,10 @@ internal sealed class DesktopAgentRuntime :
         AgentProcessRegistry processRegistry,
         WorkspaceSessionStateRepository workspaceState,
         SimulationDocumentRepository simulationDocuments,
-        IInventoryProvider nativeInventoryProvider,
-        IInventoryProvider legacyInventoryProvider,
         IHardwareInventoryProvider manageInventoryProvider,
-        IInventoryComparer inventoryComparer,
         InventorySnapshotRepository inventorySnapshots,
-        InventoryComparisonRepository inventoryComparisons,
         LocalInventoryDocumentRepository localInventoryDocument,
-        LocalSystemIdentityResolver localSystemIdentity,
+        AgentLocalSystemIdentity localSystemIdentity,
         IProcessIncarnationVerifier processIncarnationVerifier,
         string mainApplicationExecutablePath,
         IStorageHealthEventSource storageHealthEventSource,
@@ -92,12 +92,8 @@ internal sealed class DesktopAgentRuntime :
 
         this.mainApplicationExecutablePath = Path.GetFullPath(mainApplicationExecutablePath);
         inventoryCoordinator = new(
-            nativeInventoryProvider,
-            legacyInventoryProvider,
             manageInventoryProvider,
-            inventoryComparer,
             inventorySnapshots,
-            inventoryComparisons,
             localInventoryDocument,
             localSystemIdentity,
             physicalDiskDeviceResolver ?? new WindowsPhysicalDiskDeviceResolver(),
@@ -119,6 +115,7 @@ internal sealed class DesktopAgentRuntime :
         }
 
         storageHealthEventTask = Task.Run(CaptureStorageHealthEventsAsync);
+        monitorStateTask = Task.Run(PublishMonitorStateLoopAsync);
     }
 
     public async Task<ApplicationResult<AgentResponse>> GetSnapshotAsync(
@@ -143,15 +140,6 @@ internal sealed class DesktopAgentRuntime :
                     ?? monitorDiagnostics.SamplingFailure
             });
         return await SuccessAsync(new AgentSnapshotResponse(snapshot), request.CorrelationId);
-    }
-
-    public Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
-        OpenMainWindowRequest request,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        tray.OpenMainApplication(request.Destination?.ToString());
-        return SuccessAsync(new AgentAcknowledgement(), request.CorrelationId);
     }
 
     public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
@@ -356,58 +344,65 @@ internal sealed class DesktopAgentRuntime :
     {
         var receipt = await simulationDocuments.FindByCommitIdAsync(request.CommitId, cancellationToken);
         if (receipt is not null
-            && (receipt.Document.DocumentId != request.DocumentId
-                || receipt.BeforeSha256 != request.ExpectedBeforeSha256
-                || receipt.Document.Sha256 != request.ExpectedAfterSha256
-                || receipt.Document.Revision != request.ExpectedRevision
-                || receipt.OperationId != request.OperationId
-                || receipt.PlanHash != request.PlanHash))
-        {
+            && (receipt.DocumentId != request.DocumentId || receipt.IntentHash != request.IntentHash))
             return Reject(request.CorrelationId, "agent.persistence.simulation_commit_binding_mismatch");
-        }
         return ApplicationResult<AgentResponse>.Succeeded(
-            new SimulationCommitLookupResponse(receipt is not null, receipt),
-            request.CorrelationId);
+            new SimulationCommitLookupResponse(receipt is not null, receipt), request.CorrelationId);
     }
 
     public async Task<ApplicationResult<AgentResponse>> CommitSimulationEditAsync(
-        CommitAgentSimulationEditRequest request,
-        CancellationToken cancellationToken)
+        CommitAgentSimulationEditRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            var document = await simulationDocuments.CommitEditAsync(
-                request.Document,
-                request.ExpectedPreviousSha256,
-                request.Plan,
-                request.Events,
-                request.CommitId,
-                cancellationToken);
-            return ApplicationResult<AgentResponse>.Succeeded(
-                new SimulationDocumentSavedResponse(document),
-                request.CorrelationId);
+            var intent = request.Intent;
+            ArgumentNullException.ThrowIfNull(intent);
+            if (string.IsNullOrWhiteSpace(intent.CommitId) || intent.CommitId.Length > 128
+                || intent.ExpectedRevision < 1 || intent.Edits is null || intent.Edits.Count == 0
+                || intent.Edits.Any(edit => edit is null || !Enum.IsDefined(edit.Kind)
+                    || string.IsNullOrWhiteSpace(edit.TargetProviderKey) || edit.FrozenAtUtc is null
+                    || string.IsNullOrWhiteSpace(edit.AllocatedPoolId)
+                    || string.IsNullOrWhiteSpace(edit.AllocatedVirtualDiskId)
+                    || string.IsNullOrWhiteSpace(edit.AllocatedOsDiskId)
+                    || string.IsNullOrWhiteSpace(edit.AllocatedPartitionId)
+                    || string.IsNullOrWhiteSpace(edit.AllocatedVolumeId)
+                    || string.IsNullOrWhiteSpace(edit.AllocatedJobId)
+                    || string.IsNullOrWhiteSpace(edit.AllocatedMsrId)))
+                return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
+            var existing = await simulationDocuments.FindByCommitIdAsync(intent.CommitId, cancellationToken);
+            if (existing is not null)
+            {
+                if (existing.DocumentId != intent.DocumentId || existing.IntentHash != intent.IntentHash)
+                    return Reject(request.CorrelationId, "agent.persistence.simulation_commit_conflict");
+                return ApplicationResult<AgentResponse>.Succeeded(new SimulationEditCommittedResponse(existing), request.CorrelationId);
+            }
+            var payload = await simulationDocuments.LoadAsync(intent.DocumentId, cancellationToken);
+            if (payload is null || payload.Revision != intent.ExpectedRevision)
+                return Reject(request.CorrelationId, "agent.persistence.simulation_commit_conflict");
+            var document = SimulationDocumentCodec.Decode(payload);
+            var reduced = new SimulationOperationService().ReducePlan(document,
+                new SimulationDraftPlan(intent.CommitId, intent.Edits));
+            if (!reduced.Succeeded)
+                return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
+            var candidate = reduced.Document with { Revision = checked(document.Revision + 1) };
+            var receipt = await simulationDocuments.CommitEditAsync(
+                SimulationDocumentCodec.Encode(candidate), payload.Sha256, intent, cancellationToken);
+            return ApplicationResult<AgentResponse>.Succeeded(new SimulationEditCommittedResponse(receipt), request.CorrelationId);
         }
         catch (SimulationDocumentConflictException)
-        {
-            return Reject(request.CorrelationId, "agent.persistence.simulation_commit_conflict");
-        }
+        { return Reject(request.CorrelationId, "agent.persistence.simulation_commit_conflict"); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.Cancelled, request.CorrelationId,
-                Message("agent.persistence.simulation_commit_cancelled"));
+            return ApplicationResult<AgentResponse>.FromStatus(ApplicationStatus.Cancelled,
+                request.CorrelationId, Message("agent.persistence.simulation_commit_cancelled"));
         }
         catch (Microsoft.Data.Sqlite.SqliteException)
         {
-            return ApplicationResult<AgentResponse>.FromStatus(
-                ApplicationStatus.Failed, request.CorrelationId,
-                Message("agent.persistence.simulation_commit_failed"));
+            return ApplicationResult<AgentResponse>.FromStatus(ApplicationStatus.Failed,
+                request.CorrelationId, Message("agent.persistence.simulation_commit_failed"));
         }
-        catch (Exception exception) when (exception is
-            ArgumentException or JsonException or InvalidDataException)
-        {
-            return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
-        }
+        catch (Exception exception) when (exception is ArgumentException or JsonException or InvalidDataException or OverflowException)
+        { return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected"); }
     }
 
     public Task<ApplicationResult<AgentResponse>> CaptureManageInventoryAsync(
@@ -419,15 +414,10 @@ internal sealed class DesktopAgentRuntime :
         CaptureAgentManageScopedInventoryRequest request, CancellationToken cancellationToken) =>
         inventoryCoordinator.CaptureManageScopedAsync(request.Scope, request.CorrelationId, cancellationToken);
 
-    public Task<ApplicationResult<AgentResponse>> LoadManageInventoryAsync(
-        LoadAgentManageInventoryRequest request,
+    public Task<ApplicationResult<AgentResponse>> LoadInventoryCacheAsync(
+        LoadAgentInventoryCacheRequest request,
         CancellationToken cancellationToken) =>
         inventoryCoordinator.LoadManageAsync(request, cancellationToken);
-
-    public Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
-        CaptureAgentInventoryRequest request,
-        CancellationToken cancellationToken) =>
-        inventoryCoordinator.CaptureComparisonAsync(request, cancellationToken);
 
     public async Task<ApplicationResult<AgentResponse>> SetAgentPreferenceAsync(
         SetAgentPreferenceRequest request,
@@ -734,6 +724,9 @@ internal sealed class DesktopAgentRuntime :
         AgentShutdownAttempt attempt,
         CancellationToken cancellationToken)
     {
+        monitorEventCancellation.Cancel();
+        await Task.WhenAll(monitorSamplesTask, monitorStateTask)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
         storageHealthEventCancellation.Cancel();
         try
         {
@@ -801,6 +794,40 @@ internal sealed class DesktopAgentRuntime :
         }
     }
 
+    private void PublishMonitorState()
+    {
+        var diagnostics = monitoring.CurrentDiagnostics;
+        agentEvents.Publish(new AgentMonitorStateEvent(
+        instanceId, monitoring.CurrentSession, diagnostics with
+        {
+            SamplingFailure = Volatile.Read(ref startupMonitoringFailure)
+                ?? diagnostics.SamplingFailure
+        }, GetRecentStorageHealthEvents(), DateTimeOffset.UtcNow, lifecycle.State));
+    }
+
+    private async Task PublishMonitorStateLoopAsync()
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(monitorEventCancellation.Token))
+                PublishMonitorState();
+        }
+        catch (OperationCanceledException) when (monitorEventCancellation.IsCancellationRequested) { }
+    }
+
+    private async Task ForwardMonitorSamplesAsync(SessionId sessionId)
+    {
+        var cancellationToken = monitorEventCancellation.Token;
+        try
+        {
+            await AgentMonitorBatcher.ForwardAsync(instanceId, sessionId,
+                monitoring.WatchAsync(sessionId, cancellationToken), agentEvents.Publish, cancellationToken);
+            PublishMonitorState();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
     private static Task<ApplicationResult<AgentResponse>> SuccessAsync(
         AgentResponse response,
         CorrelationId correlationId) =>
@@ -816,8 +843,11 @@ internal sealed class DesktopAgentRuntime :
         if (result.IsSuccess)
         {
             Volatile.Write(ref startupMonitoringFailure, null);
+            if (result.Value is { } started)
+                monitorSamplesTask = ForwardMonitorSamplesAsync(started.SessionId);
         }
         tray.SetMonitoringSession(result.Value);
+        PublishMonitorState();
         if (result.Value is { } session)
         {
             return new(
@@ -842,6 +872,7 @@ internal sealed class DesktopAgentRuntime :
             request.SessionId,
             cancellationToken);
         tray.SetMonitoringSession(result.Value);
+        PublishMonitorState();
         if (result.Value is { } session)
         {
             return new(

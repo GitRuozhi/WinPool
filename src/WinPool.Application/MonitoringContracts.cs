@@ -48,6 +48,8 @@ public sealed record MonitorSample(
     DateTimeOffset SampledAtUtc,
     IReadOnlyList<MonitorMetricValue> Values)
 {
+    // Assigned when the coordinator accepts the sample, before bounded queues.
+    public long Sequence { get; init; }
     public MonitorCounterSource? CounterSource { get; init; }
 }
 
@@ -100,6 +102,7 @@ public sealed record MonitorRuntimeDiagnostics(
     string? RecoveredInterruptedSessionOccurrenceId = null)
 {
     public IReadOnlyList<MonitorEditTargetState> EditTargets { get; init; } = [];
+    public long TransportGapCount { get; init; }
 }
 
 /// <summary>

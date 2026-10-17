@@ -12,7 +12,7 @@ public sealed class SqliteSchemaTests
         "schema_info", "workspace_state", "systems",
         "inventory_snapshots", "local_inventory_document", "storage_objects", "storage_relationships",
         "operation_plans", "operation_steps", "operation_capacity_attempts", "execution_events",
-        "simulation_documents", "simulation_edit_commits",
+        "simulation_documents", "simulation_edit_commits", "real_structure_jobs", "real_structure_job_children",
         "monitor_sessions", "monitor_devices", "monitor_samples", "storage_health_events",
         "monitor_rollups",
         "inventory_comparisons",
@@ -261,7 +261,7 @@ public sealed class SqliteSchemaTests
             applied_at_utc_ms INTEGER NOT NULL
         );
         INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
-        VALUES(1, 19, 0);
+        VALUES(1, 20, 0);
         """,
         "schema_info.checks")]
     [InlineData(
@@ -305,6 +305,7 @@ public sealed class SqliteSchemaTests
         await using (var connection = await database.Store.OpenConnectionAsync())
         await using (var command = connection.CreateCommand())
         {
+            await RestoreLegacyReceiptSchemaAsync(connection);
             command.CommandText = """
                 DROP TABLE operation_capacity_attempts;
                 UPDATE schema_info SET schema_version=18 WHERE singleton=1;
@@ -318,7 +319,7 @@ public sealed class SqliteSchemaTests
         }
         await database.Store.InitializeAsync();
         await using var verify = await database.Store.OpenConnectionAsync();
-        Assert.Equal(19, await ScalarInt64Async(verify,"SELECT schema_version FROM schema_info WHERE singleton=1;"));
+        Assert.Equal(WinPoolSqliteStore.CurrentSchemaVersion, await ScalarInt64Async(verify,"SELECT schema_version FROM schema_info WHERE singleton=1;"));
         Assert.Equal(11, await ScalarInt64Async(verify,"SELECT state FROM operation_plans;"));
         Assert.Equal("original-unknown-receipt", await ScalarTextAsync(verify,"SELECT evidence_json FROM operation_steps;"));
         Assert.Equal(0, await ScalarInt64Async(verify,"SELECT COUNT(*) FROM operation_capacity_attempts;"));
@@ -332,6 +333,7 @@ public sealed class SqliteSchemaTests
         await using (var connection = await database.Store.OpenConnectionAsync())
         await using (var command = connection.CreateCommand())
         {
+            await RestoreLegacyReceiptSchemaAsync(connection);
             command.CommandText = """
                 DROP TABLE operation_capacity_attempts;
                 ALTER TABLE operation_plans DROP COLUMN authorization_digest;
@@ -370,6 +372,59 @@ public sealed class SqliteSchemaTests
         Assert.Equal(1, await ScalarInt64Async(verify,
             $"SELECT COUNT(*) FROM operation_plans WHERE operation_id='{operation}' AND authorization_digest IS NULL;"));
         await database.Store.InitializeAsync();
+    }
+
+    [Fact]
+    public async Task Schema19UpgradePreservesCommitLookupAndRealJournal()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await RestoreLegacyReceiptSchemaAsync(connection);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE schema_info SET schema_version=19 WHERE singleton=1;
+                INSERT INTO operation_plans(operation_id,plan_hash,environment_id,risk,state,sanitized_json,created_at_utc_ms)
+                VALUES('old-simulation','old-intent','environment',1,4,'{}',1000),
+                      ('real-unknown','real-hash','environment',4,11,'real-journal',1000);
+                INSERT INTO simulation_edit_commits(operation_id,commit_id,document_id,before_sha256,after_sha256,
+                    document_revision,document_schema_version,display_name,sanitized_json,updated_at_utc_ms,committed_at_utc_ms)
+                VALUES('old-simulation','original-commit','simulation:old','before','after',5,3,'Old','{}',1001,1002);
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+        await database.Store.InitializeAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var receipt = await new SimulationDocumentRepository(database.Store, lease).FindByCommitIdAsync("original-commit");
+        Assert.NotNull(receipt);
+        Assert.Equal("old-intent", receipt.IntentHash);
+        Assert.Equal(4, receipt.BeforeRevision);
+        Assert.Equal(5, receipt.AfterRevision);
+        Assert.Equal("after", receipt.AfterSha256);
+        await using var verify = await database.Store.OpenConnectionAsync();
+        Assert.Equal("real-journal", await ScalarTextAsync(verify, "SELECT sanitized_json FROM operation_plans WHERE operation_id='real-unknown';"));
+        Assert.Equal(11, await ScalarInt64Async(verify, "SELECT state FROM operation_plans WHERE operation_id='real-unknown';"));
+        Assert.Equal(0, await ScalarInt64Async(verify, "SELECT COUNT(*) FROM pragma_foreign_key_list('simulation_edit_commits');"));
+        await database.Store.InitializeAsync();
+    }
+
+    private static async Task RestoreLegacyReceiptSchemaAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DROP TABLE real_structure_job_children;
+            DROP TABLE real_structure_jobs;
+            DROP INDEX ix_simulation_edit_commits_document_revision;
+            DROP TABLE simulation_edit_commits;
+            CREATE TABLE simulation_edit_commits(
+                operation_id TEXT PRIMARY KEY REFERENCES operation_plans(operation_id),
+                commit_id TEXT NOT NULL UNIQUE, document_id TEXT NOT NULL,
+                before_sha256 TEXT NOT NULL, after_sha256 TEXT NOT NULL, document_revision INTEGER NOT NULL,
+                document_schema_version INTEGER NOT NULL, display_name TEXT NOT NULL, sanitized_json TEXT NOT NULL,
+                updated_at_utc_ms INTEGER NOT NULL, committed_at_utc_ms INTEGER NOT NULL);
+            CREATE INDEX ix_simulation_edit_commits_document_revision ON simulation_edit_commits(document_id,document_revision DESC);
+            """;
+        await command.ExecuteNonQueryAsync();
     }
 
     [Fact]

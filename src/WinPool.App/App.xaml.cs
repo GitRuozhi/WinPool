@@ -390,7 +390,7 @@ public partial class App : Application
                 {
                     if (Window is MainWindow mainWindow)
                     {
-                        mainWindow.RequestClose();
+                        mainWindow.RequestClose(agentAlreadyStopped: true);
                     }
                     else
                     {

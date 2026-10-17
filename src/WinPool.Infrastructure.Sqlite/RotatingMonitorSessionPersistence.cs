@@ -206,19 +206,16 @@ public sealed class RotatingMonitorSessionPersistenceFactory :
             return Math.Max(0, activeDatabaseBytesProvider());
         }
 
-        long bytes = 0;
-        foreach (var path in new[] { activeDatabasePath, activeDatabasePath + "-wal" })
+        var bytes = new FileInfo(activeDatabasePath).Length;
+        try
         {
-            if (File.Exists(path))
-            {
-                checked
-                {
-                    bytes += new FileInfo(path).Length;
-                }
-            }
+            return checked(bytes + new FileInfo(activeDatabasePath + "-wal").Length);
         }
-
-        return bytes;
+        catch (FileNotFoundException)
+        {
+            // SQLite may remove the WAL after checkpointing its contents.
+            return bytes;
+        }
     }
 
     internal long GetAvailableDataRootBytes()

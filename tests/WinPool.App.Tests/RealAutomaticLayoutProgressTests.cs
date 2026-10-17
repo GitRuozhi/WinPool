@@ -9,6 +9,36 @@ namespace WinPool.App.Tests;
 
 public sealed class RealAutomaticLayoutProgressTests
 {
+    [Fact]
+    public void DurablePrefixRestoresTheExactNextCommandWithoutReplayingFormatting()
+    {
+        var fixture = new Fixture();
+        fixture.Progress.Observe(fixture.Layout, Response(fixture.Layout, "create-msr", "create-data", "format-data"));
+        var json = JsonSerializer.Serialize(fixture.Progress.Snapshot());
+        var restored = RealAutomaticLayoutProgress.Restore(JsonSerializer.Deserialize<RealAutomaticLayoutSnapshot>(json)!);
+
+        var next = restored.BuildNext(fixture.Fresh(2, formatted: true), fixture.Intent)!;
+        var letter = Assert.IsType<SetDriveLetterCommand>(Assert.Single(next.Steps).Command);
+        Assert.Equal(Fixture.DataId, letter.Partition.Existing!.Value.ProviderKey);
+        Assert.Equal('E', letter.NewLetter);
+        Assert.Equal(json, JsonSerializer.Serialize(restored.Snapshot()));
+    }
+
+    [Fact]
+    public void DurableUnknownAndInvalidPrefixesCannotAuthorizeContinuation()
+    {
+        var fixture = new Fixture();
+        fixture.Progress.Observe(fixture.Layout, Response(fixture.Layout, "create-msr") with
+            { State = RealOperationState.OutcomeUnknown, RequiresReconciliation = true });
+        var checkpoint = JsonSerializer.Deserialize<RealAutomaticLayoutSnapshot>(JsonSerializer.Serialize(fixture.Progress.Snapshot()))!;
+        var restored = RealAutomaticLayoutProgress.Restore(checkpoint);
+        Assert.Throws<InvalidOperationException>(() => restored.BuildNext(fixture.Fresh(1), fixture.Intent));
+        Assert.Throws<InvalidDataException>(() => RealAutomaticLayoutProgress.Restore(checkpoint with
+            { VerifiedSteps = ["create-data"] }));
+        Assert.Throws<InvalidDataException>(() => RealAutomaticLayoutProgress.Restore(checkpoint with
+            { CreatedPartitions = new Dictionary<string, string>() }));
+    }
+
     [Theory]
     [InlineData("NTFS")]
     [InlineData("ReFS")]

@@ -203,7 +203,6 @@ public sealed class ApplicationBehaviorTests
             .ToDictionary(category => category, category => $"object:{category}");
         var state = new WinPool.Application.WorkspaceSessionState(
             WinPool.Application.WorkspaceSessionState.CurrentSchemaVersion,
-            WinPool.Application.WorkspacePage.Manage,
             "simulation:test",
             WinPool.Application.ManageWorkspaceCategory.Volume,
             selections,

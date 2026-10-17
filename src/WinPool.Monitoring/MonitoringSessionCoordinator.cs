@@ -137,7 +137,7 @@ public sealed partial class MonitoringSessionCoordinator : IMonitoringCoordinato
             .Where(value => value.Snapshot().State is
                 MonitoringSessionState.Starting or MonitoringSessionState.Running)
             .SelectMany(value => value.Latest.Snapshot())
-            .OrderBy(sample => sample.SampledAtUtc)
+            .OrderBy(sample => sample.Sequence)
             .ToArray();
 
     public MonitorRuntimeDiagnostics CurrentDiagnostics
@@ -402,8 +402,8 @@ public sealed partial class MonitoringSessionCoordinator : IMonitoringCoordinato
                     continue;
                 }
 
-                active.AddAndPublish(sample);
-                if (!active.Persistence.TryWrite(sample))
+                var accepted = active.AddAndPublish(sample);
+                if (!active.Persistence.TryWrite(accepted))
                 {
                     active.IncrementPersistenceDrops();
                 }
@@ -542,6 +542,7 @@ public sealed partial class MonitoringSessionCoordinator : IMonitoringCoordinato
         private long persistenceDrops;
         private long subscriberDrops;
         private long rejectedSourceSamples;
+        private long acceptedSequence;
         private readonly long startedTimestamp;
         private readonly TimeProvider timeProvider;
         private string? persistenceFailure;
@@ -672,10 +673,11 @@ public sealed partial class MonitoringSessionCoordinator : IMonitoringCoordinato
             }
         }
 
-        public void AddAndPublish(MonitorSample sample)
+        public MonitorSample AddAndPublish(MonitorSample sample)
         {
             lock (gate)
             {
+                sample = sample with { Sequence = ++acceptedSequence };
                 Latest.Add(sample);
                 foreach (var subscriber in subscribers)
                 {
@@ -692,6 +694,7 @@ public sealed partial class MonitoringSessionCoordinator : IMonitoringCoordinato
                         }
                     }
                 }
+                return sample;
             }
         }
 

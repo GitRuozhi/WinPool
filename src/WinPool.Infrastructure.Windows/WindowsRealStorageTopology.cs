@@ -33,6 +33,7 @@ public sealed class WindowsRealStorageTopology
             || document.SourceFacts is not { IsSimulation: false } facts
             || facts.IsMerged
             || facts.ScopedCollection is { Complete: false }
+            || facts.Sources.Any(x => x.ClassName == "Windows.StorageProviderDiscovery" && x.ReadState == FieldReadState.Failed)
             || facts.SystemId != document.SystemId
             || string.IsNullOrWhiteSpace(facts.InventoryVersion)
             || string.IsNullOrWhiteSpace(machineBinding)
@@ -49,6 +50,7 @@ public sealed class WindowsRealStorageTopology
         foreach (var className in RequiredStorageClasses)
             RequireSource(facts, className);
 
+        Document = document;
         Facts = facts;
         Snapshot = document.Snapshot;
         MachineBinding = machineBinding;
@@ -72,6 +74,7 @@ public sealed class WindowsRealStorageTopology
             StringComparer.Ordinal);
     }
 
+    public StorageSystemDocument Document { get; }
     public WinPoolFacts Facts { get; }
     public StorageSnapshot Snapshot { get; }
     public string MachineBinding { get; }
@@ -626,10 +629,13 @@ public sealed class WindowsRealStorageTopology
         && leftValue.TryGetInt64(out var leftNumber) && rightValue.TryGetInt64(out var rightNumber)
         && leftNumber == rightNumber;
 
+    // Persistence changes JSON escaping and maps JSON null to nullable null.
+    // Fingerprints bind the returned values, rather than their JSON spelling.
     private string CanonicalComponent(
         IReadOnlyList<WinPoolSourceObject> connected,
         HashSet<string> visited) => CanonicalComponent(MachineBinding, connected,
-            Facts.Relationships.Where(relation => visited.Contains(relation.FromId) && visited.Contains(relation.ToId)));
+            Facts.Relationships.Where(relation => visited.Contains(relation.FromId) && visited.Contains(relation.ToId)),
+            returnedNullAsJsonNull: true, powerShellStrings: true);
 
     private static readonly JsonSerializerOptions PowerShellStringEncoding = new()
     {

@@ -3,13 +3,8 @@ using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
 
-/// <summary>
-/// Transitional projection boundary for the accepted V0.13 inventory model.
-/// The App consumes the Application topology contract while the legacy
-/// collector remains available for parity testing.
-/// </summary>
+/// <summary>Projects the current source facts into workspace topology.</summary>
 public sealed class ManageSystemProjector
-    : IManageSystemProjector<StorageSystemDocument>
 {
     public ManageSystemProjection Project(StorageSystemDocument document)
     {

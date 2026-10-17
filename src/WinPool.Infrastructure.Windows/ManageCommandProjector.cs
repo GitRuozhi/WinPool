@@ -1,4 +1,4 @@
-﻿using WinPool.Application;
+using WinPool.Application;
 using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
@@ -9,7 +9,6 @@ namespace WinPool.Infrastructure.Windows;
 /// the App retains only labels, icons, dialogs, and process launching.
 /// </summary>
 public sealed class ManageCommandProjector
-    : IManageCommandProjector<StorageSystemDocument>
 {
     public ManageCommandSurfaceView Project(
         StorageSystemDocument activeDocument,

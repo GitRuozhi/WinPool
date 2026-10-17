@@ -3,7 +3,7 @@ using WinPool.Application;
 
 using WinPool.Domain;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 public sealed record PendingStructureParameter(string Key, string Value);
 public sealed record PendingStructureAction(string Title, IReadOnlyList<PendingStructureParameter> Parameters,

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Immutable;
 using WinPool.Agent;
 using WinPool.Application;
 using WinPool.Domain;
@@ -10,6 +11,365 @@ namespace WinPool.Agent.Tests;
 
 public sealed class AgentRealOperationServiceTests
 {
+    [Theory]
+    [InlineData("pool")]
+    [InlineData("vd-returned-null")]
+    [InlineData("prepare-fails")]
+    [InlineData("fingerprint-mismatch")]
+    public async Task StructureJobPersistsParentAndChildBeforeProviderAndKeepsOneMutationOwner(string scenario)
+    {
+        var snapshot = StorageSnapshot.Empty(Environment.MachineName) with
+        {
+            SnapshotVersion = "job-before", ScannedAt = DateTimeOffset.UtcNow,
+            StorageSubsystems = [new("subsystem:job", "Storage Spaces", "Healthy", "OK")],
+            PhysicalDisks = [new("physical:job", true, "Fixture disk", "Fixture", "SERIAL-JOB", "SATA", "HDD",
+                64L << 30, 512, 4096, "Healthy", "OK", false, "In a pool", 7, false, false, false, false, "pool:job",
+                Usage: PhysicalDiskUsage.AutoSelect)],
+            StoragePools = [new("pool:primordial", true, "Primordial", true, "Healthy", "OK", 0, 0, "subsystem:job", []),
+                new("pool:job", true, "Empty pool", false, "Healthy", "OK", 64L << 30, 0, "subsystem:job", ["physical:job"],
+                    512, 4096, "Fixed")]
+        };
+        if (scenario != "pool")
+        {
+            snapshot = snapshot with
+            {
+                VirtualDisks = [new("vd:job", true, "Q", "Healthy", "OK", "Simple", "Fixed", 1, 65536,
+                    32L << 30, 32L << 30, "pool:job", [], [7])],
+                OsDisks = [new("disk:job", "Q", 7, "GPT", 32L << 30, false, false, false, null, "vd:job")],
+                Partitions = [new("partition:job", true, 7, 1, "BasicData", 1L << 20, 16L << 30, false, false,
+                    "E", "Q", "REFS", 65536, 8L << 30, "Healthy", "OK", "E:\\", "disk:job",
+                    PartitionTypeId: "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+                    Guid: "45935a83-1eb8-490a-b7d1-dad5f2275803", GptType: "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7")],
+                Volumes = [new("volume:job", true, "partition:job", "REFS", "Q", 16L << 30, 8L << 30,
+                    65536, "Healthy", "OK", ["E:\\"])]
+            };
+        }
+        var current = JobDocument(snapshot, InternalStableIdentity.SystemFromDocumentId("local:structure-job"));
+        if (scenario != "pool")
+        {
+            var nativeRole = current.SourceFacts!.Objects.Single(item => current.SourceFacts.Sources.Any(source =>
+                source.Id == item.SourceRef && source.ClassName == "Windows.DiskRoles"));
+            current = current with { SourceFacts = current.SourceFacts! with
+            {
+                Objects = current.SourceFacts.Objects.Select(item => item.ObjectType == FactObjectType.Disk ? item with
+                {
+                    Fields = item.Fields.Add(WinPoolSourceField.Returned("Path", @"\\.\PHYSICALDRIVE7", FactValueType.String, item.SourceRef))
+                } : item).ToImmutableArray(),
+                Relationships = current.SourceFacts.Relationships.Add(new("disk:job", nativeRole.Id, "disk-supplement", current.UpdatedAt))
+            } };
+        }
+        if (scenario == "vd-returned-null")
+            current = current with { SourceFacts = current.SourceFacts! with
+            {
+                Objects = current.SourceFacts.Objects.Select(item => item with
+                {
+                    Fields = item.Fields.Select(field => field.Name != "ObjectId" ? field : field with
+                    {
+                        Value = JsonSerializer.SerializeToElement(field.Value!.Value.GetString() + "=\"provider&存储\"",
+                            new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
+                    }).Concat(item.Id == "pool:job"
+                        ? [WinPoolSourceField.Returned<object?>("WriteCacheSizeDefault", null, FactValueType.UInt64, item.SourceRef)]
+                        : Array.Empty<WinPoolSourceField>()).ToImmutableArray()
+                }).ToImmutableArray()
+            } };
+        var pool = current.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
+        var requested = scenario == "pool" ? SimulationEditingSession.RemoveRealPoolDraft(current.Snapshot, pool.StableId)
+            : SimulationEditingSession.RemoveRealVirtualDiskDraft(current.Snapshot, "vd:job");
+        var backend = new RecordingBackend { PauseExecution = true };
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var jobId = Guid.NewGuid();
+        backend.PreparationOverride = (proposal, trusted, id) =>
+        {
+            if (scenario == "prepare-fails") throw new InvalidDataException("Fixture capability rejection before a child exists.");
+            var now = DateTimeOffset.UtcNow;
+            var topology = new WindowsRealStorageTopology(current, "machine-binding-test", now);
+            var members = proposal.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+            var closure = topology.RequireExactPhysicalMemberSet(new(current.SystemId, StorageObjectKind.StoragePool, pool.StableId), members);
+            var environment = new EnvironmentProfile(EnvironmentId.New(), EnvironmentKind.LocalMachine, "machine-binding-test",
+                ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, now);
+            return RealOperationPlanFactory.Create(proposal, id, environment, trusted, topology.InventoryVersion,
+                scenario == "fingerprint-mismatch" ? "different-exact-topology" : closure.Fingerprint,
+                closure.PhysicalMemberFingerprint, "fixture positive support", now, now.AddMinutes(2));
+        };
+        backend.ExecuteOverride = async (plan, step) =>
+        {
+            var parent = await fixture.Plans.GetStructureJobAsync(jobId);
+            Assert.NotNull(parent);
+            Assert.Equal(RealOperationState.Running, parent.State);
+            Assert.Equal(plan.OperationId, Assert.Single(parent.Children));
+            using (var durable = JsonDocument.Parse(parent.ResultJson!))
+            {
+                Assert.Equal(plan.OperationId.Value, durable.RootElement.GetProperty("Pending").GetProperty("OperationId").GetProperty("Value").GetGuid());
+                Assert.Equal(current.Snapshot.SnapshotVersion,
+                    durable.RootElement.GetProperty("Baseline").GetProperty("SourceFacts").GetProperty("InventoryVersion").GetString());
+            }
+            Assert.Single(await fixture.Plans.GetStepsAsync(plan.OperationId), step => step.State == PersistedOperationStepState.CallIssued);
+            var scope = StorageInventoryScopeFactory.Create(current.SourceFacts!, plan.OperationId, step.Id, plan.Targets);
+            current = JobDocument(requested with { SnapshotVersion = "job-after", ScannedAt = DateTimeOffset.UtcNow }, current.SystemId, scope);
+            return new RealStepResult(RealStepOutcome.Verified, "fake.pool_deleted", JsonSerializer.Serialize(new
+            { PostFingerprint = "verified-after-delete", PhysicalMemberFingerprint = plan.RealOperation!.PhysicalMemberFingerprint }))
+            { VerifiedPostState = new(current, scope, current.UpdatedAt) };
+        };
+        fixture.Service.AttachStructureInventory(_ => Task.FromResult(current), _ => Task.FromResult<StorageSystemDocument?>(current));
+        var prepared = await fixture.Service.PrepareStructureJobAsync(new(
+            new(current.SystemId, requested, []), jobId, fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
+        var job = Assert.IsType<AgentRealStructureJobResponse>(prepared.Value);
+        Assert.Equal(RealOperationState.Prepared, job.State);
+        var accept = new AcceptAgentRealStructureJobRequest(jobId, job.GoalHash, fixture.Session.ProductSessionId, CorrelationId.New());
+        try
+        {
+            Assert.True((await fixture.Service.AcceptStructureJobAsync(accept, fixture.Session, default)).IsSuccess);
+            if (scenario is "prepare-fails" or "fingerprint-mismatch")
+            {
+                using var failedTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                AgentRealStructureJobResponse failure;
+                do
+                {
+                    failure = Assert.IsType<AgentRealStructureJobResponse>((await fixture.Service.QueryStructureJobAsync(
+                        new(jobId, CorrelationId.New()), fixture.Session, failedTimeout.Token)).Value);
+                    if (failure.State is RealOperationState.Accepted or RealOperationState.Running) await Task.Delay(10, failedTimeout.Token);
+                } while (failure.State is RealOperationState.Accepted or RealOperationState.Running);
+                Assert.Equal(RealOperationState.Failed, failure.State);
+                Assert.False(failure.RequiresReconciliation);
+                Assert.NotNull(failure.RemainingGoal);
+                Assert.Empty(failure.Children);
+                Assert.Equal(0, backend.PreflightCalls);
+                Assert.Equal(0, backend.ExecuteCalls);
+                Assert.False(await fixture.Plans.HasStructureWriteBarrierAsync());
+                // This is the previous version's durable failure shape: Unknown with no child or issued call.
+                var failed = (await fixture.Plans.GetStructureJobAsync(jobId))!;
+                var historicalId = Guid.NewGuid();
+                await fixture.Plans.SaveStructureJobAsync(failed with
+                    { JobId = historicalId, State = RealOperationState.OutcomeUnknown });
+                var restarted = new AgentRealOperationService(fixture.Plans, fixture.Events, backend, new FixedMachineIdentity(),
+                    authority: null, timeProvider: null, isSessionStillArmed: _ => true, isAdministrator: () => true);
+                await restarted.InitializeRecoveryAsync();
+                AgentRealStructureJobResponse recovered;
+                do
+                {
+                    recovered = Assert.IsType<AgentRealStructureJobResponse>((await restarted.QueryStructureJobAsync(
+                        new(historicalId, CorrelationId.New()), fixture.Session, failedTimeout.Token)).Value);
+                    if (recovered.RequiresReconciliation) await Task.Delay(10, failedTimeout.Token);
+                } while (recovered.RequiresReconciliation);
+                Assert.Equal(RealOperationState.Cancelled, recovered.State);
+                Assert.NotNull(recovered.RemainingGoal);
+                Assert.False(await fixture.Plans.HasStructureWriteBarrierAsync());
+                Assert.Equal(0, backend.PreflightCalls);
+                Assert.Equal(0, backend.ExecuteCalls);
+                return;
+            }
+            using (var entryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                while (!backend.ExecutionEntered.Task.IsCompleted)
+                {
+                    var entry = Assert.IsType<AgentRealStructureJobResponse>((await fixture.Service.QueryStructureJobAsync(
+                        new(jobId, CorrelationId.New()), fixture.Session, entryTimeout.Token)).Value);
+                    Assert.True(entry.State is RealOperationState.Accepted or RealOperationState.Running, entry.Code);
+                    await Task.Delay(10, entryTimeout.Token);
+                }
+            var running = Assert.IsType<AgentRealStructureJobResponse>((await fixture.Service.QueryStructureJobAsync(
+                new(jobId, CorrelationId.New()), fixture.Session, default)).Value);
+            Assert.Equal(RealOperationState.Running, running.State);
+            Assert.Single(running.Children);
+            Assert.True((await fixture.Service.AcceptStructureJobAsync(accept, fixture.Session, default)).IsSuccess);
+            var blocked = await fixture.Service.PrepareAsync(new(fixture.Proposal, Guid.NewGuid(),
+                fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
+            Assert.False(blocked.IsSuccess);
+            Assert.Equal(1, backend.ExecuteCalls);
+            backend.ReleaseExecution.TrySetResult();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            AgentRealStructureJobResponse terminal;
+            do
+            {
+                terminal = Assert.IsType<AgentRealStructureJobResponse>((await fixture.Service.QueryStructureJobAsync(
+                    new(jobId, CorrelationId.New()), fixture.Session, timeout.Token)).Value);
+                if (terminal.State is RealOperationState.Accepted or RealOperationState.Running) await Task.Delay(10, timeout.Token);
+            } while (terminal.State is RealOperationState.Accepted or RealOperationState.Running);
+            Assert.Equal(RealOperationState.Succeeded, terminal.State);
+            Assert.Single(terminal.Children);
+            Assert.Equal(1, backend.ExecuteCalls);
+            Assert.Equal(0, backend.ReconciliationCalls);
+            Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
+        }
+        finally { backend.ReleaseExecution.TrySetResult(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletedCreationIsMappedFromDurablePendingStageAfterRestartWithoutAnotherWrite(bool firstScopedReadFails)
+    {
+        var system = InternalStableIdentity.SystemFromDocumentId("local:structure-job");
+        var before = StorageSnapshot.Empty(Environment.MachineName) with
+        {
+            SnapshotVersion = "before-create", ScannedAt = DateTimeOffset.UtcNow,
+            StorageSubsystems = [new("subsystem:job", "Storage Spaces", "Healthy", "OK")],
+            PhysicalDisks = [new("physical:job", true, "Fixture disk", "Fixture", "SERIAL-JOB", "SATA", "HDD",
+                64L << 30, 512, 4096, "Healthy", "OK", true, "", 7, false, false, false, false, null,
+                Usage: PhysicalDiskUsage.AutoSelect)],
+            StoragePools = [new("pool:primordial", true, "Primordial", true, "Healthy", "OK", 0, 0, "subsystem:job", [])]
+        };
+        var baseline = JobDocument(before, system);
+        var temporaryPool = EditWorkspace.DraftPrefix + "frozen-pool";
+        var requested = before with
+        {
+            PhysicalDisks = before.PhysicalDisks.Select(item => item with { PoolStableId = temporaryPool }).ToArray(),
+            StoragePools = before.StoragePools.Append(new(temporaryPool, false, "Requested pool", false,
+                "", "", 0, 0, "subsystem:job", ["physical:job"])).ToArray()
+        };
+        requested = SimulationEditingSession.InsertRealDraftVirtualDisk(requested, temporaryPool, "Remaining VD");
+        var goal = new RealStructureJobGoal(system, requested,
+            [new(temporaryPool, new(true, false, "NTFS", 65536, "Remaining volume", VirtualDiskName: "Remaining VD"))]);
+        var proposal = RealOperationProposalFactory.CreatePoolWithMembers(system,
+            [new(system, StorageObjectKind.PhysicalDisk, "physical:job")], "Requested pool");
+        var backend = new RecordingBackend();
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var child = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
+            new(proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).Value).Plan;
+        var now = DateTimeOffset.UtcNow;
+        var jobId = Guid.NewGuid();
+        var pending = new { OperationId = child.OperationId, Proposal = proposal,
+            Mapping = new RealStructureResultSynchronization.OutputMapping(StorageObjectKind.StoragePool, temporaryPool, "create-pool"),
+            Description = "Verified requested pool", Layout = (RealAutomaticLayoutSnapshot?)null };
+        var result = JsonSerializer.Serialize(new { Completed = Array.Empty<string>(), Remaining = goal,
+            Code = (string?)null, Baseline = baseline, Pending = pending, Layout = (RealAutomaticLayoutSnapshot?)null });
+        await fixture.Plans.SaveStructureJobAsync(new(jobId, new string('b', 64),
+            JsonSerializer.Serialize(new { Goal = goal, Baseline = baseline, Layout = (RealAutomaticLayoutSnapshot?)null }),
+            "machine-binding-test", fixture.Session.Binding, RealOperationState.Running, now, now, result, []));
+        await fixture.Plans.LinkStructureChildAsync(jobId, child.OperationId, 0);
+        await fixture.Plans.AcceptAsync(child.OperationId, child.PlanHash, new string('a', 64), now);
+        ExecutionEvent Progress(string code) => new(child.OperationId, ExecutionEventKind.Progress, now, code, code);
+        Assert.True(await fixture.Plans.TransitionAsync(child.OperationId, PersistedOperationState.Accepted,
+            PersistedOperationState.Running, Progress("test.running")));
+        Assert.True(await fixture.Plans.TransitionStepAsync(child.OperationId, "create-pool", PersistedOperationStepState.NotStarted,
+            PersistedOperationStepState.PreparingCall, "exact selected member", null, Progress("test.preparing")));
+        Assert.True(await fixture.Plans.TransitionStepAsync(child.OperationId, "create-pool", PersistedOperationStepState.PreparingCall,
+            PersistedOperationStepState.CallIssued, "exact selected member", null, Progress("test.call_issued")));
+        Assert.True(await fixture.Plans.TransitionStepAsync(child.OperationId, "create-pool", PersistedOperationStepState.CallIssued,
+            PersistedOperationStepState.Verified, null, "{\"CreatedObjectId\":\"pool:created\"}", Progress("test.verified")));
+        Assert.True(await fixture.Plans.TransitionAsync(child.OperationId, PersistedOperationState.Running,
+            PersistedOperationState.Completed, Progress("test.completed")));
+        var actual = before with
+        {
+            SnapshotVersion = "after-create", ScannedAt = DateTimeOffset.UtcNow,
+            PhysicalDisks = before.PhysicalDisks.Select(item => item with { PoolStableId = "pool:created", CanPool = false }).ToArray(),
+            StoragePools = before.StoragePools.Append(new("pool:created", true, "Requested pool", false,
+                "Healthy", "OK", 64L << 30, 0, "subsystem:job", ["physical:job"])).ToArray()
+        };
+        var collections = 0;
+        var restarted = new AgentRealOperationService(fixture.Plans, fixture.Events, backend, new FixedMachineIdentity(),
+            authority: null, timeProvider: null, isSessionStillArmed: _ => true, isAdministrator: () => true);
+        restarted.AttachStructureInventory(_ => Task.FromResult(JobDocument(actual, system)),
+            _ => Task.FromResult<StorageSystemDocument?>(JobDocument(actual, system)), (scope, _) =>
+            {
+                var count = Interlocked.Increment(ref collections);
+                Assert.Equal(child.OperationId, scope.OperationId);
+                if (firstScopedReadFails && count == 1) throw new IOException("The related read was interrupted.");
+                return Task.FromResult(JobDocument(actual, system, scope));
+            });
+        await restarted.InitializeRecoveryAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        if (firstScopedReadFails)
+        {
+            while (Volatile.Read(ref collections) == 0) await Task.Delay(10, timeout.Token);
+            for (var index = 0; index < 5; index++)
+            {
+                var unknown = Assert.IsType<AgentRealStructureJobResponse>((await restarted.QueryStructureJobAsync(
+                    new(jobId, CorrelationId.New()), fixture.Session, timeout.Token)).Value);
+                Assert.True(unknown.RequiresReconciliation);
+                await restarted.ListRecoverableAsync(new(CorrelationId.New()), fixture.Session, timeout.Token);
+            }
+            Assert.Equal(1, collections);
+            Assert.True(await fixture.Plans.HasStructureWriteBarrierAsync(timeout.Token));
+            await restarted.RecheckAsync(new(child.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
+        }
+        AgentRealStructureJobResponse recovered;
+        do
+        {
+            recovered = Assert.IsType<AgentRealStructureJobResponse>((await restarted.QueryStructureJobAsync(
+                new(jobId, CorrelationId.New()), fixture.Session, timeout.Token)).Value);
+            if (recovered.RequiresReconciliation) await Task.Delay(10, timeout.Token);
+        } while (recovered.RequiresReconciliation);
+        Assert.Equal(RealOperationState.PartiallyCompleted, recovered.State);
+        Assert.Equal("Verified requested pool", Assert.Single(recovered.Completed));
+        Assert.Equal(jobId, recovered.RemainingGoal!.ResumeFromJobId);
+        Assert.Equal("pool:created", Assert.Single(recovered.RemainingGoal.PoolIntents).PoolId);
+        Assert.Equal("pool:created", Assert.Single(recovered.RemainingGoal.Working.VirtualDisks).PoolStableId);
+        Assert.DoesNotContain(recovered.RemainingGoal.Working.StoragePools, item => item.StableId == temporaryPool);
+        Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
+        for (var index = 0; index < 5; index++)
+        {
+            await restarted.QueryStructureJobAsync(new(jobId, CorrelationId.New()), fixture.Session, default);
+            await restarted.QueryAsync(new(child.OperationId, CorrelationId.New()), fixture.Session, default);
+            await restarted.ListRecoverableAsync(new(CorrelationId.New()), fixture.Session, default);
+        }
+        Assert.Equal(firstScopedReadFails ? 2 : 1, collections);
+        Assert.Equal(0, backend.PreflightCalls);
+        Assert.Equal(0, backend.ExecuteCalls);
+        Assert.Equal(0, backend.ReconciliationCalls);
+        var discovery = Assert.IsType<AgentRecoverableRealOperationsResponse>((await restarted.ListRecoverableAsync(
+            new(CorrelationId.New()), fixture.Session, timeout.Token)).Value);
+        var listed = Assert.Single(discovery.StructureJobs!);
+        Assert.Equal(jobId, listed.JobId);
+        Assert.Equal(system, listed.SystemId);
+        Assert.Null(listed.RemainingGoal);
+        var nextJobId = Guid.NewGuid();
+        var confirmation = await restarted.PrepareStructureJobAsync(new(recovered.RemainingGoal, nextJobId,
+            fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, timeout.Token);
+        var nextJob = Assert.IsType<AgentRealStructureJobResponse>(confirmation.Value);
+        Assert.Equal(RealOperationState.Prepared, nextJob.State);
+        Assert.Equal(nextJobId, nextJob.JobId);
+        Assert.Empty(nextJob.Children);
+        Assert.Equal(0, backend.PreflightCalls);
+        Assert.Equal(0, backend.ExecuteCalls);
+        await restarted.StopStructureJobAsync(new(nextJobId, nextJob.GoalHash, CorrelationId.New()), fixture.Session, default);
+        var nextDiscovery = Assert.IsType<AgentRecoverableRealOperationsResponse>((await restarted.ListRecoverableAsync(
+            new(CorrelationId.New()), fixture.Session, timeout.Token)).Value);
+        Assert.Equal(nextJobId, Assert.Single(nextDiscovery.StructureJobs!).JobId);
+    }
+
+    [Fact]
+    public async Task InterruptedStructureJobRestartsReadOnlyAndQueriesNeverResumeItsRemainingGoal()
+    {
+        var backend = new RecordingBackend();
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(new(
+            fixture.Proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).Value);
+        await fixture.Plans.AcceptAsync(prepared.Plan.OperationId, prepared.Plan.PlanHash, new string('a', 64), DateTimeOffset.UtcNow);
+        var jobId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var baseline = JobDocument(StorageSnapshot.Empty(Environment.MachineName), fixture.Proposal.SystemId);
+        var goal = new RealStructureJobGoal(fixture.Proposal.SystemId, baseline.Snapshot, []);
+        await fixture.Plans.SaveStructureJobAsync(new(jobId, "goal-hash", JsonSerializer.Serialize(new { Goal = goal, Baseline = baseline }),
+            "machine-binding-test", fixture.Session.Binding, RealOperationState.Running, now, now, null, []));
+        await fixture.Plans.LinkStructureChildAsync(jobId, prepared.Plan.OperationId, 0);
+        var restarted = new AgentRealOperationService(fixture.Plans, fixture.Events, backend, new FixedMachineIdentity(),
+            authority: null, timeProvider: null, isSessionStillArmed: _ => true, isAdministrator: () => true);
+        await restarted.InitializeRecoveryAsync();
+        Assert.Equal(RealOperationState.OutcomeUnknown, (await fixture.Plans.GetStructureJobAsync(jobId))!.State);
+        Assert.Equal(PersistedOperationState.OutcomeUnknown, (await fixture.Plans.GetAsync(prepared.Plan.OperationId))!.State);
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (backend.ReconciliationCalls == 0) await Task.Delay(10, timeout.Token);
+        var recoveries = backend.ReconciliationCalls;
+        for (var index = 0; index < 10; index++)
+        {
+            var status = await restarted.QueryAsync(new(prepared.Plan.OperationId, CorrelationId.New()), fixture.Session, default);
+            Assert.IsType<AgentRealOperationStatusResponse>(status.Value);
+            await restarted.ListRecoverableAsync(new(CorrelationId.New()), fixture.Session, default);
+            var job = await restarted.QueryStructureJobAsync(new(jobId, CorrelationId.New()), fixture.Session, default);
+            Assert.Equal(RealOperationState.OutcomeUnknown, Assert.IsType<AgentRealStructureJobResponse>(job.Value).State);
+        }
+        Assert.Equal(recoveries, backend.ReconciliationCalls);
+        Assert.Equal(0, backend.PreflightCalls);
+        Assert.Equal(0, backend.ExecuteCalls);
+        Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
+    }
+
     [Fact]
     public async Task ReadOnlyRecoveryDiagnosticsPreserveEvidenceBoundExceptionsAndClearAfterRecovery()
     {
@@ -49,7 +409,7 @@ public sealed class AgentRealOperationServiceTests
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             while (true)
             {
-                var response = Assert.IsType<AgentRealOperationResponse>((await recovered.QueryAsync(
+                var response = Assert.IsType<AgentRealOperationResponse>((await recovered.QueryWithEvidenceAsync(
                     new(plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token)).Value);
                 if (matches(response)) return response;
                 await Task.Delay(10, timeout.Token);
@@ -61,10 +421,16 @@ public sealed class AgentRealOperationServiceTests
         Assert.Equal(RealOperationState.OutcomeUnknown, unknown.State);
         Assert.True(unknown.RequiresReconciliation);
         Assert.Null(unknown.ReconciliationDiagnostic!.Detail);
-        var repeatedAfter = Volatile.Read(ref reconciliationCalls) + 2;
-        await AwaitStatusAsync(_ => Volatile.Read(ref reconciliationCalls) >= repeatedAfter);
+        var startupCalls = Volatile.Read(ref reconciliationCalls);
+        for (var index = 0; index < 10; index++)
+        {
+            await recovered.QueryAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
+            await recovered.ListRecoverableAsync(new(CorrelationId.New()), fixture.Session, default);
+        }
+        Assert.Equal(startupCalls, Volatile.Read(ref reconciliationCalls));
 
         Volatile.Write(ref recoveryMode, 1);
+        await recovered.RecheckAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
         var failure = await AwaitStatusAsync(response => response.ReconciliationDiagnostic?.Detail is not null);
         Assert.Equal("operation.reconciliation_failed", failure.ReconciliationDiagnostic!.Code);
         Assert.StartsWith("System.InvalidOperationException: read-only probe failed: ", failure.ReconciliationDiagnostic.Detail);
@@ -76,9 +442,11 @@ public sealed class AgentRealOperationServiceTests
         Assert.Equal(0, recoveredBackend.ExecuteCalls);
 
         Volatile.Write(ref recoveryMode, 0);
+        await recovered.RecheckAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
         await AwaitStatusAsync(response => response.ReconciliationDiagnostic is
             { Code: "real.reconciliation_step_outcome_unknown", Detail: null });
         Volatile.Write(ref recoveryMode, 2);
+        await recovered.RecheckAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
         var terminal = await AwaitStatusAsync(response => response.State == RealOperationState.Failed);
         Assert.Null(terminal.ReconciliationDiagnostic);
         Assert.False(terminal.RequiresReconciliation);
@@ -186,7 +554,7 @@ public sealed class AgentRealOperationServiceTests
         var result = await fixture.Service.ListRecoverableAsync(new(CorrelationId.New()),
             fixture.Session with { IsArmed = false }, CancellationToken.None);
         var recovered = Assert.Single(Assert.IsType<AgentRecoverableRealOperationsResponse>(result.Value).Operations);
-        Assert.Equal(original.Plan.OperationId, recovered.Plan.OperationId);
+        Assert.Equal(original.Plan.OperationId, recovered.OperationId);
         Assert.Equal(RealOperationState.Prepared, recovered.State);
         Assert.Equal(0, backend.ExecuteCalls);
     }
@@ -198,14 +566,24 @@ public sealed class AgentRealOperationServiceTests
         var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
             new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
         await using var lease = fixture.Lease;
+        var terminalStatus = new TaskCompletionSource<AgentRealOperationStatusResponse>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Service.AttachStatusObserver(status =>
+        {
+            if (status.State == RealOperationState.Succeeded) terminalStatus.TrySetResult(status);
+            return Task.CompletedTask;
+        });
         fixture.Service.AttachEditObserver(new FailingEditObserver());
         var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
             new(fixture.Proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()),
             fixture.Session, CancellationToken.None)).Value);
-        var accepted = await fixture.Service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+        var accepted = await fixture.Service.AcceptWithEvidenceAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
             fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, CancellationToken.None);
         Assert.True(accepted.IsSuccess);
         var completed = await AwaitSucceededAsync(fixture.Service, prepared.Plan.OperationId, fixture.Session);
+        var published = await terminalStatus.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(prepared.Plan.OperationId, published.OperationId);
+        Assert.False(published.RequiresReconciliation);
         Assert.False(completed.RequiresReconciliation);
         Assert.Equal(1, backend.ExecuteCalls);
     }
@@ -231,7 +609,7 @@ public sealed class AgentRealOperationServiceTests
         var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
             new(proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()),
             fixture.Session, CancellationToken.None)).Value);
-        await fixture.Service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+        await fixture.Service.AcceptWithEvidenceAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
             fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, CancellationToken.None);
         var terminal = verifiedPrefix ? PersistedOperationState.PartiallyCompleted : PersistedOperationState.Failed;
         await AwaitDurableStateAsync(fixture.Plans, prepared.Plan.OperationId, terminal);
@@ -252,14 +630,14 @@ public sealed class AgentRealOperationServiceTests
         var stepEvent = Assert.Single(history, item => item.Event.Code == "fake.observed_no_effect_step");
         var terminalEvent = Assert.Single(history, item => item.Event.Code == "fake.observed_no_effect");
         Assert.True(stepEvent.EventId < terminalEvent.EventId);
-        var status = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryAsync(
+        var status = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryWithEvidenceAsync(
             new(prepared.Plan.OperationId, CorrelationId.New()), fixture.Session, CancellationToken.None)).Value);
         Assert.Equal(verifiedPrefix ? RealOperationState.PartiallyCompleted : RealOperationState.Failed, status.State);
         Assert.Equal("fake.observed_no_effect_step", status.Steps.Single(step => step.StepId == failed.StepId).Code);
     }
 
     [Fact]
-    public async Task ExplicitQueryPersistsLaterObservedNoEffectWithoutRepeatingProviderCall()
+    public async Task ExplicitRecheckPersistsLaterObservedNoEffectWithoutRepeatingProviderCall()
     {
         var reconcileCalls = 0;
         var backend = new RecordingBackend
@@ -277,17 +655,12 @@ public sealed class AgentRealOperationServiceTests
         var plan = await PrepareAndAcceptAsync(fixture.Service, fixture.Proposal, fixture.Session);
         await AwaitDurableStateAsync(fixture.Plans, plan.OperationId, PersistedOperationState.OutcomeUnknown);
         Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
-        var pending = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryAsync(
+        var pending = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryWithEvidenceAsync(
             new(plan.OperationId, CorrelationId.New()), fixture.Session, CancellationToken.None)).Value);
         Assert.Equal(RealOperationState.OutcomeUnknown, pending.State);
-        // A query can observe Unknown while the original worker is finishing;
-        // polling may schedule recovery only after that worker has stopped.
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
-            while ((await fixture.Plans.GetAsync(plan.OperationId, timeout.Token))!.State != PersistedOperationState.Failed)
-            {
-                await fixture.Service.QueryAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
-                await Task.Delay(10, timeout.Token);
-            }
+        await AwaitWorkerStoppedAsync(fixture.Service);
+        await fixture.Service.RecheckAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
+        await AwaitDurableStateAsync(fixture.Plans, plan.OperationId, PersistedOperationState.Failed);
         var step = Assert.Single(await fixture.Plans.GetStepsAsync(plan.OperationId));
         Assert.Equal(PersistedOperationStepState.Failed, step.State);
         Assert.True(JsonSerializer.Deserialize<WindowsObservedNoEffectStepEvidence>(step.EvidenceJson!)!.WindowsCallIssued);
@@ -346,7 +719,7 @@ public sealed class AgentRealOperationServiceTests
     }
 
     [Fact]
-    public async Task UnknownQueryCannotReconcileWhileTheOriginalWorkerIsStillRunning()
+    public async Task QueriesHaveNoRecoveryEffectsAndExplicitRecheckWaitsForTheOriginalWriterToStop()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -375,19 +748,19 @@ public sealed class AgentRealOperationServiceTests
             var plan = await PrepareAndAcceptAsync(fixture.Service, fixture.Proposal, fixture.Session);
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             var responses = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
-                Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryAsync(
+                Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryWithEvidenceAsync(
                     new(plan.OperationId, CorrelationId.New()), fixture.Session, default)).Value)));
             Assert.All(responses, response => Assert.Equal(RealOperationState.OutcomeUnknown, response.State));
             await Task.Delay(50); // Let a mistakenly scheduled background query enter the fake backend.
             Assert.Equal(1, Volatile.Read(ref reconcileCalls));
             Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
+            var stillRunning = await fixture.Service.RecheckAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
+            Assert.Equal(RealOperationState.OutcomeUnknown, Assert.IsType<AgentRealOperationStatusResponse>(stillRunning.Value).State);
+            Assert.Equal(1, Volatile.Read(ref reconcileCalls));
             release.TrySetResult();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            while ((await fixture.Plans.GetAsync(plan.OperationId, timeout.Token))!.State != PersistedOperationState.Failed)
-            {
-                await fixture.Service.QueryAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
-                await Task.Delay(10, timeout.Token);
-            }
+            await AwaitWorkerStoppedAsync(fixture.Service);
+            await fixture.Service.RecheckAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
+            await AwaitDurableStateAsync(fixture.Plans, plan.OperationId, PersistedOperationState.Failed);
             Assert.Equal(2, Volatile.Read(ref reconcileCalls));
             Assert.Equal(1, backend.ExecuteCalls);
             Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
@@ -403,9 +776,12 @@ public sealed class AgentRealOperationServiceTests
     {
         var backend = new RecordingBackend
         {
-            UnknownStepId = invalid == "contradict-terminal-step" ? null : "initialize-gpt",
+            UnknownStepId = "initialize-gpt",
             Reconciliation = (plan, steps) =>
             {
+                if (invalid == "contradict-terminal-step" && steps[0].State != RealOperationStepState.Verified)
+                    return Task.FromResult(new RealReconciliationResult(RealOperationState.OutcomeUnknown,
+                        steps, "fake.await_independent_verified_step", false));
                 var result = ObservedNoEffect(plan, steps);
                 var observed = result.Steps[0] with
                 {
@@ -424,6 +800,17 @@ public sealed class AgentRealOperationServiceTests
         await using var lease = fixture.Lease;
         var plan = await PrepareAndAcceptAsync(fixture.Service, fixture.Proposal, fixture.Session);
         await AwaitDurableStateAsync(fixture.Plans, plan.OperationId, PersistedOperationState.OutcomeUnknown);
+        if (invalid == "contradict-terminal-step")
+        {
+            await AwaitWorkerStoppedAsync(fixture.Service);
+            Assert.True(await fixture.Plans.TransitionStepAsync(plan.OperationId, "initialize-gpt",
+                PersistedOperationStepState.OutcomeUnknown, PersistedOperationStepState.Verified,
+                null, "durably verified step evidence", new(plan.OperationId, ExecutionEventKind.Progress,
+                    DateTimeOffset.UtcNow, "test.concurrent_verified", "An independent verifier finished the step")));
+            await fixture.Service.RecheckAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
+            Assert.Equal(PersistedOperationStepState.Verified, Assert.Single(await fixture.Plans.GetStepsAsync(plan.OperationId)).State);
+            Assert.Equal(PersistedOperationState.OutcomeUnknown, (await fixture.Plans.GetAsync(plan.OperationId))!.State);
+        }
         Assert.True(await fixture.Plans.HasRealWriteBarrierAsync());
         Assert.Equal(1, backend.ExecuteCalls);
         Assert.DoesNotContain(await fixture.Events.ListAsync(plan.OperationId), item =>
@@ -478,7 +865,7 @@ public sealed class AgentRealOperationServiceTests
             var plan = await PrepareAndAcceptAsync(fixture.Service, fixture.Proposal, fixture.Session);
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             var running = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
-                Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryAsync(
+                Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryWithEvidenceAsync(
                     new(plan.OperationId, CorrelationId.New()), fixture.Session, CancellationToken.None)).Value)));
             Assert.All(running, status => Assert.Equal(RealOperationState.Running, status.State));
             Assert.Equal(1, Volatile.Read(ref reconciliationCalls));
@@ -494,14 +881,12 @@ public sealed class AgentRealOperationServiceTests
                     await Task.Delay(10, timeout.Token);
             }
             var unknown = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
-                Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryAsync(
+                Assert.IsType<AgentRealOperationResponse>((await fixture.Service.QueryWithEvidenceAsync(
                     new(plan.OperationId, CorrelationId.New()), fixture.Session, CancellationToken.None)).Value)));
-            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
-                while (!recoveryEntered.Task.IsCompleted)
-                {
-                    await fixture.Service.QueryAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
-                    await Task.Delay(10, timeout.Token);
-                }
+            Assert.Equal(1, Volatile.Read(ref reconciliationCalls));
+            await AwaitWorkerStoppedAsync(fixture.Service);
+            var explicitRecovery = fixture.Service.RecheckAsync(new(plan.OperationId, CorrelationId.New()), fixture.Session, default);
+            await recoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.All(unknown, status => Assert.Equal(RealOperationState.OutcomeUnknown, status.State));
             Assert.Equal(2, Volatile.Read(ref reconciliationCalls));
             Assert.True(await repository.HasRealWriteBarrierAsync());
@@ -511,6 +896,8 @@ public sealed class AgentRealOperationServiceTests
                 step.State);
             Assert.DoesNotContain(await fixture.Events.ListAsync(plan.OperationId), item =>
                 item.Event.Code == "fake.observed_no_effect");
+            releaseRecovery.TrySetResult();
+            await explicitRecovery.WaitAsync(TimeSpan.FromSeconds(5));
         }
         finally
         {
@@ -543,7 +930,7 @@ public sealed class AgentRealOperationServiceTests
         var prepared = Assert.IsType<AgentRealOperationResponse>((await service.PrepareAsync(
             new(proposal, Guid.NewGuid(), session.ProductSessionId, CorrelationId.New()), session,
             CancellationToken.None)).Value);
-        Assert.True((await service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+        Assert.True((await service.AcceptWithEvidenceAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
             session.ProductSessionId, CorrelationId.New()), session, CancellationToken.None)).IsSuccess);
         return prepared.Plan;
     }
@@ -746,7 +1133,7 @@ public sealed class AgentRealOperationServiceTests
                 session.ProductSessionId, CorrelationId.New()),
             session, CancellationToken.None);
         var plan = Assert.IsType<AgentRealOperationResponse>(prepared.Value).Plan;
-        await service.AcceptAsync(new AcceptAgentRealOperationRequest(
+        await service.AcceptWithEvidenceAsync(new AcceptAgentRealOperationRequest(
             plan.OperationId, plan.PlanHash, session.ProductSessionId,
             CorrelationId.New()), session, CancellationToken.None);
         await backend.RunnerPreflightEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -759,7 +1146,7 @@ public sealed class AgentRealOperationServiceTests
         AgentRealOperationResponse? status = null;
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            status = (await service.QueryAsync(new QueryAgentRealOperationRequest(
+            status = (await service.QueryWithEvidenceAsync(new QueryAgentRealOperationRequest(
                 plan.OperationId, CorrelationId.New()),
                 session, CancellationToken.None)).Value as AgentRealOperationResponse;
             if (status?.State == RealOperationState.Cancelled)
@@ -828,7 +1215,7 @@ public sealed class AgentRealOperationServiceTests
                 CorrelationId.New()),
             session, CancellationToken.None);
         var plan = Assert.IsType<AgentRealOperationResponse>(prepared.Value).Plan;
-        var accepted = await service.AcceptAsync(
+        var accepted = await service.AcceptWithEvidenceAsync(
             new AcceptAgentRealOperationRequest(
                 plan.OperationId, plan.PlanHash, session.ProductSessionId,
                 CorrelationId.New()),
@@ -838,7 +1225,7 @@ public sealed class AgentRealOperationServiceTests
         AgentRealOperationResponse? status = null;
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            status = (await service.QueryAsync(
+            status = (await service.QueryWithEvidenceAsync(
                 new QueryAgentRealOperationRequest(
                     plan.OperationId, CorrelationId.New()),
                 session, CancellationToken.None)).Value as AgentRealOperationResponse;
@@ -862,7 +1249,7 @@ public sealed class AgentRealOperationServiceTests
         Assert.Equal("fake.reconciled", status.Code);
 
         var queriedAgain = Assert.IsType<AgentRealOperationResponse>(
-            (await service.QueryAsync(
+            (await service.QueryWithEvidenceAsync(
                 new QueryAgentRealOperationRequest(plan.OperationId, CorrelationId.New()),
                 session, CancellationToken.None)).Value);
         Assert.Equal(plan.OperationId, queriedAgain.Plan.OperationId);
@@ -886,7 +1273,7 @@ public sealed class AgentRealOperationServiceTests
         var backend = new RecordingBackend
         {
             PreflightFailureStepId = "partition",
-            PreflightFailureCall = 2,
+            PreflightFailureCall = 1,
             PreflightException = new InvalidDataException(longMessage)
         };
         var service = new AgentRealOperationService(
@@ -905,7 +1292,7 @@ public sealed class AgentRealOperationServiceTests
                 proposal, Guid.NewGuid(), session.ProductSessionId, CorrelationId.New()),
             session, CancellationToken.None);
         var plan = Assert.IsType<AgentRealOperationResponse>(prepared.Value).Plan;
-        var accepted = await service.AcceptAsync(
+        var accepted = await service.AcceptWithEvidenceAsync(
             new AcceptAgentRealOperationRequest(
                 plan.OperationId, plan.PlanHash, session.ProductSessionId, CorrelationId.New()),
             session, CancellationToken.None);
@@ -914,7 +1301,7 @@ public sealed class AgentRealOperationServiceTests
         AgentRealOperationResponse? status = null;
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            status = (await service.QueryAsync(
+            status = (await service.QueryWithEvidenceAsync(
                 new QueryAgentRealOperationRequest(plan.OperationId, CorrelationId.New()),
                 session, CancellationToken.None)).Value as AgentRealOperationResponse;
             if (status?.State == RealOperationState.Failed)
@@ -924,7 +1311,7 @@ public sealed class AgentRealOperationServiceTests
 
         Assert.Equal(RealOperationState.Failed, status?.State);
         Assert.Equal(0, backend.ExecuteCalls);
-        Assert.Equal(2, backend.PreflightCalls);
+        Assert.Equal(1, backend.PreflightCalls);
         Assert.False(await repository.HasRealWriteBarrierAsync());
         var persistedSteps = await repository.GetStepsAsync(plan.OperationId);
         Assert.Equal(3, persistedSteps.Count);
@@ -959,7 +1346,7 @@ public sealed class AgentRealOperationServiceTests
         var backend = new RecordingBackend
         {
             PreflightFailureStepId = "format",
-            PreflightFailureCall = 3,
+            PreflightFailureCall = 2,
             PreflightException = new InvalidOperationException("volume preflight changed")
         };
         var service = new AgentRealOperationService(
@@ -978,7 +1365,7 @@ public sealed class AgentRealOperationServiceTests
                 proposal, Guid.NewGuid(), session.ProductSessionId, CorrelationId.New()),
             session, CancellationToken.None);
         var plan = Assert.IsType<AgentRealOperationResponse>(prepared.Value).Plan;
-        var accepted = await service.AcceptAsync(
+        var accepted = await service.AcceptWithEvidenceAsync(
             new AcceptAgentRealOperationRequest(
                 plan.OperationId, plan.PlanHash, session.ProductSessionId, CorrelationId.New()),
             session, CancellationToken.None);
@@ -987,7 +1374,7 @@ public sealed class AgentRealOperationServiceTests
         AgentRealOperationResponse? status = null;
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            status = (await service.QueryAsync(
+            status = (await service.QueryWithEvidenceAsync(
                 new QueryAgentRealOperationRequest(plan.OperationId, CorrelationId.New()),
                 session, CancellationToken.None)).Value as AgentRealOperationResponse;
             if (status?.State == RealOperationState.PartiallyCompleted)
@@ -997,7 +1384,7 @@ public sealed class AgentRealOperationServiceTests
 
         Assert.Equal(RealOperationState.PartiallyCompleted, status?.State);
         Assert.Equal(1, backend.ExecuteCalls);
-        Assert.Equal(3, backend.PreflightCalls);
+        Assert.Equal(2, backend.PreflightCalls);
         Assert.False(await repository.HasRealWriteBarrierAsync());
         var persistedSteps = await repository.GetStepsAsync(plan.OperationId);
         Assert.Equal(PersistedOperationStepState.Verified, persistedSteps[0].State);
@@ -1059,14 +1446,14 @@ public sealed class AgentRealOperationServiceTests
         var acceptedRequest = new AcceptAgentRealOperationRequest(
             preparedResponse.Plan.OperationId, preparedResponse.Plan.PlanHash,
             session.ProductSessionId, CorrelationId.New());
-        var accepted = await service.AcceptAsync(
+        var accepted = await service.AcceptWithEvidenceAsync(
             acceptedRequest, session, CancellationToken.None);
         Assert.IsType<AgentRealOperationResponse>(accepted.Value);
 
         AgentRealOperationResponse? status = null;
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            status = (await service.QueryAsync(
+            status = (await service.QueryWithEvidenceAsync(
                 new QueryAgentRealOperationRequest(
                     preparedResponse.Plan.OperationId, CorrelationId.New()),
                 session, CancellationToken.None)).Value as AgentRealOperationResponse;
@@ -1080,7 +1467,7 @@ public sealed class AgentRealOperationServiceTests
         Assert.Equal(1, backend.ExecuteCalls);
         Assert.False(await repository.HasRealWriteBarrierAsync());
 
-        var repeated = await service.AcceptAsync(
+        var repeated = await service.AcceptWithEvidenceAsync(
             acceptedRequest with { CorrelationId = CorrelationId.New() },
             session with { IsArmed = false }, CancellationToken.None);
         Assert.Equal(RealOperationState.Succeeded,
@@ -1161,7 +1548,7 @@ public sealed class AgentRealOperationServiceTests
                 fixture.Proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()),
                 fixture.Session, CancellationToken.None);
             var plan = Assert.IsType<AgentRealOperationResponse>(prepared.Value).Plan;
-            var accepted = await fixture.Service.AcceptAsync(new AcceptAgentRealOperationRequest(
+            var accepted = await fixture.Service.AcceptWithEvidenceAsync(new AcceptAgentRealOperationRequest(
                 plan.OperationId, plan.PlanHash, fixture.Session.ProductSessionId, CorrelationId.New()),
                 fixture.Session, CancellationToken.None);
             Assert.Equal(plan.OperationId, Assert.IsType<AgentRealOperationResponse>(accepted.Value).Plan.OperationId);
@@ -1195,74 +1582,50 @@ public sealed class AgentRealOperationServiceTests
     }
 
     [Fact]
-    public async Task OverlappingAcceptRequestsKeepOneAcceptanceAndExecutionAndRejectDifferentHash()
+    public async Task DuplicateAcceptHasNoPreflightAndPreservesOneDurableWriter()
     {
         var clock = new AdvancingTimeProvider(DateTimeOffset.UtcNow);
         var authority = new ObservedAuthority(clock);
-        var backend = new RecordingBackend { Clock = clock, PauseAcceptPreflight = true, PauseExecution = true };
+        var backend = new RecordingBackend { Clock = clock, PauseRunnerPreflight = true, PauseExecution = true };
         var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, clock, authority);
         await using var lease = fixture.Lease;
         try
         {
-            var prepared = await fixture.Service.PrepareAsync(new PrepareAgentRealOperationRequest(
-                fixture.Proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()),
-                fixture.Session, CancellationToken.None);
-            var plan = Assert.IsType<AgentRealOperationResponse>(prepared.Value).Plan;
+            var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
+                new(fixture.Proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).Value);
+            var plan = prepared.Plan;
             var request = new AcceptAgentRealOperationRequest(plan.OperationId, plan.PlanHash,
                 fixture.Session.ProductSessionId, CorrelationId.New());
-            var first = fixture.Service.AcceptAsync(request, fixture.Session, CancellationToken.None);
-            await backend.AcceptPreflightEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.False(first.IsCompleted);
-
-            // Start the second request while the first is inside its authoritative
-            // preflight. Before durable acceptance, the defined reply is busy.
-            var second = fixture.Service.AcceptAsync(request with { CorrelationId = CorrelationId.New() },
-                fixture.Session, CancellationToken.None);
-            var overlapping = await second.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.False(first.IsCompleted);
-            Assert.Equal(ApplicationStatus.Rejected, overlapping.Status);
-            Assert.Equal("agent.real_operation.busy", Assert.Single(overlapping.Messages).Code);
-            Assert.Equal(PersistedOperationState.Prepared, (await fixture.Plans.GetAsync(plan.OperationId))!.State);
-            Assert.Equal(0, authority.ConsumeCalls);
+            var accepted = await fixture.Service.AcceptAsync(request, fixture.Session, default);
+            Assert.IsType<AgentRealOperationStatusResponse>(accepted.Value);
+            await backend.RunnerPreflightEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // The one preflight is inside the paused worker; Accept already returned.
+            Assert.Equal(1, backend.PreflightCalls);
             Assert.Equal(0, backend.ExecuteCalls);
-            Assert.DoesNotContain(await fixture.Events.ListAsync(plan.OperationId), item => item.Event.Code == "operation.accepted");
-
-            backend.ReleaseAcceptPreflight.TrySetResult();
-            var firstReply = Assert.IsType<AgentRealOperationResponse>((await first.WaitAsync(TimeSpan.FromSeconds(5))).Value);
-            await backend.ExecutionEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            var duplicate = await fixture.Service.AcceptAsync(request with { CorrelationId = CorrelationId.New() },
-                fixture.Session, CancellationToken.None);
-            var duplicateReply = Assert.IsType<AgentRealOperationResponse>(duplicate.Value);
-            Assert.Equal(firstReply.Plan.OperationId, duplicateReply.Plan.OperationId);
-            Assert.Equal(firstReply.Plan.PlanHash, duplicateReply.Plan.PlanHash);
-            Assert.Equal(RealOperationState.Running, duplicateReply.State);
             Assert.Equal(1, authority.ConsumeCalls);
+            var duplicates = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => fixture.Service.AcceptAsync(
+                request with { CorrelationId = CorrelationId.New() }, fixture.Session, default)));
+            Assert.All(duplicates, duplicate => Assert.Equal(plan.OperationId,
+                Assert.IsType<AgentRealOperationStatusResponse>(duplicate.Value).OperationId));
+            Assert.Equal(1, backend.PreflightCalls);
+            backend.ReleaseRunnerPreflight.TrySetResult();
+            await backend.ExecutionEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(1, backend.ExecuteCalls);
-
             var differentHash = (plan.PlanHash[0] == '0' ? "1" : "0") + plan.PlanHash[1..];
-            var conflict = await fixture.Service.AcceptAsync(request with { PlanHash = differentHash, CorrelationId = CorrelationId.New() },
-                fixture.Session, CancellationToken.None);
-            Assert.Equal(ApplicationStatus.Rejected, conflict.Status);
+            var conflict = await fixture.Service.AcceptAsync(request with { PlanHash = differentHash }, fixture.Session, default);
             Assert.Equal("agent.real_operation.plan_mismatch", Assert.Single(conflict.Messages).Code);
             backend.ReleaseExecution.TrySetResult();
-            var completed = await AwaitSucceededAsync(fixture.Service, plan.OperationId, fixture.Session);
-            var terminalDuplicate = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.AcceptAsync(
-                request with { CorrelationId = CorrelationId.New() }, fixture.Session with { IsArmed = false }, CancellationToken.None)).Value);
-            Assert.Equal(completed.State, terminalDuplicate.State);
-            Assert.Equal(completed.Plan.OperationId, terminalDuplicate.Plan.OperationId);
-            Assert.Equal(completed.Plan.PlanHash, terminalDuplicate.Plan.PlanHash);
-            Assert.Equal(1, authority.ConsumeCalls);
+            await AwaitSucceededAsync(fixture.Service, plan.OperationId, fixture.Session);
+            var terminal = await fixture.Service.AcceptAsync(request, fixture.Session with { IsArmed = false }, default);
+            Assert.Equal(RealOperationState.Succeeded, Assert.IsType<AgentRealOperationStatusResponse>(terminal.Value).State);
+            Assert.Equal(1, backend.PreflightCalls);
+            Assert.Equal(0, backend.ReconciliationCalls);
             Assert.Equal(1, backend.ExecuteCalls);
             var history = await fixture.Events.ListAsync(plan.OperationId);
             Assert.Single(history, item => item.Event.Code == "operation.accepted");
             Assert.Single(history, item => item.Event.Code == "operation.step.call_issued");
-            Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
         }
-        finally
-        {
-            backend.ReleaseAcceptPreflight.TrySetResult();
-            backend.ReleaseExecution.TrySetResult();
-        }
+        finally { backend.ReleaseRunnerPreflight.TrySetResult(); backend.ReleaseExecution.TrySetResult(); }
     }
 
     [Theory]
@@ -1292,7 +1655,7 @@ public sealed class AgentRealOperationServiceTests
         var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
             new(proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()),
             fixture.Session, default)).Value);
-        Assert.True((await fixture.Service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+        Assert.True((await fixture.Service.AcceptWithEvidenceAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
             fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).IsSuccess);
         await AwaitSucceededAsync(fixture.Service, prepared.Plan.OperationId, fixture.Session);
         var attempts = await fixture.Plans.ReadMaximumCapacityAttemptsAsync(prepared.Plan.OperationId, "maximum");
@@ -1329,14 +1692,17 @@ public sealed class AgentRealOperationServiceTests
         var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
             new(MacroProposal(fixture.Proposal), Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()),
             fixture.Session, default)).Value);
-        await fixture.Service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+        await fixture.Service.AcceptWithEvidenceAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
             fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
         await AwaitDurableStateAsync(fixture.Plans, prepared.Plan.OperationId, PersistedOperationState.OutcomeUnknown);
-        await fixture.Service.InitializeRecoveryAsync();
+        await AwaitWorkerStoppedAsync(fixture.Service);
+        var restarted = new AgentRealOperationService(fixture.Plans, fixture.Events, backend, new FixedMachineIdentity(),
+            authority: null, timeProvider: null, isSessionStillArmed: _ => true, isAdministrator: () => true);
+        await restarted.InitializeRecoveryAsync();
         using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
             while (backend.MaximumRecoveryCalls < 1)
             {
-                await fixture.Service.QueryAsync(new(prepared.Plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
+                await fixture.Service.QueryWithEvidenceAsync(new(prepared.Plan.OperationId, CorrelationId.New()), fixture.Session, timeout.Token);
                 await Task.Delay(10, timeout.Token);
             }
         Assert.Equal(1, backend.MaximumSearchCalls);
@@ -1391,7 +1757,7 @@ public sealed class AgentRealOperationServiceTests
                 CapacityTiers: [new(first, firstPolicy), new(second, secondPolicy)]) }] };
         var prepared = Assert.IsType<AgentRealOperationResponse>((await fixture.Service.PrepareAsync(
             new(proposal, Guid.NewGuid(), fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).Value);
-        Assert.True((await fixture.Service.AcceptAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
+        Assert.True((await fixture.Service.AcceptWithEvidenceAsync(new(prepared.Plan.OperationId, prepared.Plan.PlanHash,
             fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default)).IsSuccess);
         await AwaitSucceededAsync(fixture.Service, prepared.Plan.OperationId, fixture.Session);
         Assert.Equal(5, (await fixture.Plans.ReadMaximumCapacityAttemptsAsync(prepared.Plan.OperationId, "maximum")).Count);
@@ -1443,13 +1809,39 @@ public sealed class AgentRealOperationServiceTests
         return (service, plans, events, session, proposal, lease);
     }
 
+    private static StorageSystemDocument JobDocument(StorageSnapshot snapshot, SystemId system, StorageInventoryScope? scope = null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var facts = WinPoolSimulationFacts.Create(snapshot, system) with { IsSimulation = false };
+        var sources = facts.Sources.Select(source => source with
+        {
+            Origin = source.ClassName.StartsWith("MSFT_", StringComparison.Ordinal) ? FactOrigin.StorageCim
+                : source.Namespace == "winpool/native" ? FactOrigin.Native : FactOrigin.Win32,
+            CapturedAt = now
+        }).ToImmutableArray();
+        foreach (var name in new[] { "MSFT_StorageSubSystem", "MSFT_PhysicalDisk", "MSFT_StoragePool", "MSFT_Disk",
+            "MSFT_Partition", "MSFT_Volume", "MSFT_VirtualDisk", "MSFT_StorageTier" })
+            if (!sources.Any(source => source.ClassName == name)) sources = sources.Add(new("job-empty:" + name,
+                FactOrigin.StorageCim, "root/microsoft/windows/storage", name, now, CollectionPurpose.Storage));
+        facts = facts with { Sources = sources, InventoryCapturedAt = now,
+            ScopedCollection = scope is null ? null : new(scope, now, now, true) };
+        return new(StorageSystemDocument.CurrentSchemaVersion, "local:structure-job", StorageSystemKind.Local,
+            "Structure job", facts, [], now) { SystemId = system };
+    }
+
+    private static async Task AwaitWorkerStoppedAsync(AgentRealOperationService service)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!await service.TryCloseAdmissionForShutdownAsync()) await Task.Delay(10, timeout.Token);
+    }
+
     private static async Task<AgentRealOperationResponse> AwaitSucceededAsync(AgentRealOperationService service,
         OperationId operationId, TrustedRealSession session)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (true)
         {
-            var status = Assert.IsType<AgentRealOperationResponse>((await service.QueryAsync(
+            var status = Assert.IsType<AgentRealOperationResponse>((await service.QueryWithEvidenceAsync(
                 new QueryAgentRealOperationRequest(operationId, CorrelationId.New()), session, timeout.Token)).Value);
             if (status.State == RealOperationState.Succeeded) return status;
             Assert.Contains(status.State, new[] { RealOperationState.Accepted, RealOperationState.Running });
@@ -1546,12 +1938,21 @@ public sealed class AgentRealOperationServiceTests
         public Task<RealVirtualDiskCreationRange> ReadVirtualDiskCreationRangeAsync(StorageObjectId target,
             TrustedRealSession session, CancellationToken cancellationToken) => Task.FromResult(
                 new RealVirtualDiskCreationRange(target, 1048576, 1073741824, 1048576, 0, [], "fresh-fingerprint", DateTimeOffset.UtcNow));
+        public Task<RealStructureCreationSupport> ReadStructureCreationSupportAsync(StorageObjectId target,
+            bool tiered, TrustedRealSession session, CancellationToken cancellationToken) => Task.FromResult(
+                new RealStructureCreationSupport(target, tiered, "fresh-fingerprint", DateTimeOffset.UtcNow,
+                    "physical-members-v1", "subsystem:job", "subsystem-unique-id", "subsystem-object-id",
+                    "pool:created", "pool-unique-id", "pool-object-id", true, true, true, true, 1,
+                    "fixture positive provider support"));
         private int executeCalls;
         private int preflightCalls;
         private int rangeReadCalls;
+        private int reconciliationCalls;
+        public int ReconciliationCalls => Volatile.Read(ref reconciliationCalls);
         public int ExecuteCalls => Volatile.Read(ref executeCalls);
         public int PreflightCalls => Volatile.Read(ref preflightCalls);
         public int RangeReadCalls => Volatile.Read(ref rangeReadCalls);
+        public Func<OperationPlan, RealOperationStep, Task<RealStepResult>>? ExecuteOverride { get; set; }
         public string? UnknownStepId { get; init; }
         public string UnknownCode { get; init; } = "fake.unknown";
         public Exception? ExecutionException { get; init; }
@@ -1560,15 +1961,13 @@ public sealed class AgentRealOperationServiceTests
         public string? PreflightFailureStepId { get; init; }
         public int PreflightFailureCall { get; init; }
         public Exception? PreflightException { get; init; }
+        public Func<RealOperationIntentRequest, TrustedRealSession, OperationId, OperationPlan>? PreparationOverride { get; set; }
         public Exception? PreparationException { get; set; }
         public Exception? RangeException { get; set; }
         public bool PauseRunnerPreflight { get; init; }
-        public bool PauseAcceptPreflight { get; init; }
         public bool PauseExecution { get; init; }
         public CancellationToken ExecutionToken { get; private set; }
         public TimeProvider Clock { get; init; } = TimeProvider.System;
-        public TaskCompletionSource AcceptPreflightEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource ReleaseAcceptPreflight { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ExecutionEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseExecution { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource RunnerPreflightEntered { get; } =
@@ -1584,6 +1983,7 @@ public sealed class AgentRealOperationServiceTests
         {
             if (PreparationException is { } exception)
                 throw exception;
+            if (PreparationOverride is { } prepare) return Task.FromResult(prepare(proposal, session, operationId));
             var now = Clock.GetUtcNow();
             var environment = new EnvironmentProfile(
                 EnvironmentId.New(), EnvironmentKind.LocalMachine,
@@ -1620,24 +2020,19 @@ public sealed class AgentRealOperationServiceTests
             CancellationToken cancellationToken)
         {
             var call = Interlocked.Increment(ref preflightCalls);
-            if (PauseAcceptPreflight && call == 1)
-            {
-                AcceptPreflightEntered.TrySetResult();
-                await ReleaseAcceptPreflight.Task.WaitAsync(cancellationToken);
-            }
             if (call == PreflightFailureCall
                 && StringComparer.Ordinal.Equals(step.Id, PreflightFailureStepId))
             {
                 throw PreflightException ?? new InvalidOperationException("fake preflight failure");
             }
-            if (PauseRunnerPreflight && call == 2)
+            if (PauseRunnerPreflight && call == 1)
             {
                 RunnerPreflightEntered.TrySetResult();
                 await ReleaseRunnerPreflight.Task.WaitAsync(cancellationToken);
             }
             return new RealStepPreflight(
                 "{\"disk\":\"physical-disk-unique-id\"}",
-                "inventory-v1", "target-fingerprint-v1", "physical-members-v1");
+                plan.InventoryVersion, plan.RealOperation!.TargetFingerprint, plan.RealOperation.PhysicalMemberFingerprint);
         }
 
         public async Task<RealStepResult> ExecuteStepAsync(
@@ -1654,6 +2049,7 @@ public sealed class AgentRealOperationServiceTests
                 ExecutionEntered.TrySetResult();
                 await ReleaseExecution.Task.WaitAsync(cancellationToken);
             }
+            if (ExecuteOverride is { } execute) return await execute(plan, step);
             if (StringComparer.Ordinal.Equals(step.Id, UnknownStepId))
             {
                 return new RealStepResult(
@@ -1671,6 +2067,7 @@ public sealed class AgentRealOperationServiceTests
             IReadOnlyList<RealOperationStepProgress> persistedSteps,
             CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref reconciliationCalls);
             if (Reconciliation is not null)
                 return Reconciliation(plan, persistedSteps);
             var failedStep = persistedSteps.FirstOrDefault(step =>

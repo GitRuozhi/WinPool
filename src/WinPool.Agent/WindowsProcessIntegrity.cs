@@ -14,6 +14,11 @@ public static class WindowsProcessIntegrity
     {
         if (processId <= 0) { return null; }
         using var process = OpenProcess(0x1000, false, processId); // QUERY_LIMITED_INFORMATION
+        return TryRead(process);
+    }
+
+    internal static int? TryRead(SafeProcessHandle process)
+    {
         if (process.IsInvalid || !OpenProcessToken(process, 0x0008, out var token)) { return null; }
         using (token)
         {

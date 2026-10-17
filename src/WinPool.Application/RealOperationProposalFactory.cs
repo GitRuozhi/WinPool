@@ -1,8 +1,7 @@
-using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
 /// <summary>
 /// App-side proposals contain requested values only. The Agent rereads Windows
@@ -450,18 +449,6 @@ public static class RealOperationProposalFactory
             throw new ArgumentException("The complete pool member set must contain distinct physical identities in the requested system.", nameof(members));
     }
 
-    public static RealOperationIntentRequest CreateHddTierTemplate(
-        SystemId systemId, StorageObjectId pool, string name)
-    {
-        var request = OneStep(systemId, OperationIntent.CreateStorageTier, pool,
-            new CreateTierCommand(RealTargetReference.ForExisting(pool), name,
-                65536, 1),
-            $"One 64 KiB, one-column HDD tier template named {name} exists in the exact pool",
-            "A pool-level HDD tier template is created; no virtual disk or data volume is created");
-        RealOperationValidator.Validate(request);
-        return request;
-    }
-
     public static RealOperationIntentRequest CreateTieredVirtualDisk(
         SystemId systemId, StorageObjectId pool, StorageObjectId tier,
         string name, long sizeBytes, bool useMaximumSize = false)
@@ -479,40 +466,6 @@ public static class RealOperationProposalFactory
                 "The requested capacity is allocated from the exact pool",
                 "Agent live provider and exact-template size verification required")],
             $"One Simple Fixed virtual disk {name} ({capacity}) is bound to the exact existing HDD template");
-        RealOperationValidator.Validate(request);
-        return request;
-    }
-
-    public static RealOperationIntentRequest RenameHddTier(
-        SystemId systemId, StorageObjectId tier, string name,
-        StorageObjectId? pool = null, IReadOnlyList<StorageObjectId>? members = null)
-    {
-        var request = OneStep(systemId, OperationIntent.RenameStorageObject, tier,
-            new RenameTierCommand(RealTargetReference.ForExisting(tier), name),
-            $"The exact HDD tier retains its identity and associations with name {name}",
-            "No data loss expected");
-        request = DeclarePoolMembers(request, pool, members);
-        RealOperationValidator.Validate(request);
-        return request;
-    }
-
-    public static RealOperationIntentRequest CreateMultiTieredMaximumVirtualDisk(
-        SystemId systemId, StorageObjectId pool, IReadOnlyList<StorageObjectId> tiers, string name)
-    {
-        ArgumentNullException.ThrowIfNull(tiers);
-        if (tiers.Count < 2 || tiers.Distinct().Count() != tiers.Count)
-            throw new ArgumentException("Multi-tier MAX requires distinct ordered templates.", nameof(tiers));
-        var inputs = tiers.Select(tier => new MaximumCapacityTier(RealTargetReference.ForExisting(tier), null)).ToArray();
-        var request = new RealOperationIntentRequest(OperationIntent.CreateVirtualDisk, systemId,
-            new[] { pool }.Concat(tiers).ToArray(),
-            [new RealOperationStep("create-tiered-vdisk", new CreateTieredVirtualDiskCommand(
-                RealTargetReference.ForExisting(pool), inputs[0].Tier, name, 0, true,
-                TieredVirtualDiskCreationMechanism.ExactTemplate, CapacityTiers: inputs), [],
-                "Exact unused templates, complete approved member set and per-tier layouts are verified",
-                "One VD is seeded at 0.5 C per tier, then every actual tier reaches its proven whole-GiB maximum in the listed order",
-                "All successful allocation and growth remains in effect if later search stops",
-                "Agent-frozen per-tier origins, durable attempts and strict postconditions required")],
-            "One exact multi-tier VD with verified whole-GiB maximum for every actual tier");
         RealOperationValidator.Validate(request);
         return request;
     }
@@ -598,97 +551,6 @@ public static class RealOperationProposalFactory
         var request = new RealOperationIntentRequest(OperationIntent.DeleteStoragePool,
             systemId, targets, steps,
             "Delete the exact pool after its virtual disk and explicit pool-level HDD templates are removed");
-        RealOperationValidator.Validate(request);
-        return request;
-    }
-
-    public static RealOperationIntentRequest CreateSingleMemberPool(
-        SystemId systemId, StorageObjectId physicalDisk, string poolName,
-        VirtualDiskOptions? virtualDisk)
-    {
-        var steps = new List<RealOperationStep>
-        {
-            new("create-pool",
-                new CreatePoolCommand(RealTargetReference.ForExisting(physicalDisk),
-                    poolName), [],
-                "The exact physical disk is RAW, has zero partitions and can join a pool",
-                $"One-member storage pool {poolName} exists",
-                "Existing partitions and data on the physical disk become inaccessible",
-                "Agent live Windows poolability check required")
-        };
-        if (virtualDisk is not null)
-            AppendVirtualDiskSteps(steps,
-                RealTargetReference.FromStep(StorageObjectKind.StoragePool,
-                    "create-pool"), virtualDisk);
-
-        var expected = virtualDisk is null
-            ? $"One-member storage pool named {poolName}"
-            : $"One-member storage pool {poolName}; Simple Fixed one-column " +
-              $"virtual disk {virtualDisk.Name} ({CreationCapacity(virtualDisk.SizeBytes, virtualDisk.UseMaximumSize)})" +
-              (virtualDisk.InitializeAndPartition
-                  ? "; GPT metadata only, then provider-created MSR and data layout are handled after a fresh read"
-                  : "; virtual disk remains RAW without partitions");
-        var request = new RealOperationIntentRequest(OperationIntent.CreateStoragePool,
-            systemId, [physicalDisk], steps, expected);
-        RealOperationValidator.Validate(request);
-        return request;
-    }
-
-    public static RealOperationIntentRequest RebuildSingleMemberPool(
-        SystemId systemId, StorageObjectId physicalDisk,
-        StorageObjectId oldPool, StorageObjectId oldVirtualDisk,
-        string newPoolName, VirtualDiskOptions options,
-        IReadOnlyList<StorageObjectId>? oldTierTemplates = null,
-        IReadOnlyList<StorageObjectId>? members = null)
-    {
-        oldTierTemplates ??= [];
-        if (oldTierTemplates.Any(tier => tier.System != systemId
-            || tier.Kind != StorageObjectKind.StorageTier)
-            || oldTierTemplates.Distinct().Count() != oldTierTemplates.Count)
-            throw new ArgumentException("Rebuild tiers must be unique exact existing tier targets in the requested system.", nameof(oldTierTemplates));
-        var steps = new List<RealOperationStep>
-        {
-            new("delete-vdisk",
-                new DeleteVirtualDiskCommand(RealTargetReference.ForExisting(oldVirtualDisk)),
-                [], "The exact old virtual disk and every child are verified",
-                "The old virtual disk and its child volumes are absent",
-                "All files, partitions, volumes and drive letters on the old virtual disk are lost",
-                "Agent live Windows removal check required"),
-        };
-        var previous = "delete-vdisk";
-        for (var index = 0; index < oldTierTemplates.Count; index++)
-        {
-            var tier = oldTierTemplates[index];
-            var stepId = $"delete-tier-{index + 1}";
-            steps.Add(new RealOperationStep(stepId,
-                new DeleteTierCommand(RealTargetReference.ForExisting(tier)), [previous],
-                "The exact old virtual disk has been verified absent and this exact pool-level HDD template is unused",
-                "The exact pool-level HDD template is absent",
-                "The old pool-level HDD template metadata is removed",
-                "Agent live Windows tier-removal check required"));
-            previous = stepId;
-        }
-        steps.Add(new RealOperationStep("delete-pool",
-                new DeletePoolCommand(RealTargetReference.ForExisting(oldPool)),
-                [previous],
-                "The old pool has no remaining virtual disks or tier templates",
-                "The old pool is absent and its physical member is released",
-                "All old pool metadata is lost",
-                "Agent live Windows removal check required"));
-        var targets = new List<StorageObjectId> { physicalDisk, oldPool, oldVirtualDisk };
-        if (members is not null)
-        {
-            ValidateMembers(systemId, members);
-            if (!members.Contains(physicalDisk))
-                throw new ArgumentException("The physical anchor must belong to the complete approved rebuild member set.", nameof(members));
-            targets.AddRange(members.Where(member => member != physicalDisk));
-        }
-        targets.AddRange(oldTierTemplates);
-        var request = new RealOperationIntentRequest(OperationIntent.RebuildStoragePool,
-            systemId, targets, steps,
-            $"Remove the old pool and virtual disk before separately preparing {newPoolName}/{options.Name}; " +
-            $"requested replacement is Simple Fixed one-column {CreationCapacity(options.SizeBytes, options.UseMaximumSize)}. " +
-            "Released-disk clearing and replacement creation require fresh identities and separate frozen confirmations");
         RealOperationValidator.Validate(request);
         return request;
     }

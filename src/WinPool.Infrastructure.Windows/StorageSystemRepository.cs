@@ -4,104 +4,14 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinPool.Application;
 using WinPool.Domain;
-using WinPool.Execution;
 
 namespace WinPool.Infrastructure.Windows;
 
-public sealed class LocalStorageSystemRepository : IStorageSystemRepository
-{
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
-
-    private readonly string? _directoryPath;
-
-    public LocalStorageSystemRepository(string? directoryPath = null) => _directoryPath = directoryPath;
-
-    public string DirectoryPath => _directoryPath ?? Path.Combine(StorageDataLocations.CurrentRoot, "Systems");
-
-    public async Task<IReadOnlyList<StorageSystemDocument>> LoadSimulationsAsync(
-        CancellationToken cancellationToken = default)
-    {
-        if (!Directory.Exists(DirectoryPath))
-        {
-            return [];
-        }
-
-        var documents = new List<StorageSystemDocument>();
-        foreach (var path in Directory.EnumerateFiles(DirectoryPath, "*.json")
-                     .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                await using var stream = File.OpenRead(path);
-                var document = await JsonSerializer.DeserializeAsync<StorageSystemDocument>(
-                    stream,
-                    JsonOptions,
-                    cancellationToken);
-                if (document is not null
-                    && document.SchemaVersion == StorageSystemDocument.CurrentSchemaVersion
-                    && document.Kind == StorageSystemKind.Simulation
-                    && !string.IsNullOrWhiteSpace(document.Id))
-                {
-                    documents.Add(document);
-                }
-            }
-            catch (Exception ex) when (
-                ex is JsonException or IOException or UnauthorizedAccessException)
-            {
-                // A damaged optional simulation must not prevent WinPool startup.
-            }
-        }
-
-        return documents;
-    }
-
-    public async Task SaveSimulationAsync(
-        StorageSystemDocument document,
-        CancellationToken cancellationToken = default)
-    {
-        if (document.Kind != StorageSystemKind.Simulation)
-        {
-            throw new InvalidOperationException("Only simulated systems can be persisted.");
-        }
-        Directory.CreateDirectory(DirectoryPath);
-        var safeId = string.Concat(document.Id.Select(ch =>
-            char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
-        var path = Path.Combine(DirectoryPath, $"{safeId}.json");
-        var temporaryPath = path + ".tmp";
-        await using (var stream = File.Create(temporaryPath))
-        {
-            await JsonSerializer.SerializeAsync(stream, document, JsonOptions, cancellationToken);
-        }
-        File.Move(temporaryPath, path, true);
-    }
-
-    public Task DeleteSimulationAsync(string id, CancellationToken cancellationToken = default)
-    {
-        var safeId = string.Concat(id.Select(ch =>
-            char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
-        var path = Path.Combine(DirectoryPath, $"{safeId}.json");
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
-        return Task.CompletedTask;
-    }
-}
-
 public interface IStructuredSimulationEditRepository
 {
-    Task SaveEditAsync(
-        StorageSystemDocument document,
-        OperationPlan plan,
-        IReadOnlyList<ExecutionEvent> events,
-        CancellationToken cancellationToken = default,
-        string commitId = "");
+    Task<StorageSystemDocument> SaveEditAsync(
+        StorageSystemDocument candidate, SimulationCommitIntent intent,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class SimulationCommitConflictException()
@@ -116,6 +26,7 @@ public sealed class SimulationCommitFailureException()
 
 public static class SimulationDocumentCodec
 {
+    private const int MaximumDocumentBytes = 3 * 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -132,9 +43,10 @@ public static class SimulationDocumentCodec
         }
 
         var json = JsonSerializer.Serialize(document, JsonOptions);
-        var sha256 = Convert.ToHexString(
-                SHA256.HashData(Encoding.UTF8.GetBytes(json)))
-            .ToLowerInvariant();
+        var bytes = Encoding.UTF8.GetBytes(json);
+        if (bytes.Length > MaximumDocumentBytes)
+            throw new InvalidDataException("The simulation document exceeds its supported size.");
+        var sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         var payload = new SimulationDocumentPayload(
             document.Id,
             document.SchemaVersion,
@@ -143,16 +55,16 @@ public static class SimulationDocumentCodec
             sha256,
             document.Revision,
             document.UpdatedAt);
-        StorageDocumentTransportBudget.Validate(payload);
         return payload;
     }
 
     public static StorageSystemDocument Decode(SimulationDocumentPayload payload)
     {
         ArgumentNullException.ThrowIfNull(payload);
-        StorageDocumentTransportBudget.Validate(payload);
         var json = payload.Json ?? string.Empty;
         var bytes = Encoding.UTF8.GetBytes(json);
+        if (bytes.Length == 0 || bytes.Length > MaximumDocumentBytes)
+            throw new InvalidDataException("The simulation document size is invalid.");
         var actual = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         if (!StringComparer.Ordinal.Equals(actual, payload.Sha256))
         {
@@ -184,7 +96,7 @@ public static class SimulationDocumentCodec
 
 public static class LocalInventoryDocumentCodec
 {
-    private const int MaximumPayloadBytes = StorageDocumentTransportBudget.MaximumBytes;
+    private const int MaximumPayloadBytes = 3 * 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -219,14 +131,12 @@ public static class LocalInventoryDocumentCodec
             json,
             Hash(bytes),
             document.UpdatedAt);
-        StorageDocumentTransportBudget.Validate(payload);
         return payload;
     }
 
     public static StorageSystemDocument Decode(LocalInventoryDocumentPayload payload)
     {
         ArgumentNullException.ThrowIfNull(payload);
-        StorageDocumentTransportBudget.Validate(payload);
         var bytes = Encoding.UTF8.GetBytes(payload.Json ?? string.Empty);
         if (bytes.Length == 0
             || bytes.Length > MaximumPayloadBytes
@@ -282,17 +192,6 @@ public static class LocalInventoryDocumentCodec
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 }
 
-internal static class StorageDocumentTransportBudget
-{
-    // Measure the escaped JSON string inside its typed payload, leaving room in the 4 MiB IPC frame.
-    public const int MaximumBytes = 3 * 1024 * 1024;
-    public static void Validate<T>(T payload)
-    {
-        if (JsonSerializer.SerializeToUtf8Bytes(payload).Length > MaximumBytes)
-            throw new InvalidDataException("The escaped document payload exceeds its IPC budget.");
-    }
-}
-
 public sealed class AgentBackedHardwareInventoryProvider(IAgentConnection connection)
     : IHardwareInventoryProvider
 {
@@ -307,20 +206,10 @@ public sealed class AgentBackedHardwareInventoryProvider(IAgentConnection connec
 
     private async Task<StorageSystemDocument> CollectAsync(CollectionPurpose purpose, CancellationToken cancellationToken)
     {
-        var result = await connection.SendAsync(
+        return await AgentInventoryReader.CaptureAsync(connection,
             new CaptureAgentManageInventoryRequest(
                 CorrelationId.New(), purpose),
             cancellationToken);
-        if (!result.IsSuccess
-            || result.Value is not ManageInventoryCaptureResponse response)
-        {
-            var message = result.Messages.FirstOrDefault();
-            throw new InventoryScanException(
-                "The Agent local inventory request failed.",
-                !string.IsNullOrWhiteSpace(message?.DiagnosticText) ? message.DiagnosticText : message?.Code ?? string.Empty);
-        }
-
-        return LocalInventoryDocumentCodec.Decode(response.Document);
     }
 }
 
@@ -332,61 +221,52 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Dictionary<string, string> hashes = new(StringComparer.Ordinal);
 
-    public async Task<IReadOnlyList<StorageSystemDocument>> LoadSimulationsAsync(
+    public async Task<IReadOnlyList<SimulationDocumentMetadata>> LoadSimulationsAsync(
         CancellationToken cancellationToken = default)
     {
         await gate.WaitAsync(cancellationToken);
         try
         {
             hashes.Clear();
-            var documents = new List<StorageSystemDocument>();
-            string? afterDocumentId = null;
+            var documents = new List<SimulationDocumentMetadata>();
+            string? after = null;
             do
             {
-                var response = await SendAsync(
-                    new ListAgentSimulationDocumentsRequest(
-                        100,
-                        afterDocumentId,
-                        CorrelationId.New()),
-                    cancellationToken);
+                var response = await SendAsync(new ListAgentSimulationDocumentsRequest(100, after, CorrelationId.New()), cancellationToken);
                 if (response is not SimulationDocumentListResponse list)
-                {
                     throw new InvalidDataException("The Agent returned an unexpected simulation list response.");
-                }
                 foreach (var metadata in list.Documents)
                 {
-                    var loaded = await SendAsync(
-                        new LoadAgentSimulationDocumentRequest(
-                            metadata.DocumentId,
-                            CorrelationId.New()),
-                        cancellationToken);
-                    if (loaded is not SimulationDocumentLoadedResponse { Document: { } payload }
-                        || payload.DocumentId != metadata.DocumentId
-                        || payload.DocumentSchemaVersion != metadata.DocumentSchemaVersion
-                        || payload.DisplayName != metadata.DisplayName
-                        || payload.Sha256 != metadata.Sha256
-                        || payload.Revision != metadata.Revision
-                        || payload.UpdatedAtUtc != metadata.UpdatedAtUtc)
-                    {
-                        throw new InvalidDataException(
-                            "The Agent returned simulation content that does not match its metadata.");
-                    }
-                    var document = SimulationDocumentCodec.Decode(payload);
-                    hashes.Add(document.Id, payload.Sha256);
-                    documents.Add(document);
+                    hashes.Add(metadata.DocumentId, metadata.Sha256);
+                    documents.Add(metadata);
                 }
-                afterDocumentId = list.NextAfterDocumentId;
-            }
-            while (afterDocumentId is not null);
-            return documents
-                .OrderBy(document => document.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(document => document.Id, StringComparer.Ordinal)
-                .ToArray();
+                after = list.NextAfterDocumentId;
+            } while (after is not null);
+            return documents.OrderBy(document => document.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(document => document.DocumentId, StringComparer.Ordinal).ToArray();
         }
-        finally
-        {
-            gate.Release();
-        }
+        finally { gate.Release(); }
+    }
+
+    public async Task<StorageSystemDocument?> LoadSimulationAsync(string documentId,
+        CancellationToken cancellationToken = default)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try { return await LoadDocumentCoreAsync(documentId, cancellationToken); }
+        finally { gate.Release(); }
+    }
+
+    private async Task<StorageSystemDocument?> LoadDocumentCoreAsync(string documentId, CancellationToken cancellationToken)
+    {
+        var response = await SendAsync(new LoadAgentSimulationDocumentRequest(documentId, CorrelationId.New()), cancellationToken);
+        if (response is not SimulationDocumentLoadedResponse loaded)
+            throw new InvalidDataException("The Agent returned an unexpected simulation load response.");
+        if (loaded.Document is null) return null;
+        if (loaded.Document.DocumentId != documentId)
+            throw new InvalidDataException("The Agent returned a different simulation document.");
+        var document = SimulationDocumentCodec.Decode(loaded.Document);
+        hashes[documentId] = loaded.Document.Sha256;
+        return document;
     }
 
     public async Task SaveSimulationAsync(
@@ -412,95 +292,49 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         }
     }
 
-    public async Task SaveEditAsync(
-        StorageSystemDocument document,
-        OperationPlan plan,
-        IReadOnlyList<ExecutionEvent> events,
-        CancellationToken cancellationToken = default,
-        string commitId = "")
+    public async Task<StorageSystemDocument> SaveEditAsync(
+        StorageSystemDocument candidate, SimulationCommitIntent intent,
+        CancellationToken cancellationToken = default)
     {
         await gate.WaitAsync(cancellationToken);
         try
         {
-            if (!hashes.TryGetValue(document.Id, out var expected))
-            {
-                throw new InvalidOperationException(
-                    "The simulation document must be loaded before an edit can be committed.");
-            }
-
-            var id = string.IsNullOrWhiteSpace(commitId)
-                ? Guid.NewGuid().ToString("N")
-                : commitId.Trim();
-            var payload = SimulationDocumentCodec.Encode(document);
-            var result = await connection.SendAsync(
-                new CommitAgentSimulationEditRequest(
-                    payload,
-                    expected,
-                    plan,
-                    events,
-                    CorrelationId.New(),
-                    id),
-                cancellationToken);
+            if (!hashes.TryGetValue(intent.DocumentId, out var beforeHash))
+                throw new InvalidOperationException("The simulation document must be loaded before an edit can be committed.");
+            var expected = SimulationDocumentCodec.Encode(candidate);
+            var result = await connection.SendAsync(new CommitAgentSimulationEditRequest(intent, CorrelationId.New()), cancellationToken);
+            SimulationCommitReceipt? receipt = (result.Value as SimulationEditCommittedResponse)?.Receipt;
             if (result.Status == ApplicationStatus.OutcomeUnknown)
             {
-                var lookup = await connection.SendAsync(
-                    new LookupAgentSimulationCommitRequest(
-                        id,
-                        document.Id,
-                        expected,
-                        payload.Sha256,
-                        payload.Revision,
-                        plan.OperationId.Value.ToString("N"),
-                        plan.PlanHash,
-                        CorrelationId.New()),
-                    cancellationToken);
-                if (lookup.IsSuccess
-                    && lookup.Value is SimulationCommitLookupResponse found
-                    && found.Found
-                    && found.Receipt is { } receipt
-                    && receipt.CommitId == id
-                    && receipt.BeforeSha256 == expected
-                    && CommitDocumentsMatch(receipt.Document, payload)
-                    && receipt.OperationId == plan.OperationId.Value.ToString("N")
-                    && receipt.PlanHash == plan.PlanHash)
-                {
-                    hashes[document.Id] = receipt.Document.Sha256;
-                    return;
-                }
-
-                throw new SimulationCommitOutcomeUnknownException(id);
+                var lookup = await connection.SendAsync(new LookupAgentSimulationCommitRequest(
+                    intent.CommitId, intent.DocumentId, intent.IntentHash, CorrelationId.New()), cancellationToken);
+                if (lookup.IsSuccess && lookup.Value is SimulationCommitLookupResponse { Found: true } found)
+                    receipt = found.Receipt;
+                if (receipt is null) throw new SimulationCommitOutcomeUnknownException(intent.CommitId);
             }
-
-            if (!result.IsSuccess || result.Value is null)
+            else if (!result.IsSuccess || receipt is null)
             {
                 var code = result.Messages.FirstOrDefault()?.Code;
-                if (result.Status == ApplicationStatus.Rejected
-                    && code == "agent.persistence.simulation_commit_conflict")
-                {
+                if (result.Status == ApplicationStatus.Rejected && code == "agent.persistence.simulation_commit_conflict")
                     throw new SimulationCommitConflictException();
-                }
                 if (result.Status == ApplicationStatus.Cancelled)
-                {
-                    throw new OperationCanceledException(
-                        "The simulation commit was cancelled before completion.",
-                        cancellationToken);
-                }
-                if (result.Status == ApplicationStatus.Failed
-                    && code == "agent.persistence.simulation_commit_failed")
-                {
+                    throw new OperationCanceledException("The simulation commit was cancelled before completion.", cancellationToken);
+                if (result.Status == ApplicationStatus.Failed && code == "agent.persistence.simulation_commit_failed")
                     throw new SimulationCommitFailureException();
-                }
-                throw new InvalidOperationException(
-                    code
-                    ?? "The Agent persistence request failed.");
+                throw new InvalidOperationException(code ?? "The Agent simulation commit failed.");
             }
-
-            UpdateHash(result.Value, document.Id);
+            if (receipt.CommitId != intent.CommitId || receipt.DocumentId != intent.DocumentId
+                || receipt.IntentHash != intent.IntentHash || receipt.BeforeRevision != intent.ExpectedRevision
+                || receipt.AfterRevision != checked(intent.ExpectedRevision + 1) || receipt.BeforeSha256 != beforeHash)
+                throw new SimulationCommitOutcomeUnknownException(intent.CommitId);
+            hashes[intent.DocumentId] = receipt.AfterSha256;
+            if (receipt.AfterRevision == candidate.Revision && receipt.AfterSha256 == expected.Sha256)
+                return candidate;
+            // A lost preview cache or a different authoritative candidate requires one body read.
+            return await LoadDocumentCoreAsync(intent.DocumentId, cancellationToken)
+                ?? throw new SimulationCommitOutcomeUnknownException(intent.CommitId);
         }
-        finally
-        {
-            gate.Release();
-        }
+        finally { gate.Release(); }
     }
 
     public async Task DeleteSimulationAsync(
@@ -550,18 +384,6 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         return result.Value;
     }
 
-    private static bool CommitDocumentsMatch(
-        SimulationDocumentPayload left,
-        SimulationDocumentPayload right) =>
-        left.DocumentId == right.DocumentId
-        && left.DocumentSchemaVersion == right.DocumentSchemaVersion
-        && left.DisplayName == right.DisplayName
-        && left.Json == right.Json
-        && left.Sha256 == right.Sha256
-        && left.Revision == right.Revision
-        && left.UpdatedAtUtc.ToUnixTimeMilliseconds()
-            == right.UpdatedAtUtc.ToUnixTimeMilliseconds();
-
     private void UpdateHash(AgentResponse response, string documentId)
     {
         if (response is not SimulationDocumentSavedResponse saved
@@ -569,7 +391,6 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         {
             throw new InvalidDataException("The Agent returned an unexpected save response.");
         }
-        SimulationDocumentCodec.Decode(saved.Document);
         hashes[documentId] = saved.Document.Sha256;
     }
 }

@@ -2,7 +2,6 @@ namespace WinPool.Application;
 
 public sealed record WorkspaceSessionState(
     int SchemaVersion,
-    WorkspacePage ActivePage,
     string ActiveDocumentId,
     ManageWorkspaceCategory ActiveCategory,
     IReadOnlyDictionary<ManageWorkspaceCategory, string> RememberedProviderKeys,
@@ -25,7 +24,6 @@ public static class WorkspaceSessionStateValidator
             && state.RememberedProviderKeys.All(pair =>
                 Enum.IsDefined(pair.Key)
                 && IsBounded(pair.Value, 1024, allowEmpty: false))
-            && Enum.IsDefined(state.ActivePage)
             && Enum.IsDefined(state.ActiveCategory)
             && state.UpdatedAtUtc != default;
     }

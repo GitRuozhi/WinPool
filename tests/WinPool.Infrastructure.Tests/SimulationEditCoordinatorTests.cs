@@ -6,7 +6,33 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class SimulationEditCoordinatorTests
 {
     [Fact]
-    public async Task EditPassesThroughPlanAuthorizationAndSimulationExecutorBeforeCommit()
+    public async Task FrozenPreviewMatchesAgentCandidateAndCommitReusesPreviewWithoutRunningRulesAgain()
+    {
+        var snapshot = SimulationLayouts.PoolWithoutVirtualDisk();
+        var document = new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion,
+            "simulation:deterministic", StorageSystemKind.Simulation, "Deterministic", snapshot, [], DateTimeOffset.UnixEpoch);
+        var pool = document.Snapshot.StoragePools.First(item => !item.IsPrimordial);
+        var plan = SimulationDraftPlanner.Precheck(document,
+            [new SimulationEditRequest(SimulationEditKind.CreateVirtualDisk, pool.StableId,
+                Name: "Space", SizeBytes: 8L << 30, CreatePartition: true, CreateMsr: true,
+                FileSystem: "NTFS", AllocationUnitSize: 65536)]);
+        Assert.NotNull(plan.PreviewDocument);
+        var remoteBaseline = SimulationDocumentCodec.Decode(SimulationDocumentCodec.Encode(document));
+        var remote = new SimulationOperationService().ReducePlan(remoteBaseline, plan);
+        Assert.True(remote.Succeeded, remote.Error);
+        var candidate = remote.Document with { Revision = document.Revision + 1 };
+        Assert.Equal(SimulationDocumentCodec.Encode(plan.PreviewDocument!).Sha256,
+            SimulationDocumentCodec.Encode(candidate).Sha256);
+        SimulationEditCommit? committed = null;
+        var coordinator = new SimulationEditCoordinator(() => document,
+            (commit, _) => { committed = commit; return Task.CompletedTask; }, new ThrowingSimulationEditor());
+        var result = await coordinator.ExecutePlanAsync(plan, CancellationToken.None);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(SimulationDocumentCodec.Encode(plan.PreviewDocument!).Sha256, SimulationDocumentCodec.Encode(committed!.Document).Sha256);
+    }
+
+    [Fact]
+    public async Task TypedEditIsReducedAndCommittedWithoutAnExecutionPlan()
     {
         var active = CreateDocument(StorageSystemKind.Simulation);
         StorageSystemDocument? committed = null;
@@ -32,10 +58,8 @@ public sealed class SimulationEditCoordinatorTests
         Assert.True(result.IsSuccess);
         Assert.NotNull(committed);
         Assert.NotNull(structuredCommit);
-        Assert.Equal(result.Value!.PlanHash, structuredCommit.Plan.PlanHash);
-        Assert.Equal(
-            WinPool.Execution.ExecutionEventKind.Completed,
-            structuredCommit.Events[^1].Kind);
+        Assert.Equal(result.Value!.PlanHash, structuredCommit.Intent.IntentHash);
+        Assert.Single(structuredCommit.Intent.Edits);
         Assert.Equal(
             "Renamed disk",
             committed.Snapshot.PhysicalDisks.Single().FriendlyName);
@@ -46,11 +70,10 @@ public sealed class SimulationEditCoordinatorTests
     }
 
     [Theory]
-    [InlineData(true, "True", false)]
-    [InlineData(false, "False", true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
     public async Task FormatModeIsBoundIntoTypedPlanAndPreview(
         bool quickFormat,
-        string expectedParameter,
         bool expectFullSwitch)
     {
         var active = CreateFormattedDocument();
@@ -78,7 +101,7 @@ public sealed class SimulationEditCoordinatorTests
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(committed);
-        Assert.Equal(expectedParameter, committed!.Plan.Parameters["QuickFormat"]);
+        Assert.Equal(quickFormat, committed!.Intent.Edits.Single().QuickFormat);
         Assert.Equal(
             expectFullSwitch,
             string.Join(Environment.NewLine, result.Value!.SimulatedCommands)
@@ -110,7 +133,7 @@ public sealed class SimulationEditCoordinatorTests
             CancellationToken.None);
 
         Assert.True(format.IsSuccess);
-        Assert.Equal("True", committed!.Plan.Parameters["QuickFormat"]);
+        Assert.True(committed!.Intent.Edits.Single().QuickFormat ?? true);
         Assert.DoesNotContain(
             " -Full",
             string.Join(Environment.NewLine, format.Value!.SimulatedCommands),
@@ -121,7 +144,7 @@ public sealed class SimulationEditCoordinatorTests
             CancellationToken.None);
 
         Assert.True(rename.IsSuccess);
-        Assert.DoesNotContain("QuickFormat", committed!.Plan.Parameters.Keys);
+        Assert.Null(committed!.Intent.Edits.Single().QuickFormat);
     }
 
     [Fact]
@@ -170,9 +193,9 @@ public sealed class SimulationEditCoordinatorTests
                 FileSystem: "NTFS"),
             CancellationToken.None);
 
-        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        Assert.Equal(ApplicationStatus.Rejected, result.Status);
         Assert.False(committed);
-        Assert.Equal("simulation.failed", Assert.Single(result.Messages).Code);
+        Assert.Equal("simulation.plan-rejected", Assert.Single(result.Messages).Code);
     }
 
     [Fact]
@@ -249,65 +272,28 @@ public sealed class SimulationEditCoordinatorTests
     }
 
     [Fact]
-    public async Task BuiltInResetAlsoUsesTheAuthorizedSimulationExecutionChain()
+    public async Task BuiltInResetUsesTheSameDeterministicReducerAsNormalEdits()
     {
-        var active = CreateDocument(StorageSystemKind.Simulation) with
-        {
-            Id = "simulation:builtin:test",
-            SystemId = InternalStableIdentity.SystemFromDocumentId("simulation:builtin:test")
-        };
-        var coordinator = new SimulationEditCoordinator(
-            () => active,
-            (commit, _) =>
-            {
-                active = commit.Document;
-                return Task.CompletedTask;
-            },
-            new SimulationOperationService(),
-            document => new SimulationOperationResult(
-                true,
-                document with { DisplayName = "Reset document" },
-                string.Empty,
-                ["Reset-SimulationDocument -BuiltIn"]));
-
-        var result = await coordinator.ExecuteAsync(
-            new SimulationEditRequest(
-                SimulationEditKind.ResetDocument,
-                active.Snapshot.Computer.StableId),
-            CancellationToken.None);
-
+        var active = SimulationCatalog.CreateDocuments()[0] with { DisplayName = "Changed" };
+        var coordinator = new SimulationEditCoordinator(() => active,
+            (commit, _) => { active = commit.Document; return Task.CompletedTask; }, new SimulationOperationService());
+        var result = await coordinator.ExecuteAsync(new(SimulationEditKind.ResetDocument,
+            active.Snapshot.Computer.StableId), CancellationToken.None);
         Assert.True(result.IsSuccess);
-        Assert.Equal("Reset document", active.DisplayName);
-        Assert.Equal(
-            "Reset-SimulationDocument -BuiltIn",
-            Assert.Single(result.Value!.SimulatedCommands));
-        Assert.False(string.IsNullOrWhiteSpace(result.Value.PlanHash));
+        Assert.Equal("DESKTOP-PL96UKD", active.DisplayName);
+        Assert.Contains("restore the built-in simulation", Assert.Single(result.Value!.SimulatedCommands));
     }
 
     [Fact]
     public async Task ImportedSimulationCannotUseBuiltInResetContract()
     {
         var active = CreateDocument(StorageSystemKind.Simulation);
-        var resetCalled = false;
-        var coordinator = new SimulationEditCoordinator(
-            () => active,
-            (_, _) => Task.CompletedTask,
-            new SimulationOperationService(),
-            document =>
-            {
-                resetCalled = true;
-                return SimulationOperationResult.Failure(document, "Unexpected reset.");
-            });
-
-        var result = await coordinator.ExecuteAsync(
-            new SimulationEditRequest(
-                SimulationEditKind.ResetDocument,
-                active.Snapshot.Computer.StableId),
-            CancellationToken.None);
-
+        var coordinator = new SimulationEditCoordinator(() => active,
+            (_, _) => throw new InvalidOperationException("Must not commit"), new SimulationOperationService());
+        var result = await coordinator.ExecuteAsync(new(SimulationEditKind.ResetDocument,
+            active.Snapshot.Computer.StableId), CancellationToken.None);
         Assert.Equal(ApplicationStatus.Rejected, result.Status);
         Assert.Equal("simulation.reset-built-in-only", Assert.Single(result.Messages).Code);
-        Assert.False(resetCalled);
     }
 
     [Theory]
@@ -323,9 +309,7 @@ public sealed class SimulationEditCoordinatorTests
             () => active,
             async (commit, token) =>
             {
-                await repository.SaveEditAsync(
-                    commit.Document, commit.Plan, commit.Events, token, commit.CommitId);
-                active = commit.Document;
+                active = await repository.SaveEditAsync(commit.Document, commit.Intent, token);
             },
             new SimulationOperationService());
 
@@ -347,9 +331,9 @@ public sealed class SimulationEditCoordinatorTests
         Assert.Equal(4, connection.Requests.Count);
         var firstCommit = Assert.IsType<CommitAgentSimulationEditRequest>(connection.Requests[1]);
         var secondCommit = Assert.IsType<CommitAgentSimulationEditRequest>(connection.Requests[3]);
-        Assert.Equal(firstCommit.Document.Sha256, secondCommit.ExpectedPreviousSha256);
-        Assert.False(string.IsNullOrWhiteSpace(firstCommit.CommitId));
-        Assert.NotEqual(firstCommit.CommitId, secondCommit.CommitId);
+        Assert.Equal(firstCommit.Intent.ExpectedRevision + 1, secondCommit.Intent.ExpectedRevision);
+        Assert.False(string.IsNullOrWhiteSpace(firstCommit.Intent.CommitId));
+        Assert.NotEqual(firstCommit.Intent.CommitId, secondCommit.Intent.CommitId);
     }
 
     [Theory]
@@ -358,15 +342,9 @@ public sealed class SimulationEditCoordinatorTests
     [InlineData("unavailable", false)]
     [InlineData("commit-id", false)]
     [InlineData("before-hash", false)]
-    [InlineData("operation-id", false)]
-    [InlineData("plan-hash", false)]
+    [InlineData("intent-hash", false)]
     [InlineData("document-id", false)]
-    [InlineData("schema", false)]
-    [InlineData("display-name", false)]
-    [InlineData("json", false)]
-    [InlineData("after-hash", false)]
     [InlineData("revision", false)]
-    [InlineData("updated-at", false)]
     public async Task UnconfirmedCommitRemainsUnknownWithoutResubmittingOrPublishingCandidate(
         string lookupFault, bool useDraftPlan)
     {
@@ -379,9 +357,7 @@ public sealed class SimulationEditCoordinatorTests
             () => active,
             async (commit, token) =>
             {
-                await repository.SaveEditAsync(
-                    commit.Document, commit.Plan, commit.Events, token, commit.CommitId);
-                active = commit.Document;
+                active = await repository.SaveEditAsync(commit.Document, commit.Intent, token);
             },
             new SimulationOperationService());
 
@@ -419,9 +395,7 @@ public sealed class SimulationEditCoordinatorTests
             () => active,
             async (commit, token) =>
             {
-                await repository.SaveEditAsync(
-                    commit.Document, commit.Plan, commit.Events, token, commit.CommitId);
-                active = commit.Document;
+                active = await repository.SaveEditAsync(commit.Document, commit.Intent, token);
             },
             new SimulationOperationService());
 
@@ -505,24 +479,16 @@ public sealed class SimulationEditCoordinatorTests
         return created.Document;
     }
 
-    // Simulate Agent persistence and transport replies; client planning, execution and reconciliation are real.
-    private sealed class LostCommitReplyConnection(
-        string lookupFault = "none",
-        ApplicationStatus? commitStatus = null,
-        string? commitCode = null) : IAgentConnection
+    // The fake Agent runs the production reducer; the first persisted reply is lost.
+    private sealed class LostCommitReplyConnection(string lookupFault = "none",
+        ApplicationStatus? commitStatus = null, string? commitCode = null) : IAgentConnection
     {
-        private CommitAgentSimulationEditRequest? firstCommit;
+        private SimulationCommitReceipt? firstReceipt;
         public SimulationDocumentPayload? Current { get; private set; }
         public List<AgentRequest> Requests { get; } = [];
-
-        public Task<ApplicationResult<AgentHandshake>> ConnectAsync(CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public IAsyncEnumerable<AgentEvent> WatchAsync(CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public Task<ApplicationResult<AgentResponse>> SendAsync(
-            AgentRequest request, CancellationToken cancellationToken)
+        public Task<ApplicationResult<AgentHandshake>> ConnectAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public IAsyncEnumerable<AgentEvent> WatchAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ApplicationResult<AgentResponse>> SendAsync(AgentRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
             AgentResponse response;
@@ -533,72 +499,51 @@ public sealed class SimulationEditCoordinatorTests
                     Current = save.Document;
                     response = new SimulationDocumentSavedResponse(Current);
                     break;
+                case LoadAgentSimulationDocumentRequest:
+                    response = new SimulationDocumentLoadedResponse(Current);
+                    break;
                 case CommitAgentSimulationEditRequest commit:
-                    Assert.Equal(Current!.Sha256, commit.ExpectedPreviousSha256);
-                    Assert.Equal(Current.Revision + 1, commit.Document.Revision);
+                    Assert.Equal(Current!.Revision, commit.Intent.ExpectedRevision);
                     if (commitStatus is { } status)
+                        return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(status, request.CorrelationId,
+                            new ApplicationMessage(commitCode!, commitCode!, string.Empty, ApplicationMessageSeverity.Error, [])));
+                    var before = Current;
+                    var reduced = new SimulationOperationService().ReducePlan(SimulationDocumentCodec.Decode(before),
+                        new SimulationDraftPlan(commit.Intent.CommitId, commit.Intent.Edits));
+                    Assert.True(reduced.Succeeded, reduced.Error);
+                    Current = SimulationDocumentCodec.Encode(reduced.Document with { Revision = before.Revision + 1 });
+                    var receipt = new SimulationCommitReceipt(commit.Intent.CommitId, Current.DocumentId,
+                        before.Revision, Current.Revision, before.Sha256, Current.Sha256,
+                        commit.Intent.IntentHash, DateTimeOffset.UtcNow);
+                    if (firstReceipt is null)
                     {
-                        return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(
-                            status, request.CorrelationId,
-                            new ApplicationMessage(commitCode!, commitCode!, string.Empty,
-                                ApplicationMessageSeverity.Error, [])));
+                        firstReceipt = receipt;
+                        return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(ApplicationStatus.OutcomeUnknown, request.CorrelationId));
                     }
-                    Current = commit.Document;
-                    if (firstCommit is null)
-                    {
-                        firstCommit = commit;
-                        // The Agent persisted the edit, but its reply never reached the client.
-                        return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(
-                            ApplicationStatus.OutcomeUnknown, request.CorrelationId));
-                    }
-                    response = new SimulationDocumentSavedResponse(Current);
+                    response = new SimulationEditCommittedResponse(receipt);
                     break;
                 case LookupAgentSimulationCommitRequest lookup:
-                    Assert.NotNull(firstCommit);
-                    Assert.Equal(firstCommit.CommitId, lookup.CommitId);
-                    Assert.Equal(firstCommit.Document.DocumentId, lookup.DocumentId);
-                    Assert.Equal(firstCommit.ExpectedPreviousSha256, lookup.ExpectedBeforeSha256);
-                    Assert.Equal(firstCommit.Document.Sha256, lookup.ExpectedAfterSha256);
-                    Assert.Equal(firstCommit.Document.Revision, lookup.ExpectedRevision);
-                    Assert.Equal(firstCommit.Plan.OperationId.Value.ToString("N"), lookup.OperationId);
-                    Assert.Equal(firstCommit.Plan.PlanHash, lookup.PlanHash);
+                    Assert.NotNull(firstReceipt);
+                    Assert.Equal(firstReceipt.CommitId, lookup.CommitId);
+                    Assert.Equal(firstReceipt.DocumentId, lookup.DocumentId);
+                    Assert.Equal(firstReceipt.IntentHash, lookup.IntentHash);
                     if (lookupFault == "unavailable")
-                    {
-                        return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(
-                            ApplicationStatus.Failed, request.CorrelationId));
-                    }
-                    response = lookupFault == "not-found"
-                        ? new SimulationCommitLookupResponse(false, null)
-                        : new SimulationCommitLookupResponse(true, CreateReceipt(firstCommit));
+                        return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(ApplicationStatus.Failed, request.CorrelationId));
+                    response = lookupFault == "not-found" ? new SimulationCommitLookupResponse(false, null)
+                        : new SimulationCommitLookupResponse(true, lookupFault switch
+                        {
+                            "none" => firstReceipt,
+                            "commit-id" => firstReceipt with { CommitId = "other" },
+                            "before-hash" => firstReceipt with { BeforeSha256 = "other" },
+                            "intent-hash" => firstReceipt with { IntentHash = "other" },
+                            "document-id" => firstReceipt with { DocumentId = "simulation:other" },
+                            "revision" => firstReceipt with { AfterRevision = firstReceipt.AfterRevision + 1 },
+                            _ => throw new NotSupportedException(lookupFault)
+                        });
                     break;
-                default:
-                    throw new NotSupportedException($"Unexpected request: {request.GetType().Name}");
+                default: throw new NotSupportedException(request.GetType().Name);
             }
             return Task.FromResult(ApplicationResult<AgentResponse>.Succeeded(response, request.CorrelationId));
-        }
-
-        private SimulationCommitReceipt CreateReceipt(CommitAgentSimulationEditRequest commit)
-        {
-            var receipt = new SimulationCommitReceipt(
-                commit.CommitId, commit.Plan.OperationId.Value.ToString("N"),
-                commit.ExpectedPreviousSha256, commit.Plan.PlanHash, commit.Document,
-                DateTimeOffset.FromUnixTimeSeconds(1_800_000_100));
-            return lookupFault switch
-            {
-                "none" => receipt,
-                "commit-id" => receipt with { CommitId = "other-commit" },
-                "before-hash" => receipt with { BeforeSha256 = "other-before-hash" },
-                "operation-id" => receipt with { OperationId = Guid.Empty.ToString("N") },
-                "plan-hash" => receipt with { PlanHash = "other-plan-hash" },
-                "document-id" => receipt with { Document = commit.Document with { DocumentId = "simulation:other" } },
-                "schema" => receipt with { Document = commit.Document with { DocumentSchemaVersion = commit.Document.DocumentSchemaVersion + 1 } },
-                "display-name" => receipt with { Document = commit.Document with { DisplayName = "Other" } },
-                "json" => receipt with { Document = commit.Document with { Json = "{}" } },
-                "after-hash" => receipt with { Document = commit.Document with { Sha256 = "other-after-hash" } },
-                "revision" => receipt with { Document = commit.Document with { Revision = commit.Document.Revision + 1 } },
-                "updated-at" => receipt with { Document = commit.Document with { UpdatedAtUtc = commit.Document.UpdatedAtUtc.AddSeconds(1) } },
-                _ => throw new NotSupportedException(lookupFault)
-            };
         }
     }
 

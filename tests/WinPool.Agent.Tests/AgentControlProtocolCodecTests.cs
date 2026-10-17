@@ -52,22 +52,6 @@ public sealed class AgentControlProtocolCodecTests
         Assert.IsType<GetAgentSnapshotRequest>(decoded.Request);
     }
 
-    [Fact]
-    public void CodecDecodesOpenMainWindowRequest()
-    {
-        var codec = new AgentControlProtocolCodec();
-        var correlationId = CorrelationId.New();
-        var request = new OpenMainWindowRequest(WorkspacePage.Manage, correlationId);
-        var envelope = Envelope(
-            AgentControlMessageTypes.OpenMainWindow,
-            correlationId,
-            JsonSerializer.SerializeToElement(request, SerializerOptions));
-
-        var decoded = codec.DecodeRequest(envelope);
-
-        Assert.True(decoded.IsAccepted);
-        Assert.Equal(request, Assert.IsType<OpenMainWindowRequest>(decoded.Request));
-    }
 
     [Fact]
     public void CodecDecodesOpenNativePropertiesRequest()
@@ -134,7 +118,6 @@ public sealed class AgentControlProtocolCodecTests
     {
         var state = new WorkspaceSessionState(
             WorkspaceSessionState.CurrentSchemaVersion,
-            WorkspacePage.Manage,
             "simulation:test",
             ManageWorkspaceCategory.System,
             new Dictionary<ManageWorkspaceCategory, string>(),
@@ -213,42 +196,11 @@ public sealed class AgentControlProtocolCodecTests
     [Fact]
     public void CodecDecodesCommitSimulationEditRequest()
     {
-        var systemId = SystemId.New();
-        var payload = new SimulationDocumentPayload(
-            "simulation:test",
-            1,
-            "Test",
-            "{}",
-            new string('a', 64),
-            1,
-            DateTimeOffset.UtcNow);
-        var plan = OperationPlan.Create(
-            new OperationRequest(
-                OperationId.New(),
-                EnvironmentId.New(),
-                systemId,
-                OperationIntent.SimulateStorageMutation,
-                [],
-                new Dictionary<string, string>(),
-                DateTimeOffset.UtcNow),
-            ExecutionCapability.None,
-            RiskLevel.R1SimulationWrite,
-            "v1",
-            [],
-            [],
-            null,
-            string.Empty,
-            string.Empty,
-            string.Empty,
-            new AlgorithmIdentity("test", "1.0", AlgorithmConfidence.Derived, "test"),
-            DateTimeOffset.UtcNow);
         var correlationId = CorrelationId.New();
         var request = new CommitAgentSimulationEditRequest(
-            payload,
-            new string('b', 64),
-            plan,
-            [],
-            correlationId);
+            new SimulationCommitIntent("simulation:test", 1, "commit", SimulationEditIntent.Freeze(
+                [new SimulationEditRequest(SimulationEditKind.Rename, "physical:test", Name: "Renamed")],
+                "commit", DateTimeOffset.UtcNow)), correlationId);
         var decoded = new AgentControlProtocolCodec().DecodeRequest(
             Envelope(
                 AgentControlMessageTypes.CommitSimulationEdit,
@@ -262,18 +214,6 @@ public sealed class AgentControlProtocolCodecTests
     [Fact]
     public void CodecDecodesInventoryAndManageInventoryRequests()
     {
-        var inventoryCorrelation = CorrelationId.New();
-        var inventory = new CaptureAgentInventoryRequest(
-            IncludeLegacyComparison: true,
-            inventoryCorrelation);
-        var inventoryDecoded = new AgentControlProtocolCodec().DecodeRequest(
-            Envelope(
-                AgentControlMessageTypes.CaptureInventory,
-                inventoryCorrelation,
-                JsonSerializer.SerializeToElement(inventory, SerializerOptions)));
-        Assert.IsType<CaptureAgentInventoryRequest>(inventoryDecoded.Request);
-        Assert.True(inventoryDecoded.IsAccepted);
-
         var manageInventoryCorrelation = CorrelationId.New();
         var manageInventory = new CaptureAgentManageInventoryRequest(
             manageInventoryCorrelation);
@@ -287,16 +227,16 @@ public sealed class AgentControlProtocolCodecTests
         Assert.IsType<CaptureAgentManageInventoryRequest>(manageInventoryDecoded.Request);
         Assert.True(manageInventoryDecoded.IsAccepted);
 
-        var loadManageInventory = new LoadAgentManageInventoryRequest(
+        var loadManageInventory = new LoadAgentInventoryCacheRequest(
             manageInventoryCorrelation);
         var loadManageInventoryDecoded = new AgentControlProtocolCodec().DecodeRequest(
             Envelope(
-                AgentControlMessageTypes.LoadManageInventory,
+                AgentControlMessageTypes.LoadInventoryCache,
                 manageInventoryCorrelation,
                 JsonSerializer.SerializeToElement(
                     loadManageInventory,
                     SerializerOptions)));
-        Assert.IsType<LoadAgentManageInventoryRequest>(loadManageInventoryDecoded.Request);
+        Assert.IsType<LoadAgentInventoryCacheRequest>(loadManageInventoryDecoded.Request);
         Assert.True(loadManageInventoryDecoded.IsAccepted);
     }
 

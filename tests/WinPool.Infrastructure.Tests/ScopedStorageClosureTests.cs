@@ -87,7 +87,7 @@ public sealed class ScopedStorageClosureTests
             Assert.False(Assert.Single(document.SourceFacts.Relationships, edge => edge.Kind == "pool-member").IsRetained);
             var node = Assert.Single(EditWorkspace.ProjectPoolWorkspace(document.Snapshot), item => item.Unit.StableId == pool.StableId);
             Assert.Equal(physical.StableId, Assert.Single(node.Children).Unit.StableId);
-            Assert.Contains("Get-WinPoolScopePrimordialMembers $pool", ScopedStorageInventoryScript.Create(Scope()));
+            Assert.Contains("Get-WinPoolScopePrimordialMembers $pool", EmbeddedStorageInventoryScript.ForScope(Scope()));
         }
     }
 
@@ -125,7 +125,7 @@ public sealed class ScopedStorageClosureTests
         // Execute the production fixed closure with a closed synthetic CIM graph. Both CIM
         // entry points are shadowed; any undeclared query throws, and no storage cmdlet runs.
         var script = "$ProgressPreference='SilentlyContinue'; [Console]::InputEncoding=[Text.Encoding]::UTF8; [Console]::OutputEncoding=[Text.Encoding]::UTF8;\n"
-            + MockGraph + "\n" + ScopedStorageInventoryScript.Closure + "\n" + CaptureResult;
+            + MockGraph + "\n" + EmbeddedStorageInventoryScript.ScopeClosure + "\nInitialize-WinPoolScope\n" + "\n" + CaptureResult;
         var start = new ProcessStartInfo(WindowsPowerShellRunner.ExecutablePath)
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
@@ -283,7 +283,7 @@ $observations = @(foreach ($item in $WinPoolScopeObjects.Values) {
     SourceObservations=$observations;
     SourceQuerySuccesses=@($WinPoolScopeClasses | ForEach-Object { [ordered]@{ ClassName=$_; Namespace=$WinPoolScopeNamespace } });
     SourceQueryFailures=@($sourceQueryFailures.ToArray());
-    ClosureFailed=$WinPoolScopeFailed;
+    ClosureFailed=$WinPoolScopeState.Failed;
     ClosureObjects=@($WinPoolScopeObjects.Values | ForEach-Object {
         [ordered]@{ ClassName=[string]$_.CimClass.CimClassName; UniqueId=[string]$_.UniqueId; ObjectId=[string]$_.ObjectId }
     });

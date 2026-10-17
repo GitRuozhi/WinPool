@@ -9,7 +9,6 @@ namespace WinPool.Infrastructure.Windows;
 /// presentation in the App.
 /// </summary>
 public sealed class ManageDetailsProjector
-    : IManageDetailsProjector<StorageSystemDocument>
 {
     public ManageObjectDetailsView Project(
         StorageSystemDocument document,

@@ -10,7 +10,12 @@ namespace WinPool.Infrastructure.Windows;
 public sealed class WindowsPowerShellRunner : IReadOnlyInventoryCommandRunner, IScopedInventoryCommandRunner
 {
     private readonly CollectionPurpose purpose;
-    public WindowsPowerShellRunner(CollectionPurpose purpose = CollectionPurpose.Hardware) => this.purpose = purpose;
+    private readonly bool discoverProviderCache;
+    public WindowsPowerShellRunner(CollectionPurpose purpose = CollectionPurpose.Hardware, bool discoverProviderCache = false)
+    {
+        this.purpose = purpose;
+        this.discoverProviderCache = discoverProviderCache;
+    }
     public const int TimeoutSeconds = 60;
     public static string ExecutablePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.System),
@@ -19,10 +24,10 @@ public sealed class WindowsPowerShellRunner : IReadOnlyInventoryCommandRunner, I
         "powershell.exe");
 
     public Task<ReadOnlyCommandResult> RunInventoryAsync(CancellationToken cancellationToken) =>
-        RunCommandAsync(EmbeddedStorageInventoryScript.ForPurpose(purpose), cancellationToken);
+        RunCommandAsync(EmbeddedStorageInventoryScript.ForPurpose(purpose, discoverProviderCache), cancellationToken);
 
     public Task<ReadOnlyCommandResult> RunInventoryAsync(StorageInventoryScope scope, CancellationToken cancellationToken) =>
-        RunCommandAsync(ScopedStorageInventoryScript.Create(scope), cancellationToken);
+        RunCommandAsync(EmbeddedStorageInventoryScript.ForScope(scope, discoverProviderCache), cancellationToken);
 
     private static async Task<ReadOnlyCommandResult> RunCommandAsync(string command, CancellationToken cancellationToken)
     {
@@ -126,38 +131,42 @@ public static partial class ReadOnlyStorageCommandPolicy
 public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvider, IScopedHardwareInventoryProvider
 {
     private readonly IReadOnlyInventoryCommandRunner _runner;
+    private readonly IReadOnlyInventoryCommandRunner _hardwareRunner;
     private readonly CollectionPurpose _purpose;
 
-    public WindowsHardwareInventoryProvider(IReadOnlyInventoryCommandRunner? runner = null, CollectionPurpose purpose = CollectionPurpose.Storage)
+    public WindowsHardwareInventoryProvider(IReadOnlyInventoryCommandRunner? runner = null, CollectionPurpose purpose = CollectionPurpose.Storage,
+        bool discoverProviderCache = false)
     {
         _purpose = purpose;
-        _runner = runner ?? new WindowsPowerShellRunner(purpose);
+        _runner = runner ?? new WindowsPowerShellRunner(purpose, discoverProviderCache);
+        _hardwareRunner = runner ?? new WindowsPowerShellRunner(CollectionPurpose.Hardware, discoverProviderCache);
     }
 
     public static string FixedStorageCommand => EmbeddedStorageInventoryScript.Source;
 
     public Task<StorageSystemDocument> CollectHardwareAsync(CancellationToken cancellationToken) =>
-        new WindowsHardwareInventoryProvider(purpose: CollectionPurpose.Hardware).CollectLocalAsync(cancellationToken);
+        CollectAsync(CollectionPurpose.Hardware, null, cancellationToken);
 
     public Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken) =>
-        CollectAsync(null, cancellationToken);
+        CollectAsync(_purpose, null, cancellationToken);
 
     public Task<StorageSystemDocument> CollectScopedAsync(StorageInventoryScope scope, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
         scope.Validate();
-        return CollectAsync(scope, cancellationToken);
+        return CollectAsync(CollectionPurpose.Storage, scope, cancellationToken);
     }
 
-    private async Task<StorageSystemDocument> CollectAsync(StorageInventoryScope? scope, CancellationToken cancellationToken)
+    private async Task<StorageSystemDocument> CollectAsync(CollectionPurpose purpose, StorageInventoryScope? scope, CancellationToken cancellationToken)
     {
         var started = DateTimeOffset.UtcNow;
         var captureStarted = Stopwatch.GetTimestamp();
-        var result = scope is null ? await _runner.RunInventoryAsync(cancellationToken)
+        var runner = purpose == CollectionPurpose.Hardware ? _hardwareRunner : _runner;
+        var result = scope is null ? await runner.RunInventoryAsync(cancellationToken)
             : _runner is IScopedInventoryCommandRunner scoped ? await scoped.RunInventoryAsync(scope, cancellationToken)
             : throw new InvalidOperationException("The inventory runner does not support exact scoped collection.");
-        StorageOperationTiming.Record("inventory.provider.collect", captureStarted, scope?.OperationId, scope?.StepId, scope?.Key ?? _purpose.ToString(), 1);
-        Trace.WriteLine(JsonSerializer.Serialize(new { Event = "inventory.capture", Purpose = scope is null ? _purpose.ToString() : "ScopedStorage",
+        StorageOperationTiming.Record("inventory.provider.collect", captureStarted, scope?.OperationId, scope?.StepId, scope?.Key ?? purpose.ToString(), 1);
+        Trace.WriteLine(JsonSerializer.Serialize(new { Event = "inventory.capture", Purpose = scope is null ? purpose.ToString() : "ScopedStorage",
             OperationId = scope?.OperationId.Value, StepId = scope?.StepId, Scope = scope?.Key, Generation = scope?.Generation,
             ElapsedMilliseconds = result.Duration.TotalMilliseconds, result.ExitCode, StartedAt = started }));
         if (result.ExitCode != 0)
@@ -185,7 +194,7 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
                 SnapshotVersion = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(result.StandardOutput))) };
             var id = $"local:{context.Computer.StableId}";
             var system = scope?.SystemId ?? InternalStableIdentity.SystemFromDocumentId(id);
-            var facts = WinPoolFactCapture.Read(root, context, system, scope is null ? _purpose : CollectionPurpose.Storage);
+            var facts = WinPoolFactCapture.Read(root, context, system, purpose);
             if (scope is not null)
             {
                 string[] required = ["MSFT_StorageSubSystem", "MSFT_StoragePool", "MSFT_PhysicalDisk", "MSFT_VirtualDisk",
@@ -206,7 +215,7 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
                         complete ? null : "inventory.scope.incomplete")
                 };
             }
-            if (scope is null && _purpose == CollectionPurpose.Hardware)
+            if (scope is null && purpose == CollectionPurpose.Hardware)
             {
                 facts = WindowsGraphicsFactCollector.AddTo(facts, capturedAt);
                 facts = WindowsNetworkFactCollector.AddTo(facts, capturedAt);
@@ -222,17 +231,4 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
                 ex);
         }
     }
-}
-
-public sealed class WindowsStorageInventoryProvider : IStorageInventoryProvider
-{
-    private readonly IHardwareInventoryProvider _provider;
-
-    public WindowsStorageInventoryProvider(IHardwareInventoryProvider? provider = null)
-    {
-        _provider = provider ?? new WindowsHardwareInventoryProvider();
-    }
-
-    public async Task<StorageSnapshot> ScanAsync(CancellationToken cancellationToken) =>
-        (await _provider.CollectLocalAsync(cancellationToken)).Snapshot;
 }

@@ -103,7 +103,7 @@ public static class WinPoolBuildSqliteProbe
                 throw new InvalidOperationException("SQLite quick_check failed.");
             long version = Scalar(database,
                 "SELECT schema_version FROM schema_info WHERE singleton = 1;");
-            if (version != 17 && version != 18 && version != 19)
+            if (version != 17 && version != 18 && version != 19 && version != 20)
                 throw new InvalidOperationException("Unsupported core schema " + version + ".");
             // An unknown result remains a product write barrier, but once the
             // runtime is stopped it must not prevent installing a repair.

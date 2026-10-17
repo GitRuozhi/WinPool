@@ -9,12 +9,14 @@ public sealed class LocalInventoryObserver(
     Action<string, Exception?> reportFailure,
     Action<AgentEvent>? reportCapture = null)
 {
+    private string? appliedRevision;
+
     public async Task LoadHistoryAsync(Func<Task<LocalInventoryDocumentPayload?>> read)
     {
         try
         {
             var payload = await read();
-            if (payload is not null) await apply(LocalInventoryDocumentCodec.Decode(payload));
+            if (payload is not null) await ApplyPayloadAsync(payload);
         }
         catch (Exception exception)
         {
@@ -41,7 +43,7 @@ public sealed class LocalInventoryObserver(
                             reportCapture?.Invoke(started);
                             break;
                         case AgentInventoryUpdatedEvent updated:
-                            await apply(LocalInventoryDocumentCodec.Decode(updated.Document));
+                            await ApplyPayloadAsync(updated.Document);
                             reportCapture?.Invoke(updated);
                             break;
                         case AgentInventoryFailedEvent failed:
@@ -50,7 +52,8 @@ public sealed class LocalInventoryObserver(
                             break;
                         case AgentStateReseedEvent reseed:
                             reportCapture?.Invoke(reseed);
-                            await ReloadAsync(cancellationToken);
+                            if (reseed.Reason != "agent.events.latest_snapshot")
+                                await ReloadAsync(cancellationToken);
                             break;
                     }
                 }
@@ -72,13 +75,22 @@ public sealed class LocalInventoryObserver(
     {
         try
         {
-            var document = await new AgentBackedMachineRecordService(connection).LoadLocalScanAsync(cancellationToken);
-            if (document is not null) await apply(document);
+            var result = await connection.SendAsync(new LoadAgentInventoryCacheRequest(CorrelationId.New()), cancellationToken);
+            if (!result.IsSuccess || result.Value is not ManageInventoryLoadedResponse loaded)
+                throw new IOException(result.Messages.FirstOrDefault()?.Code ?? "agent.inventory.cache_unavailable");
+            if (loaded.Document is not null) await ApplyPayloadAsync(loaded.Document);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception)
         {
             reportFailure("inventory.report.reload_failed", exception);
         }
+    }
+
+    private async Task ApplyPayloadAsync(LocalInventoryDocumentPayload payload)
+    {
+        if (payload.Sha256 == appliedRevision) return;
+        await apply(LocalInventoryDocumentCodec.Decode(payload));
+        appliedRevision = payload.Sha256;
     }
 }

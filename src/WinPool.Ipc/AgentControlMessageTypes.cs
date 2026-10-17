@@ -2,11 +2,16 @@ namespace WinPool.Ipc;
 
 public static class AgentControlMessageTypes
 {
+    public const string ReconcileRealOperation = "agent.request.reconcile_real_operation";
+    public const string LoadRealOperationEvidence = "agent.request.load_real_operation_evidence";
+    public const string PrepareRealStructureJob = "agent.request.prepare_real_structure_job";
+    public const string AcceptRealStructureJob = "agent.request.accept_real_structure_job";
+    public const string QueryRealStructureJob = "agent.request.query_real_structure_job";
+    public const string StopRealStructureJob = "agent.request.stop_real_structure_job";
     public const string HandshakeRequest = "agent.handshake.request";
     public const string HandshakeAccepted = "agent.handshake.accepted";
     public const string HandshakeRejected = "agent.handshake.rejected";
     public const string GetSnapshot = "agent.request.get_snapshot";
-    public const string OpenMainWindow = "agent.request.open_main_window";
     public const string OpenNativeProperties = "agent.request.open_native_properties";
     public const string StartMonitoring = "agent.request.start_monitoring";
     public const string StopMonitoring = "agent.request.stop_monitoring";
@@ -26,11 +31,10 @@ public static class AgentControlMessageTypes
         "agent.request.commit_simulation_edit";
     public const string LookupSimulationCommit =
         "agent.request.lookup_simulation_commit";
-    public const string CaptureInventory = "agent.request.capture_inventory";
     public const string CaptureManageInventory =
         "agent.request.capture_manage_inventory";
-    public const string LoadManageInventory =
-        "agent.request.load_manage_inventory";
+    public const string LoadInventoryCache =
+        "agent.request.load_inventory_cache";
     public const string ExportMonitorCsv = "agent.request.export_monitor_csv";
     public const string SetAgentPreference = "agent.request.set_agent_preference";
     public const string EnterRealMode = "agent.request.enter_real_mode";

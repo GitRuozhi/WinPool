@@ -6,7 +6,6 @@ using WinPool.Ipc;
 using WinPool.Infrastructure.Sqlite;
 using WinPool.Infrastructure.Windows;
 using WinPool.Monitoring;
-using WinPool.Inventory;
 
 namespace WinPool.Agent;
 
@@ -142,11 +141,12 @@ internal static class Program
                 $"agent-{agentSessionId:N}");
             var localDocument = new LocalInventoryDocumentRepository(store, writeOwner);
             var localIdentity = new LocalSystemIdentityResolver(store, writeOwner);
+            var sharedIdentity = new AgentLocalSystemIdentity(localDocument, localIdentity);
+            var collector = new AgentInventoryCollector(new WindowsHardwareInventoryProvider(), sharedIdentity);
+            var inventoryReady = new TaskCompletionSource<AgentInventoryCoordinator>(TaskCreationOptions.RunContinuationsAsynchronously);
             var realMachineIdentity = new WindowsRealMachineIdentityProvider();
             var realTopologyReader = new WindowsRealStorageTopologyReader(
-                new AgentRealStorageFactSource(
-                    new WindowsRealStorageFactSource(),
-                    new AgentLocalSystemIdentity(localDocument, localIdentity)),
+                collector,
                 realMachineIdentity);
             var realOperations = new AgentRealOperationService(
                 new OperationPlanRepository(store, writeOwner),
@@ -159,6 +159,28 @@ internal static class Program
                     realTopologyReader),
                 realMachineIdentity,
                 realModeGate);
+            realOperations.AttachStatusObserver(status =>
+            {
+                agentEvents.Publish(new AgentRealOperationStatusEvent(status, DateTimeOffset.UtcNow));
+                return Task.CompletedTask;
+            });
+            realOperations.AttachStructureStatusObserver(status =>
+            {
+                agentEvents.Publish(new AgentRealStructureJobStatusEvent(status, DateTimeOffset.UtcNow));
+                return Task.CompletedTask;
+            });
+            realOperations.AttachStructureInventory(collector.CaptureFreshAsync, async cancellationToken =>
+            {
+                var cached = await localDocument.LoadAsync(cancellationToken).ConfigureAwait(false);
+                return cached is null ? null : LocalInventoryDocumentCodec.Decode(cached.Document);
+            }, async (scope, cancellationToken) =>
+            {
+                var raw = await collector.CaptureFreshAsync(scope, cancellationToken).ConfigureAwait(false);
+                var inventory = await inventoryReady.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await inventory.PublishFreshAsync(raw, scope, cancellationToken).ConfigureAwait(false);
+                var cached = await localDocument.LoadAsync(cancellationToken).ConfigureAwait(false);
+                return cached is null ? raw : LocalInventoryDocumentCodec.Decode(cached.Document);
+            });
             try
             {
                 AgentStartupTaskRunner.Complete(
@@ -202,8 +224,8 @@ internal static class Program
                 monitoringPersistence,
                 targetIdentityResolver: new WindowsMonitorTargetIdentityResolver(
                     localSystemIdentity: async cancellationToken =>
-                        (await new AgentLocalSystemIdentity(localDocument, localIdentity)
-                            .ResolveAsync(cancellationToken).ConfigureAwait(false)).SystemId));
+                        (await sharedIdentity.ResolveAsync(cancellationToken).ConfigureAwait(false)).SystemId,
+                    collectFacts: collector.CollectForMonitorAsync));
             AgentStartupTaskRunner.Complete(() => monitoring.InitializeEditRecoveryAsync(CancellationToken.None));
             realOperations.AttachEditObserver(monitoring);
             AgentStartupTaskRunner.Complete(() => realOperations.PublishRecoveredEditStatesAsync());
@@ -220,14 +242,10 @@ internal static class Program
                 processRegistry,
                 new WorkspaceSessionStateRepository(store, writeOwner),
                 new SimulationDocumentRepository(store, writeOwner),
-                new NativeWindowsInventoryProvider(),
-                new EmbeddedPowerShellInventoryProvider(),
-                new WindowsHardwareInventoryProvider(),
-                new InventoryComparer(),
+                collector,
                 new InventorySnapshotRepository(store, writeOwner),
-                new InventoryComparisonRepository(store, writeOwner),
                 localDocument,
-                localIdentity,
+                sharedIdentity,
                 processIncarnationVerifier,
                 mainApplicationExecutablePath,
                 new WindowsStorageHealthEventSource(),
@@ -237,6 +255,12 @@ internal static class Program
                 lifecycle,
                 agentPreferencesStore,
                 startupRecovery: startupRecovery);
+            inventoryReady.SetResult(runtime.InventoryCoordinator);
+            realOperations.AttachVerifiedPostStateObserver(async post =>
+            {
+                collector.AcceptVerifiedPostState(post.Document, post.Scope);
+                await runtime.InventoryCoordinator.PublishFreshAsync(post.Document, post.Scope).ConfigureAwait(false);
+            });
             var shutdown = new AgentShutdownWorkflow(runtime, processRegistry);
             coordinator.AttachRuntime(runtime, shutdown);
             context.AttachCoordinator(coordinator);

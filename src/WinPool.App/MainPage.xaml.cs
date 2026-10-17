@@ -548,7 +548,7 @@ public sealed partial class MainPage : Page
     private CommandSpec BuildDiskEditorSpec(ManageCommandSurfaceView surface)
     {
         var stableId = ViewModel.SelectedWorkspaceItem?.Projection?.Id.ProviderKey;
-        var snapshot = ViewModel.EffectiveActiveSnapshot;
+        var snapshot = ViewModel.ActiveSnapshot;
         var visiblePartitionDiskIds = EditWorkspace.ProjectPartitionWorkspace(snapshot)
             .Select(node => node.Unit.StableId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -708,7 +708,7 @@ public sealed partial class MainPage : Page
         if (target is null || IsSyntheticOrUnstableTarget(target))
             return false;
 
-        var snapshot = ViewModel.EffectiveActiveSnapshot;
+        var snapshot = ViewModel.ActiveSnapshot;
         return kind switch
         {
             ManageCommandKind.CreatePool or ManageCommandKind.RenamePool or ManageCommandKind.EditPool =>
@@ -1400,7 +1400,11 @@ public sealed partial class MainPage : Page
         BuildCommandButtons();
     }
 
-    private async Task RescanAsync() => await ViewModel.ScanAsync();
+    private async Task RescanAsync()
+    {
+        await ViewModel.RecheckRealOperationsAsync();
+        await ViewModel.ScanAsync();
+    }
 
     private async Task ExportAsync()
     {

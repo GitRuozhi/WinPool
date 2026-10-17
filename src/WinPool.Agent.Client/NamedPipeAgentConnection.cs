@@ -316,6 +316,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         }
         catch (Exception exception) when (
             exception is IOException
+                or TimeoutException
                 or InvalidDataException
                 or InvalidOperationException
                 or UnauthorizedAccessException
@@ -481,15 +482,15 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             // The server begins its next idle read only after this response.
             // Starting the client's lease here is deliberately conservative.
             lastControlTransferStartedTimestamp = timeProvider.GetTimestamp();
-            transportStarted = true;
-            await IpcFrameCodec.WriteAsync(
-                stream!,
-                Envelope(
+            var wireFrame = IpcFrameCodec.Encode(Envelope(
                     Guid.NewGuid(),
                     request.CorrelationId.Value,
                     messageType,
                     request,
-                    request.GetType()),
+                    request.GetType()));
+            transportStarted = true;
+            await IpcFrameCodec.WriteAsync(
+                stream!, wireFrame,
                 operation.Token);
             var responseEnvelope = await IpcFrameCodec.ReadAsync(
                 stream!,
@@ -536,8 +537,14 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 request.CorrelationId,
                 "agent.request.cancelled");
         }
+        catch (IpcFrameTooLargeException) when (!transportStarted)
+        {
+            return Failure<AgentResponse>(ApplicationStatus.Rejected,
+                request.CorrelationId, "agent.request.frame_too_large");
+        }
         catch (Exception exception) when (
             exception is IOException
+                or TimeoutException
                 or InvalidDataException
                 or JsonException
                 or NotSupportedException)
@@ -942,8 +949,13 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             nameof(AgentInventoryStartedEvent) => payload.Event.Deserialize<AgentInventoryStartedEvent>(JsonOptions),
             nameof(AgentInventoryUpdatedEvent) => payload.Event.Deserialize<AgentInventoryUpdatedEvent>(JsonOptions),
             nameof(AgentInventoryFailedEvent) => payload.Event.Deserialize<AgentInventoryFailedEvent>(JsonOptions),
-            nameof(AgentMonitorSampleEvent) =>
-                payload.Event.Deserialize<AgentMonitorSampleEvent>(JsonOptions),
+            nameof(AgentMonitorBatchEvent) =>
+                payload.Event.Deserialize<AgentMonitorBatchEvent>(JsonOptions),
+            nameof(AgentMonitorStateEvent) =>
+                payload.Event.Deserialize<AgentMonitorStateEvent>(JsonOptions),
+            nameof(AgentRealOperationStatusEvent) =>
+                payload.Event.Deserialize<AgentRealOperationStatusEvent>(JsonOptions),
+            nameof(AgentRealStructureJobStatusEvent) => payload.Event.Deserialize<AgentRealStructureJobStatusEvent>(JsonOptions),
             nameof(AgentProcessStateEvent) =>
                 payload.Event.Deserialize<AgentProcessStateEvent>(JsonOptions),
             nameof(AgentShutdownEvent) =>
@@ -959,7 +971,6 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         request switch
         {
             GetAgentSnapshotRequest => AgentControlMessageTypes.GetSnapshot,
-            OpenMainWindowRequest => AgentControlMessageTypes.OpenMainWindow,
             OpenAgentNativePropertiesRequest => AgentControlMessageTypes.OpenNativeProperties,
             StartAgentMonitoringRequest => AgentControlMessageTypes.StartMonitoring,
             StopAgentMonitoringRequest => AgentControlMessageTypes.StopMonitoring,
@@ -979,11 +990,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.CommitSimulationEdit,
             LookupAgentSimulationCommitRequest =>
                 AgentControlMessageTypes.LookupSimulationCommit,
-            CaptureAgentInventoryRequest => AgentControlMessageTypes.CaptureInventory,
             CaptureAgentManageInventoryRequest =>
                 AgentControlMessageTypes.CaptureManageInventory,
-            LoadAgentManageInventoryRequest =>
-                AgentControlMessageTypes.LoadManageInventory,
+            LoadAgentInventoryCacheRequest =>
+                AgentControlMessageTypes.LoadInventoryCache,
             ExportAgentMonitorCsvRequest => AgentControlMessageTypes.ExportMonitorCsv,
             SetAgentPreferenceRequest => AgentControlMessageTypes.SetAgentPreference,
             EnterAgentRealModeRequest => AgentControlMessageTypes.EnterRealMode,
@@ -994,6 +1004,12 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.AcceptRealOperation,
             QueryAgentRealOperationRequest =>
                 AgentControlMessageTypes.QueryRealOperation,
+            ReconcileAgentRealOperationRequest => AgentControlMessageTypes.ReconcileRealOperation,
+            LoadAgentRealOperationEvidenceRequest => AgentControlMessageTypes.LoadRealOperationEvidence,
+            PrepareAgentRealStructureJobRequest => AgentControlMessageTypes.PrepareRealStructureJob,
+            AcceptAgentRealStructureJobRequest => AgentControlMessageTypes.AcceptRealStructureJob,
+            QueryAgentRealStructureJobRequest => AgentControlMessageTypes.QueryRealStructureJob,
+            StopAgentRealStructureJobRequest => AgentControlMessageTypes.StopRealStructureJob,
             QueryAgentRealVirtualDiskCreationRangeRequest => AgentControlMessageTypes.QueryRealVirtualDiskCreationRange,
             QueryAgentRealStructureCreationSupportRequest => AgentControlMessageTypes.QueryRealStructureCreationSupport,
             ListAgentRecoverableRealOperationsRequest => AgentControlMessageTypes.ListRecoverableRealOperations,
@@ -1036,10 +1052,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<SimulationDocumentSavedResponse>(JsonOptions),
             nameof(SimulationDocumentDeletedResponse) =>
                 response.Deserialize<SimulationDocumentDeletedResponse>(JsonOptions),
+            nameof(SimulationEditCommittedResponse) =>
+                response.Deserialize<SimulationEditCommittedResponse>(JsonOptions),
             nameof(SimulationCommitLookupResponse) =>
                 response.Deserialize<SimulationCommitLookupResponse>(JsonOptions),
-            nameof(InventoryCaptureResponse) =>
-                response.Deserialize<InventoryCaptureResponse>(JsonOptions),
             nameof(ManageInventoryCaptureResponse) =>
                 response.Deserialize<ManageInventoryCaptureResponse>(JsonOptions),
             nameof(ManageInventoryLoadedResponse) =>
@@ -1052,6 +1068,11 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 response.Deserialize<AgentRealModeResponse>(JsonOptions),
             nameof(AgentRealOperationResponse) =>
                 response.Deserialize<AgentRealOperationResponse>(JsonOptions),
+            nameof(AgentRealOperationStatusResponse) =>
+                response.Deserialize<AgentRealOperationStatusResponse>(JsonOptions),
+            nameof(AgentRealOperationEvidenceResponse) =>
+                response.Deserialize<AgentRealOperationEvidenceResponse>(JsonOptions),
+            nameof(AgentRealStructureJobResponse) => response.Deserialize<AgentRealStructureJobResponse>(JsonOptions),
             nameof(AgentRealVirtualDiskCreationRangeResponse) => response.Deserialize<AgentRealVirtualDiskCreationRangeResponse>(JsonOptions),
             nameof(AgentRealStructureCreationSupportResponse) => response.Deserialize<AgentRealStructureCreationSupportResponse>(JsonOptions),
             nameof(AgentRecoverableRealOperationsResponse) => response.Deserialize<AgentRecoverableRealOperationsResponse>(JsonOptions),

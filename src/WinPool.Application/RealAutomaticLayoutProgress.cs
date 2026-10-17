@@ -3,9 +3,13 @@ using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
 
-namespace WinPool.App.Services;
+namespace WinPool.Application;
 
-/// <summary>Session-only evidence for continuing one automatic layout without replaying verified writes.</summary>
+public sealed record RealAutomaticLayoutSnapshot(RealOperationIntentRequest Original, string VirtualDiskId,
+    PoolEditIntent Intent, IReadOnlyList<string> VerifiedSteps, IReadOnlyDictionary<string, string> CreatedPartitions,
+    bool RequiresReconciliation);
+
+/// <summary>Exact verified progression for continuing an automatic layout without replaying writes.</summary>
 public sealed class RealAutomaticLayoutProgress
 {
     private readonly RealOperationIntentRequest original;
@@ -14,6 +18,27 @@ public sealed class RealAutomaticLayoutProgress
     public string VirtualDiskId { get; }
     public PoolEditIntent Intent { get; }
     public bool RequiresReconciliation { get; private set; }
+
+    public RealAutomaticLayoutSnapshot Snapshot() => new(original, VirtualDiskId, Intent,
+        original.Steps.Where(step => verified.Contains(step.Id)).Select(step => step.Id).ToArray(),
+        new Dictionary<string, string>(created, StringComparer.Ordinal), RequiresReconciliation);
+
+    public static RealAutomaticLayoutProgress Restore(RealAutomaticLayoutSnapshot snapshot)
+    {
+        var progress = new RealAutomaticLayoutProgress(snapshot.Original, snapshot.VirtualDiskId, snapshot.Intent);
+        var prefix = snapshot.Original.Steps.Take(snapshot.VerifiedSteps.Count).Select(step => step.Id).ToArray();
+        if (!prefix.SequenceEqual(snapshot.VerifiedSteps)
+            || snapshot.CreatedPartitions.Any(pair => string.IsNullOrWhiteSpace(pair.Value)
+                || !snapshot.VerifiedSteps.Contains(pair.Key)
+                || !snapshot.Original.Steps.Any(step => step.Id == pair.Key && step.Command is CreatePartitionCommand))
+            || prefix.Any(id => snapshot.Original.Steps.Single(step => step.Id == id).Command is CreatePartitionCommand
+                && !snapshot.CreatedPartitions.ContainsKey(id)))
+            throw new InvalidDataException("The durable automatic layout is not an exact verified prefix.");
+        progress.verified.UnionWith(prefix);
+        foreach (var pair in snapshot.CreatedPartitions) progress.created.Add(pair.Key, pair.Value);
+        progress.RequiresReconciliation = snapshot.RequiresReconciliation;
+        return progress;
+    }
 
     public RealAutomaticLayoutProgress(RealOperationIntentRequest layout, string virtualDiskId, PoolEditIntent intent)
     {

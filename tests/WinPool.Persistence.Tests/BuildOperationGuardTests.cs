@@ -100,6 +100,7 @@ public sealed class BuildOperationGuardTests
     [InlineData(17)]
     [InlineData(18)]
     [InlineData(19)]
+    [InlineData(20)]
     public async Task SupportedSchemasWithoutRealOperationsPassWithoutUpgrade(int version)
     {
         if (!OperatingSystem.IsWindows()) return;

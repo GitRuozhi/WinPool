@@ -333,6 +333,7 @@ public sealed class MonitoringSessionCoordinatorTests
         var firstMove = watcher.MoveNextAsync().AsTask();
         source.Publish(fixture.Sample(1));
         Assert.True(await firstMove.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, watcher.Current.Sequence);
 
         source.Publish(fixture.Sample(2));
         source.Publish(fixture.Sample(3));
@@ -348,6 +349,7 @@ public sealed class MonitoringSessionCoordinatorTests
 
         Assert.True(await watcher.MoveNextAsync());
         Assert.Equal(3, Metric(watcher.Current, MonitorMetricKind.ActiveTimePercent));
+        Assert.Equal(3, watcher.Current.Sequence); // Sequence 2 was lost upstream of IPC.
         await coordinator.StopAsync(fixture.Request.SessionId, CancellationToken.None);
     }
 

@@ -134,11 +134,44 @@ public sealed record StorageSystemDocument(
     }
 }
 
+public sealed record StorageSystemCatalogEntry(string Id, string DisplayName, StorageSystemKind Kind,
+    long Revision, DateTimeOffset UpdatedAt)
+{
+    public bool IsLocal => Kind == StorageSystemKind.Local;
+}
+
 public sealed class StorageSystemCatalog
 {
     private readonly List<StorageSystemDocument> _systems = [];
+    private readonly Dictionary<string, SimulationDocumentMetadata> _metadata = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<StorageSystemDocument> Systems => _systems;
+    public IReadOnlyList<StorageSystemCatalogEntry> Entries => _systems.Where(document => document.IsLocal)
+        .Select(document => new StorageSystemCatalogEntry(document.Id, document.DisplayName, document.Kind, document.Revision, document.UpdatedAt))
+        .Concat(_metadata.Values.OrderBy(document => document.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(document => document.DocumentId, StringComparer.Ordinal)
+            .Select(document => new StorageSystemCatalogEntry(document.DocumentId, document.DisplayName,
+                StorageSystemKind.Simulation, document.Revision, document.UpdatedAtUtc))).ToArray();
+
+    public bool Contains(string id) => Find(id) is not null || _metadata.ContainsKey(id);
+
+    public void ReplaceSimulationMetadata(IEnumerable<SimulationDocumentMetadata> metadata)
+    {
+        _metadata.Clear();
+        foreach (var entry in metadata) _metadata.Add(entry.DocumentId, entry);
+        _systems.RemoveAll(document => !document.IsLocal && (!_metadata.TryGetValue(document.Id, out var entry)
+            || entry.Revision != document.Revision || entry.UpdatedAtUtc != document.UpdatedAt));
+    }
+
+    public void CacheSimulation(StorageSystemDocument document)
+    {
+        if (document.IsLocal) throw new ArgumentException("A simulation document is required.", nameof(document));
+        var index = _systems.FindIndex(existing => existing.Id == document.Id);
+        if (index < 0) _systems.Add(document); else _systems[index] = document;
+        _metadata[document.Id] = new(document.Id, document.SchemaVersion, document.DisplayName,
+            string.Empty, document.Revision, document.UpdatedAt);
+        NormalizeOrder();
+    }
 
     public bool TryReplaceLocalReport(StorageSystemDocument local)
     {
@@ -164,7 +197,8 @@ public sealed class StorageSystemCatalog
     public void ReplaceSimulations(IEnumerable<StorageSystemDocument> simulations)
     {
         _systems.RemoveAll(x => !x.IsLocal);
-        _systems.AddRange(simulations.Where(x => !x.IsLocal));
+        _metadata.Clear();
+        foreach (var document in simulations.Where(x => !x.IsLocal)) CacheSimulation(document);
         NormalizeOrder();
     }
 
@@ -176,12 +210,14 @@ public sealed class StorageSystemCatalog
             throw new ArgumentException("A local system cannot be added as a simulation.", nameof(simulation));
         }
 
-        _systems.Add(simulation);
-        NormalizeOrder();
+        CacheSimulation(simulation);
     }
 
-    public void RemoveSimulation(string id) =>
+    public void RemoveSimulation(string id)
+    {
         _systems.RemoveAll(x => !x.IsLocal && x.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        _metadata.Remove(id);
+    }
 
     public void Update(StorageSystemDocument document)
     {
@@ -192,6 +228,8 @@ public sealed class StorageSystemCatalog
         }
 
         _systems[index] = document;
+        if (!document.IsLocal) _metadata[document.Id] = new(document.Id, document.SchemaVersion,
+            document.DisplayName, string.Empty, document.Revision, document.UpdatedAt);
         NormalizeOrder();
     }
 
@@ -222,6 +260,7 @@ public sealed record SimulationOperationResult(
     string Error,
     IReadOnlyList<string> Commands)
 {
+    public StorageRuleDecision? Decision { get; init; }
     public static SimulationOperationResult Failure(StorageSystemDocument document, string error) =>
         new(false, document, error, []);
 }
@@ -231,21 +270,28 @@ public sealed class SimulationOperationService : ISimulationOperationService
     public SimulationOperationResult Apply(
         StorageSystemDocument document,
         SimulationEditRequest request)
+        => Reduce(document, request.FrozenAtUtc is not null ? request
+            : SimulationEditIntent.Freeze(request, Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow));
+
+    /// <summary>Pure reduction of a frozen edit; no IO, random IDs or clock reads.</summary>
+    public SimulationOperationResult Reduce(StorageSystemDocument document, SimulationEditRequest request)
     {
         if (document.Kind != StorageSystemKind.Simulation)
         {
             return SimulationOperationResult.Failure(document, "Local storage systems are read-only.");
         }
 
-        var decision = StorageEditRules.Evaluate(document.Snapshot, request);
+        var decision = request.Kind == SimulationEditKind.ResetDocument
+            ? new StorageRuleDecision(StorageRuleVerdict.Allow, "simulation.reset", string.Empty, request.TargetProviderKey)
+            : StorageEditRules.Evaluate(document.Snapshot, request);
         if (decision.Verdict == StorageRuleVerdict.Deny)
         {
-            return SimulationOperationResult.Failure(document, decision.Message);
+            return SimulationOperationResult.Failure(document, decision.Message) with { Decision = decision };
         }
 
         if (decision.Verdict == StorageRuleVerdict.InsufficientInfo)
         {
-            return SimulationOperationResult.Failure(document, decision.Message);
+            return SimulationOperationResult.Failure(document, decision.Message) with { Decision = decision };
         }
 
         try
@@ -275,13 +321,14 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 SimulationEditKind.DeleteVirtualDisk => DeleteVirtualDisk(document.Snapshot, request),
                 SimulationEditKind.SetDiskUsage => SetDiskUsage(document.Snapshot, request),
                 SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive => document.Snapshot,
+                SimulationEditKind.ResetDocument => document.Snapshot,
                 _ => throw new ArgumentOutOfRangeException(nameof(request))
             };
 
             var jobs = document.Jobs;
             if (request.Kind is SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive)
             {
-                var now = DateTimeOffset.Now;
+                var now = request.FrozenAtUtc ?? throw new ArgumentException("The edit time must be frozen.");
                 if (request.Kind == SimulationEditKind.OptimizePool)
                 {
                     var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == request.TargetProviderKey);
@@ -290,7 +337,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                         throw new InvalidOperationException("Only a non-primordial simulated pool can be optimized.");
                     }
                     jobs = jobs.Append(new SimulationJob(
-                        $"job:{Guid.NewGuid():N}",
+                        request.AllocatedJobId!,
                         "OptimizeStoragePool",
                         pool.StableId,
                         SimulationJobStatus.Completed,
@@ -301,7 +348,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 else
                 {
                     jobs = jobs.Append(new SimulationJob(
-                        $"job:{Guid.NewGuid():N}",
+                        request.AllocatedJobId!,
                         "OptimizeVolume",
                         request.TargetProviderKey,
                         SimulationJobStatus.Completed,
@@ -309,6 +356,18 @@ public sealed class SimulationOperationService : ISimulationOperationService
                         now,
                         "Simulated no-op. No rearrangement or performance improvement is claimed.")).ToArray();
                 }
+            }
+
+            if (request.Kind == SimulationEditKind.ResetDocument)
+            {
+                var builtin = SimulationCatalog.TryCreateDocument(document.Id, request.FrozenAtUtc);
+                if (builtin is null) return SimulationOperationResult.Failure(document, "Only a built-in simulation document can be reset.");
+                return new(true, document with
+                {
+                    DisplayName = builtin.DisplayName, Jobs = [], UpdatedAt = request.FrozenAtUtc!.Value,
+                    SourceFacts = builtin.SourceFacts! with { SystemId = document.SystemId,
+                        Revision = checked((document.SourceFacts?.Revision ?? 0) + 1) }
+                }, string.Empty, ["# Internal action: restore the built-in simulation. No Windows command."]) { Decision = decision };
             }
 
             snapshot = StorageRelationshipProjector.Rebuild(snapshot);
@@ -322,11 +381,11 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 true,
                 document with
                 {
-                    Jobs = jobs, UpdatedAt = DateTimeOffset.Now,
+                    Jobs = jobs, UpdatedAt = request.FrozenAtUtc ?? throw new ArgumentException("The edit time must be frozen."),
                     SourceFacts = WinPoolSimulationFacts.ApplyCandidate(document.SourceFacts, document.Snapshot, snapshot, document.SystemId)
                 },
                 string.Empty,
-                SimulationCommandPreview.Build(request, document.Snapshot, snapshot));
+                SimulationCommandPreview.Build(request, document.Snapshot, snapshot)) { Decision = decision };
         }
         catch (InvalidOperationException ex)
         {
@@ -334,7 +393,11 @@ public sealed class SimulationOperationService : ISimulationOperationService
         }
     }
 
-    public SimulationOperationResult ApplyPlan(
+    public SimulationOperationResult ApplyPlan(StorageSystemDocument document, SimulationDraftPlan plan) =>
+        ReducePlan(document, plan.Steps.All(step => step.FrozenAtUtc is not null) ? plan
+            : plan with { Steps = SimulationEditIntent.Freeze(plan.Steps, plan.PlanId, DateTimeOffset.UtcNow) });
+
+    public SimulationOperationResult ReducePlan(
         StorageSystemDocument document,
         SimulationDraftPlan plan)
     {
@@ -348,7 +411,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         var commands = new List<string>();
         foreach (var step in plan.Steps)
         {
-            var result = Apply(current, step);
+            var result = Reduce(current, step);
             if (!result.Succeeded)
             {
                 return SimulationOperationResult.Failure(document, result.Error);
@@ -559,7 +622,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         IReadOnlyList<string> accessPaths,
         string? allocatedId = null) =>
         new(
-            string.IsNullOrWhiteSpace(allocatedId) ? $"sim:volume:{Guid.NewGuid():N}" : allocatedId,
+            string.IsNullOrWhiteSpace(allocatedId) ? SimulationEditIntent.StableId("sim:volume", partitionId) : allocatedId,
             true,
             partitionId,
             fileSystem,
@@ -694,7 +757,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         if (style == "GPT" && request.CreateMsr == true)
         {
             remaining.Add(new PartitionInfo(
-                $"sim:partition:{Guid.NewGuid():N}",
+                request.AllocatedMsrId!,
                 true,
                 disk.Number,
                 1,
@@ -794,7 +857,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 ? NextFreeDriveLetter(snapshot)
                 : TopologyProjector.NormalizeDriveLetter(request.DriveLetter);
         var partitionId = string.IsNullOrWhiteSpace(request.AllocatedPartitionId)
-            ? $"sim:partition:{Guid.NewGuid():N}"
+            ? throw new ArgumentException("The partition ID must be frozen.")
             : request.AllocatedPartitionId;
         var label = request.Name?.Trim() ?? string.Empty;
         long? cluster = format
@@ -918,7 +981,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
         }
 
         var poolId = string.IsNullOrWhiteSpace(request.AllocatedPoolId)
-            ? $"sim:pool:{Guid.NewGuid():N}"
+            ? throw new ArgumentException("The pool ID must be frozen.")
             : request.AllocatedPoolId;
         var pool = new StoragePoolInfo(
             poolId,
@@ -1018,10 +1081,10 @@ public sealed class SimulationOperationService : ISimulationOperationService
         }
 
         var vdiskId = string.IsNullOrWhiteSpace(request.AllocatedVirtualDiskId)
-            ? $"sim:vdisk:{Guid.NewGuid():N}"
+            ? throw new ArgumentException("The virtual-disk ID must be frozen.")
             : request.AllocatedVirtualDiskId;
         var osDiskId = string.IsNullOrWhiteSpace(request.AllocatedOsDiskId)
-            ? $"sim:osdisk:{Guid.NewGuid():N}"
+            ? throw new ArgumentException("The OS-disk ID must be frozen.")
             : request.AllocatedOsDiskId;
         var osDiskNumber = snapshot.OsDisks.Select(x => x.Number).DefaultIfEmpty(-1).Max() + 1;
         var tierIds = poolTiers
@@ -1094,7 +1157,7 @@ public sealed class SimulationOperationService : ISimulationOperationService
                 string.IsNullOrWhiteSpace(request.VolumeName) ? name : request.VolumeName,
                 CreateMsr: createMsr, QuickFormat: request.QuickFormat ?? true);
             foreach (var step in SimulationDraftPlanner.CreateAutomaticPartitionSteps(
-                osDiskId, size, intent, request.AllocatedPartitionId, request.AllocatedVolumeId))
+                osDiskId, size, intent, request.AllocatedPartitionId, request.AllocatedVolumeId, request.AllocatedMsrId))
                 result = CreatePartition(result, step with { DriveLetter = step.PartitionKind == PartitionKind.BasicData
                     ? request.DriveLetter ?? string.Empty : null, AccessPaths = step.PartitionKind == PartitionKind.BasicData
                     ? request.AccessPaths : null });
@@ -1239,7 +1302,8 @@ public sealed class SimulationOperationService : ISimulationOperationService
             AllocatedVirtualDiskId: request.AllocatedVirtualDiskId,
             AllocatedOsDiskId: request.AllocatedOsDiskId,
             AllocatedPartitionId: request.AllocatedPartitionId,
-            AllocatedVolumeId: request.AllocatedVolumeId));
+            AllocatedVolumeId: request.AllocatedVolumeId, FrozenAtUtc: request.FrozenAtUtc,
+            AllocatedMsrId: request.AllocatedMsrId));
         return created;
     }
 

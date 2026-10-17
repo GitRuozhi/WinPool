@@ -67,7 +67,7 @@ public sealed class AgentSessionCoordinatorTests
         await actions.NotificationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var result = await coordinator.HandleAsync(
-            new OpenMainWindowRequest(null, CorrelationId.New()));
+            new LoadAgentWorkspaceStateRequest(CorrelationId.New()));
 
         Assert.Equal(ApplicationStatus.Rejected, result.Status);
         Assert.Equal(
@@ -139,7 +139,7 @@ public sealed class AgentSessionCoordinatorTests
         var snapshot = await coordinator.HandleAsync(
             new GetAgentSnapshotRequest(CorrelationId.New()));
         var rejected = await coordinator.HandleAsync(
-            new OpenMainWindowRequest(null, CorrelationId.New()));
+            new LoadAgentWorkspaceStateRequest(CorrelationId.New()));
 
         var response = Assert.IsType<AgentSnapshotResponse>(snapshot.Value);
         Assert.Equal(instanceId, response.Snapshot.AgentInstanceId);
@@ -153,7 +153,7 @@ public sealed class AgentSessionCoordinatorTests
             new AgentShutdownWorkflow(new RecordingShutdownActions(), registry));
         lifecycle.MarkReady();
         Assert.True((await coordinator.HandleAsync(
-            new OpenMainWindowRequest(null, CorrelationId.New()))).IsSuccess);
+            new LoadAgentWorkspaceStateRequest(CorrelationId.New()))).IsSuccess);
         Assert.Equal(1, operations.RequestCount);
     }
 
@@ -175,7 +175,7 @@ public sealed class AgentSessionCoordinatorTests
             lifecycle);
 
         var result = await coordinator.HandleAsync(
-            new OpenMainWindowRequest(null, CorrelationId.New()));
+            new LoadAgentWorkspaceStateRequest(CorrelationId.New()));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(AgentLifecycleState.Running, coordinator.State);
@@ -292,7 +292,7 @@ public sealed class AgentSessionCoordinatorTests
         }, exception => reported = exception);
         await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var result = await coordinator.HandleAsync(new OpenMainWindowRequest(null, CorrelationId.New()));
+        var result = await coordinator.HandleAsync(new LoadAgentWorkspaceStateRequest(CorrelationId.New()));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(AgentLifecycleState.Running, lifecycle.State);
@@ -579,12 +579,7 @@ public sealed class AgentSessionCoordinatorTests
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> OpenMainWindowAsync(
-            OpenMainWindowRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
+public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
             OpenAgentNativePropertiesRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
@@ -639,18 +634,13 @@ public sealed class AgentSessionCoordinatorTests
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> CaptureInventoryAsync(
-            CaptureAgentInventoryRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
-
-        public Task<ApplicationResult<AgentResponse>> CaptureManageInventoryAsync(
+public Task<ApplicationResult<AgentResponse>> CaptureManageInventoryAsync(
             CaptureAgentManageInventoryRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> LoadManageInventoryAsync(
-            LoadAgentManageInventoryRequest request,
+        public Task<ApplicationResult<AgentResponse>> LoadInventoryCacheAsync(
+            LoadAgentInventoryCacheRequest request,
             CancellationToken cancellationToken) =>
             Succeed(request);
 

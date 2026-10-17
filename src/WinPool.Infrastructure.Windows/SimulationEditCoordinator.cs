@@ -1,756 +1,116 @@
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
-using WinPool.Execution;
-using ExecutionMode = WinPool.Domain.ExecutionMode;
-using PrivilegeState = WinPool.Domain.PrivilegeState;
 
 namespace WinPool.Infrastructure.Windows;
 
-public sealed record SimulationEditCommit(
-    StorageSystemDocument Document,
-    OperationPlan Plan,
-    IReadOnlyList<ExecutionEvent> Events,
-    string CommitId = "");
+public sealed record SimulationEditCommit(StorageSystemDocument Document, SimulationCommitIntent Intent);
 
-/// <summary>
-/// Transitional adapter that routes the accepted V0.13 simulation document model
-/// through the V0.2 planner, policy, one-shot authorization and simulation executor.
-/// It never exposes a local-storage mutation executor.
-/// </summary>
+/// <summary>Previews frozen typed edits and publishes them only after an authoritative commit.</summary>
 public sealed class SimulationEditCoordinator(
     Func<StorageSystemDocument> currentDocument,
     Func<SimulationEditCommit, CancellationToken, Task> commitDocument,
-    ISimulationOperationService simulationEditor,
-    Func<StorageSystemDocument, SimulationOperationResult>? resetEditor = null) : ISimulationEditCoordinator
+    ISimulationOperationService simulationEditor) : ISimulationEditCoordinator
 {
-    private readonly Func<StorageSystemDocument> currentDocument =
-        currentDocument ?? throw new ArgumentNullException(nameof(currentDocument));
-    private readonly Func<SimulationEditCommit, CancellationToken, Task> commitDocument =
-        commitDocument ?? throw new ArgumentNullException(nameof(commitDocument));
-    private readonly ISimulationOperationService simulationEditor =
-        simulationEditor ?? throw new ArgumentNullException(nameof(simulationEditor));
-    private readonly Func<StorageSystemDocument, SimulationOperationResult>? resetEditor = resetEditor;
-
-    public async Task<ApplicationResult<SimulationEditReceipt>> ExecuteAsync(
-        SimulationEditRequest request,
-        CancellationToken cancellationToken)
+    public Task<ApplicationResult<SimulationEditReceipt>> ExecuteAsync(
+        SimulationEditRequest request, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        var correlationId = CorrelationId.New();
         var document = currentDocument();
-        if (document.Kind != StorageSystemKind.Simulation)
-        {
-            return Failure(
-                ApplicationStatus.Rejected,
-                correlationId,
-                "simulation.local-read-only",
-                "Local storage systems are read-only.");
-        }
-
-        if (request.Kind == SimulationEditKind.ResetDocument
-            && !document.Id.StartsWith("simulation:builtin", StringComparison.Ordinal))
-        {
-            return Failure(
-                ApplicationStatus.Rejected,
-                correlationId,
-                "simulation.reset-built-in-only",
-                "Only the built-in simulation document can be reset.");
-        }
-
-        var targetUnit = ResolveTarget(document.Snapshot, request);
-        if (targetUnit is null)
-        {
-            return Failure(
-                ApplicationStatus.Rejected,
-                correlationId,
-                "simulation.target-missing",
-                "The selected simulation target no longer exists.");
-        }
-
-        var systemId = document.SystemId;
-        var target = new StorageObjectId(
-            systemId,
-            MapKind(targetUnit.Kind),
-            targetUnit.StableId);
-        var targets = new List<StorageObjectId> { target };
-        foreach (var memberKey in request.MemberDiskIds ?? [])
-        {
-            var member = document.Snapshot.FindUnit(memberKey);
-            if (member is null || member.Kind != StorageUnitKind.PhysicalDisk)
-            {
-                return Failure(
-                    ApplicationStatus.Rejected,
-                    correlationId,
-                    "simulation.member-target-missing",
-                    "A selected member disk no longer exists.");
-            }
-
-            targets.Add(new StorageObjectId(systemId, StorageObjectKind.PhysicalDisk, member.StableId));
-        }
-
-        var inventoryVersion = InventoryVersion(document);
-        var environmentId = InternalStableIdentity.EnvironmentFromDocumentId(document.Id);
-        var machineBinding = MachineBinding.Create(["winpool-simulation", document.Id]);
-        var environment = new EnvironmentProfile(
-            environmentId,
-            EnvironmentKind.Simulation,
-            machineBinding,
-            ExecutionCapability.SimulateStorageMutation,
-            IsUserProvidedDisposableEnvironment: false,
-            DateTimeOffset.UtcNow);
-        var context = new WinPool.Execution.ExecutionContext(
-            environment,
-            ExecutionMode.Simulation,
-            PrivilegeState.StandardUser,
-            machineBinding,
-            inventoryVersion,
-            IsReleaseBuild: true);
-        var parameters = Parameters(request);
-        var operationRequest = new OperationRequest(
-            OperationId.New(),
-            environmentId,
-            systemId,
-            OperationIntent.SimulateStorageMutation,
-            targets,
-            parameters,
-            DateTimeOffset.UtcNow);
-
-        var commitStarted = false;
-        try
-        {
-            var policy = new OperationPolicyEvaluator();
-            var authority = new InMemoryOperationAuthority(policy);
-            var planner = new DefaultOperationPlanner(
-                new FixedOperationInventoryVersionSource(inventoryVersion));
-            var plan = await planner.BuildAsync(operationRequest, cancellationToken);
-            var authorization = await authority.AuthorizeAsync(
-                    plan,
-                    context,
-                    userConfirmed: false,
-                    cancellationToken);
-            if (authorization.Kind != AuthorizationIssueKind.Issued || authorization.Token is null)
-            {
-                return Failure(
-                    authorization.Kind == AuthorizationIssueKind.Rejected
-                        ? ApplicationStatus.Rejected
-                        : ApplicationStatus.RequiresAuthorization,
-                    correlationId,
-                    authorization.Code,
-                    authorization.Message);
-            }
-
-            var store = new ApplicationSimulationDocumentStore(
-                document,
-                request,
-                parameters,
-                simulationEditor,
-                resetEditor);
-            var executor = new SimulationOperationExecutor(store);
-            var gate = new ExecutorGate(policy, authority);
-            ExecutionEvent? terminal = null;
-            var executionEvents = new List<ExecutionEvent>();
-            await foreach (var executionEvent in gate.ExecuteAsync(
-                               plan,
-                               context,
-                               authorization.Token,
-                               executor,
-                               cancellationToken))
-            {
-                executionEvents.Add(executionEvent);
-                if (executionEvent.Kind is ExecutionEventKind.Completed
-                    or ExecutionEventKind.Cancelled
-                    or ExecutionEventKind.Rejected
-                    or ExecutionEventKind.Failed)
-                {
-                    terminal = executionEvent;
-                }
-            }
-
-            if (terminal?.Kind != ExecutionEventKind.Completed || store.Result is null)
-            {
-                if (store.InvalidModel)
-                {
-                    return Failure(ApplicationStatus.Rejected, correlationId,
-                        "simulation.invalid-model",
-                        "The simulated model contains values that cannot be safely applied.");
-                }
-                var status = terminal?.Kind == ExecutionEventKind.Cancelled
-                    ? ApplicationStatus.Cancelled
-                    : terminal?.Kind == ExecutionEventKind.Rejected
-                        ? ApplicationStatus.Rejected
-                        : ApplicationStatus.Failed;
-                return Failure(
-                    status,
-                    correlationId,
-                    terminal?.Code ?? "simulation.execution-incomplete",
-                    store.FailureText ?? terminal?.Message ?? "The simulation operation did not complete.");
-            }
-
-            commitStarted = true;
-            await commitDocument(
-                new SimulationEditCommit(
-                    store.Result.Document,
-                    plan,
-                    executionEvents,
-                    Guid.NewGuid().ToString("N")),
-                cancellationToken);
-            return ApplicationResult<SimulationEditReceipt>.Succeeded(
-                new SimulationEditReceipt(
-                    plan.OperationId,
-                    plan.PlanHash,
-                    systemId,
-                    target,
-                    store.BeforeRevision,
-                    store.AfterRevision,
-                    store.Result.Commands),
-                correlationId);
-        }
-        catch (OperationCanceledException)
-        {
-            return Failure(
-                ApplicationStatus.Cancelled,
-                correlationId,
-                "simulation.cancelled",
-                "The simulation operation was cancelled.");
-        }
-        catch (SimulationCommitOutcomeUnknownException unknown)
-        {
-            return Failure(
-                ApplicationStatus.OutcomeUnknown,
-                correlationId,
-                "simulation.commit.outcome_unknown",
-                unknown.Message);
-        }
-        catch (SimulationCommitConflictException conflict)
-        {
-            return Failure(ApplicationStatus.Rejected, correlationId,
-                "simulation.commit.conflict", conflict.Message);
-        }
-        catch (SimulationCommitFailureException failure)
-        {
-            return Failure(ApplicationStatus.Failed, correlationId,
-                "simulation.commit.storage_failed", failure.Message);
-        }
-        catch (IOException) when (commitStarted)
-        {
-            return Failure(ApplicationStatus.OutcomeUnknown, correlationId,
-                "simulation.commit.outcome_unknown",
-                "The save connection failed after the commit began. Reconcile the document before retrying.");
-        }
-        catch (OverflowException)
-        {
-            return Failure(ApplicationStatus.Rejected, correlationId,
-                "simulation.numeric-overflow",
-                "The modeled capacity exceeds the supported byte range.");
-        }
-        catch (ArgumentException)
-        {
-            return Failure(ApplicationStatus.Rejected, correlationId,
-                "simulation.invalid-model",
-                "The simulated model contains values that cannot be safely applied.");
-        }
-        catch (Exception exception) when (exception is
-            InvalidOperationException or IOException or UnauthorizedAccessException)
-        {
-            return Failure(
-                ApplicationStatus.Failed,
-                correlationId,
-                "simulation.execution-failed",
-                "The simulation operation failed without changing the active document.");
-        }
-    }
-
-    public async Task<ApplicationResult<SimulationEditReceipt>> ExecutePlanAsync(
-        SimulationDraftPlan plan,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(plan);
-        var correlationId = CorrelationId.New();
-        var document = currentDocument();
-        if (document.Kind != StorageSystemKind.Simulation)
-        {
-            return Failure(
-                ApplicationStatus.Rejected,
-                correlationId,
-                "simulation.local-read-only",
-                "Local storage systems are read-only.");
-        }
-
-        if (plan.IsEmpty)
-        {
-            return Failure(
-                ApplicationStatus.Rejected,
-                correlationId,
-                "simulation.plan-empty",
-                "The simulation plan has no steps.");
-        }
-
-        if ((plan.BaselineSystemId is { } baselineSystem && baselineSystem != document.SystemId)
-            || (plan.BaselineRevision is { } baselineRevision && baselineRevision != document.Revision)
-            || (plan.BaselineInventoryVersion is { } baselineInventory
-                && !StringComparer.Ordinal.Equals(baselineInventory, document.InventoryVersion)))
-        {
-            return Failure(ApplicationStatus.Rejected, correlationId,
-                "simulation.plan.revision_conflict",
-                "The simulation changed since this plan was prepared. Refresh the draft before retrying.");
-        }
-
-        SimulationOperationResult applied;
-        try
-        {
-            applied = simulationEditor.ApplyPlan(document, plan);
-        }
-        catch (Exception exception) when (exception is OverflowException or ArgumentException)
-        {
-            return Failure(ApplicationStatus.Rejected, correlationId,
-                "simulation.invalid-model",
-                "The simulated model contains values that cannot be safely applied.");
-        }
-        if (!applied.Succeeded)
-        {
-            return Failure(
-                ApplicationStatus.Rejected,
-                correlationId,
-                "simulation.plan-rejected",
-                applied.Error);
-        }
-
-        var systemId = document.SystemId;
-        var target = new StorageObjectId(
-            systemId,
-            StorageObjectKind.System,
-            document.Snapshot.Computer.StableId);
-        var inventoryVersion = InventoryVersion(document);
-        var environmentId = InternalStableIdentity.EnvironmentFromDocumentId(document.Id);
-        var machineBinding = MachineBinding.Create(["winpool-simulation", document.Id]);
-        var environment = new EnvironmentProfile(
-            environmentId,
-            EnvironmentKind.Simulation,
-            machineBinding,
-            ExecutionCapability.SimulateStorageMutation,
-            IsUserProvidedDisposableEnvironment: false,
-            DateTimeOffset.UtcNow);
-        var context = new WinPool.Execution.ExecutionContext(
-            environment,
-            ExecutionMode.Simulation,
-            PrivilegeState.StandardUser,
-            machineBinding,
-            inventoryVersion,
-            IsReleaseBuild: true);
-        var parameters = new SortedDictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["EditKind"] = "DraftPlan",
-            ["PlanId"] = plan.PlanId,
-            ["StepCount"] = plan.Steps.Count.ToString(CultureInfo.InvariantCulture),
-            ["SystemValidation"] = "SkippedForSimulation"
-        };
-        var operationRequest = new OperationRequest(
-            OperationId.New(),
-            environmentId,
-            systemId,
-            OperationIntent.SimulateStorageMutation,
-            [target],
-            parameters,
-            DateTimeOffset.UtcNow);
         var commitId = Guid.NewGuid().ToString("N");
+        var frozen = SimulationEditIntent.Freeze(request, commitId, DateTimeOffset.UtcNow);
+        if (frozen.TargetProviderKey == "primordial"
+            && document.Snapshot.StoragePools.FirstOrDefault(pool => pool.IsPrimordial) is { } primordial)
+            frozen = frozen with { TargetProviderKey = primordial.StableId };
+        return ExecuteCoreAsync(document, new SimulationDraftPlan(commitId, [frozen]), commitId,
+            singleEdit: true, cancellationToken);
+    }
+
+    public Task<ApplicationResult<SimulationEditReceipt>> ExecutePlanAsync(
+        SimulationDraftPlan plan, CancellationToken cancellationToken)
+    {
+        var document = currentDocument();
+        var commitId = Guid.NewGuid().ToString("N");
+        return ExecuteCoreAsync(document,
+            plan with { Steps = SimulationEditIntent.Freeze(plan.Steps, commitId, DateTimeOffset.UtcNow) },
+            commitId, singleEdit: false, cancellationToken);
+    }
+
+    private async Task<ApplicationResult<SimulationEditReceipt>> ExecuteCoreAsync(
+        StorageSystemDocument document, SimulationDraftPlan plan, string commitId,
+        bool singleEdit, CancellationToken cancellationToken)
+    {
+        var correlation = CorrelationId.New();
+        if (document.Kind != StorageSystemKind.Simulation)
+            return Failure(ApplicationStatus.Rejected, correlation, "simulation.local-read-only", "Local storage systems are read-only.");
+        if (plan.IsEmpty)
+            return Failure(ApplicationStatus.Rejected, correlation, "simulation.plan-empty", "The simulation plan has no steps.");
+        if ((plan.BaselineSystemId is { } system && system != document.SystemId)
+            || (plan.BaselineRevision is { } revision && revision != document.Revision)
+            || (plan.BaselineInventoryVersion is { } version && version != document.InventoryVersion))
+            return Failure(ApplicationStatus.Rejected, correlation, "simulation.plan.revision_conflict", "The simulation changed since this plan was prepared. Refresh the draft before retrying.");
+        if (plan.Steps.Any(edit => edit.Kind == SimulationEditKind.ResetDocument)
+            && !document.Id.StartsWith("simulation:builtin", StringComparison.Ordinal))
+            return Failure(ApplicationStatus.Rejected, correlation, "simulation.reset-built-in-only", "Only a built-in simulation document can be reset.");
+        var unit = singleEdit ? document.Snapshot.FindUnit(plan.Steps[0].TargetProviderKey) : null;
+        if (singleEdit && (unit is null || unit.Kind is StorageUnitKind.SyntheticStoragePool or StorageUnitKind.SyntheticStorageTier))
+            return Failure(ApplicationStatus.Rejected, correlation, "simulation.target-missing", "The selected simulation target no longer exists.");
 
         var commitStarted = false;
         try
         {
-            var policy = new OperationPolicyEvaluator();
-            var authority = new InMemoryOperationAuthority(policy);
-            var planner = new DefaultOperationPlanner(
-                new FixedOperationInventoryVersionSource(inventoryVersion));
-            var operationPlan = await planner.BuildAsync(operationRequest, cancellationToken);
-            var authorization = await authority.AuthorizeAsync(
-                    operationPlan,
-                    context,
-                    userConfirmed: false,
-                    cancellationToken);
-            if (authorization.Kind != AuthorizationIssueKind.Issued || authorization.Token is null)
-            {
-                return Failure(
-                    authorization.Kind == AuthorizationIssueKind.Rejected
-                        ? ApplicationStatus.Rejected
-                        : ApplicationStatus.RequiresAuthorization,
-                    correlationId,
-                    authorization.Code,
-                    authorization.Message);
-            }
-
-            var store = new PlanDocumentStore(document, applied);
-            var executor = new SimulationOperationExecutor(store);
-            var gate = new ExecutorGate(policy, authority);
-            ExecutionEvent? terminal = null;
-            var executionEvents = new List<ExecutionEvent>();
-            await foreach (var executionEvent in gate.ExecuteAsync(
-                               operationPlan,
-                               context,
-                               authorization.Token,
-                               executor,
-                               cancellationToken))
-            {
-                executionEvents.Add(executionEvent);
-                if (executionEvent.Kind is ExecutionEventKind.Completed
-                    or ExecutionEventKind.Cancelled
-                    or ExecutionEventKind.Rejected
-                    or ExecutionEventKind.Failed)
-                {
-                    terminal = executionEvent;
-                }
-            }
-
-            if (terminal?.Kind != ExecutionEventKind.Completed || store.Result is null)
-            {
-                var status = terminal?.Kind switch
-                {
-                    ExecutionEventKind.Cancelled => ApplicationStatus.Cancelled,
-                    ExecutionEventKind.Rejected => ApplicationStatus.Rejected,
-                    _ => ApplicationStatus.Failed
-                };
-                return Failure(
-                    status,
-                    correlationId,
-                    terminal?.Code ?? "simulation.execution-incomplete",
-                    store.FailureText ?? terminal?.Message ?? "The simulation plan did not complete.");
-            }
-
+            cancellationToken.ThrowIfCancellationRequested();
+            SimulationOperationResult applied;
+            if (plan.PreviewDocument is { } preview && preview.Id == document.Id
+                && preview.Revision == document.Revision + 1)
+                applied = new(true, preview, string.Empty,
+                    plan.DisplayItems.SelectMany(item => item.CommandPreview).ToArray());
+            else
+                applied = singleEdit
+                    ? simulationEditor.Apply(document, plan.Steps[0])
+                    : simulationEditor.ApplyPlan(document, plan);
+            if (!applied.Succeeded)
+                return Failure(ApplicationStatus.Rejected, correlation, "simulation.plan-rejected", applied.Error);
+            var candidate = applied.Document with { Revision = checked(document.Revision + 1) };
+            var intent = new SimulationCommitIntent(document.Id, document.Revision, commitId, plan.Steps);
             commitStarted = true;
-            await commitDocument(
-                new SimulationEditCommit(
-                    store.Result.Document,
-                    operationPlan,
-                    executionEvents,
-                    commitId),
-                cancellationToken);
-            return ApplicationResult<SimulationEditReceipt>.Succeeded(
-                new SimulationEditReceipt(
-                    operationPlan.OperationId,
-                    operationPlan.PlanHash,
-                    systemId,
-                    target,
-                    store.BeforeRevision,
-                    store.AfterRevision,
-                    store.Result.Commands),
-                correlationId);
+            await commitDocument(new(candidate, intent), cancellationToken);
+            var target = unit is null
+                ? new StorageObjectId(document.SystemId, StorageObjectKind.System, document.Snapshot.Computer.StableId)
+                : new StorageObjectId(document.SystemId, MapKind(unit.Kind), unit.StableId);
+            return ApplicationResult<SimulationEditReceipt>.Succeeded(new(
+                new OperationId(Guid.ParseExact(commitId, "N")), intent.IntentHash,
+                document.SystemId, target, document.Revision, candidate.Revision, applied.Commands), correlation);
         }
         catch (OperationCanceledException)
-        {
-            return Failure(ApplicationStatus.Cancelled, correlationId,
-                "simulation.cancelled", "The simulation operation was cancelled.");
-        }
-        catch (SimulationCommitOutcomeUnknownException unknown)
-        {
-            return Failure(
-                ApplicationStatus.OutcomeUnknown,
-                correlationId,
-                "simulation.commit.outcome_unknown",
-                unknown.Message);
-        }
-        catch (SimulationCommitConflictException conflict)
-        {
-            return Failure(ApplicationStatus.Rejected, correlationId,
-                "simulation.commit.conflict", conflict.Message);
-        }
-        catch (SimulationCommitFailureException failure)
-        {
-            return Failure(ApplicationStatus.Failed, correlationId,
-                "simulation.commit.storage_failed", failure.Message);
-        }
+        { return Failure(ApplicationStatus.Cancelled, correlation, "simulation.cancelled", "The simulation operation was cancelled."); }
+        catch (SimulationCommitOutcomeUnknownException exception)
+        { return Failure(ApplicationStatus.OutcomeUnknown, correlation, "simulation.commit.outcome_unknown", exception.Message); }
+        catch (SimulationCommitConflictException exception)
+        { return Failure(ApplicationStatus.Rejected, correlation, "simulation.commit.conflict", exception.Message); }
+        catch (SimulationCommitFailureException exception)
+        { return Failure(ApplicationStatus.Failed, correlation, "simulation.commit.storage_failed", exception.Message); }
         catch (IOException) when (commitStarted)
-        {
-            return Failure(ApplicationStatus.OutcomeUnknown, correlationId,
-                "simulation.commit.outcome_unknown",
-                "The save connection failed after the commit began. Reconcile the document before retrying.");
-        }
-        catch (OverflowException)
-        {
-            return Failure(ApplicationStatus.Rejected, correlationId,
-                "simulation.numeric-overflow",
-                "The modeled capacity exceeds the supported byte range.");
-        }
-        catch (ArgumentException)
-        {
-            return Failure(ApplicationStatus.Rejected, correlationId,
-                "simulation.invalid-model",
-                "The simulated model contains values that cannot be safely applied.");
-        }
-        catch (Exception exception) when (exception is
-            InvalidOperationException or IOException or UnauthorizedAccessException)
-        {
-            return Failure(
-                ApplicationStatus.Failed,
-                correlationId,
-                "simulation.execution-failed",
-                "The simulation operation failed without changing the active document.");
-        }
-    }
-
-    private static ApplicationResult<SimulationEditReceipt> Failure(
-        ApplicationStatus status,
-        CorrelationId correlationId,
-        string code,
-        string userText) =>
-        ApplicationResult<SimulationEditReceipt>.FromStatus(
-            status,
-            correlationId,
-            new ApplicationMessage(
-                code,
-                userText,
-                string.Empty,
-                status == ApplicationStatus.Rejected
-                    ? ApplicationMessageSeverity.Warning
-                    : ApplicationMessageSeverity.Error,
-                []));
-
-    private static IReadOnlyDictionary<string, string> Parameters(SimulationEditRequest request)
-    {
-        var values = new SortedDictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["EditKind"] = request.Kind.ToString(),
-            ["TargetProviderKey"] = request.TargetProviderKey
-        };
-        Add(values, "Name", request.Name);
-        Add(values, "DestinationGroupId", request.DestinationGroupId);
-        Add(values, "DiskUsage", request.DiskUsage);
-        Add(values, "PartitionStyle", request.PartitionStyle);
-        Add(values, "DriveLetter", request.DriveLetter);
-        Add(values, "FileSystem", request.FileSystem);
-        Add(values, "AllocationUnitSize", request.AllocationUnitSize);
-        if (request.Kind == SimulationEditKind.FormatPartition
-            || request.Kind == SimulationEditKind.CreatePartition
-                && !string.IsNullOrWhiteSpace(request.FileSystem))
-        {
-            Add(values, "QuickFormat", (request.QuickFormat ?? true) ? "True" : "False");
-        }
-        Add(values, "Offline", request.Offline);
-        Add(values, "EstimatedWriteBytes", request.SizeBytes);
-        Add(values, "CreateMsr", request.CreateMsr);
-        Add(values, "InterleaveBytes", request.InterleaveBytes);
-        Add(values, "Resiliency", request.Resiliency);
-        if (request.MemberDiskIds is not null)
-        {
-            values["MemberDiskProviderKeys"] = JsonSerializer.Serialize(
-                request.MemberDiskIds.Order(StringComparer.Ordinal));
-        }
-
-        Add(values, "VirtualDiskName", request.VirtualDiskName);
-        Add(values, "VolumeName", request.VolumeName);
-        Add(values, "PartitionKind", request.PartitionKind);
-        Add(values, "PerformanceResiliency", request.PerformanceResiliency);
-        Add(values, "PerformanceInterleaveBytes", request.PerformanceInterleaveBytes);
-        Add(values, "PerformanceSizeBytes", request.PerformanceSizeBytes);
-        Add(values, "PerformanceDataCopies", request.PerformanceDataCopies);
-        Add(values, "CapacityResiliency", request.CapacityResiliency);
-        Add(values, "CapacityInterleaveBytes", request.CapacityInterleaveBytes);
-        Add(values, "CapacitySizeBytes", request.CapacitySizeBytes);
-        Add(values, "CapacityColumns", request.CapacityColumns);
-        Add(values, "CapacityToleratedFailures", request.CapacityToleratedFailures);
-        Add(values, "ScmResiliency", request.ScmResiliency);
-        Add(values, "ScmInterleaveBytes", request.ScmInterleaveBytes);
-        Add(values, "ScmDataCopies", request.ScmDataCopies);
-        Add(values, "OffsetBytes", request.OffsetBytes);
-        Add(values, "CreatePartition", request.CreatePartition);
-        Add(values, "CreateVirtualDisk", request.CreateVirtualDisk);
-        return values;
-    }
-
-    private static void Add(
-        IDictionary<string, string> values,
-        string key,
-        string? value)
-    {
-        if (value is not null)
-        {
-            values[key] = value;
-        }
-    }
-
-    private static void Add<T>(
-        IDictionary<string, string> values,
-        string key,
-        T? value) where T : struct
-    {
-        if (value is not null)
-        {
-            values[key] = Convert.ToString(value.Value, CultureInfo.InvariantCulture)!;
-        }
-    }
-
-    private static string InventoryVersion(StorageSystemDocument document) =>
-        $"application:{document.SchemaVersion}:{document.Snapshot.SchemaVersion}:{document.UpdatedAt.UtcTicks}:{document.Snapshot.ScannedAt.UtcTicks}";
-
-    private static StorageUnitRef? ResolveTarget(
-        StorageSnapshot snapshot,
-        SimulationEditRequest request)
-    {
-        var direct = snapshot.FindUnit(request.TargetProviderKey);
-        if (direct is not null)
-        {
-            if (direct.Kind is StorageUnitKind.SyntheticStoragePool
-                or StorageUnitKind.SyntheticStorageTier)
-            {
-                // Unified synthetic containers are display/navigation-only,
-                // never valid simulation mutation targets.
-                return null;
-            }
-            return direct;
-        }
-
-        if ((request.Kind == SimulationEditKind.CreateStoragePool
-                || request.Kind == SimulationEditKind.CreateTieredPool)
-            && StringComparer.OrdinalIgnoreCase.Equals(request.TargetProviderKey, "primordial"))
-        {
-            var primordial = snapshot.StoragePools.SingleOrDefault(pool => pool.IsPrimordial);
-            return primordial is null ? null : snapshot.FindUnit(primordial.StableId);
-        }
-
-        return null;
+        { return Failure(ApplicationStatus.OutcomeUnknown, correlation, "simulation.commit.outcome_unknown", "The save connection failed after the commit began. Reconcile the document before retrying."); }
+        catch (Exception exception) when (exception is ArgumentException or OverflowException)
+        { return Failure(ApplicationStatus.Rejected, correlation, "simulation.invalid-model", "The simulated model contains values that cannot be safely applied."); }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+        { return Failure(ApplicationStatus.Failed, correlation, "simulation.execution-failed", "The simulation operation failed without changing the active document."); }
     }
 
     private static StorageObjectKind MapKind(StorageUnitKind kind) => kind switch
     {
-        StorageUnitKind.System => StorageObjectKind.System,
-        StorageUnitKind.StorageSubsystem => StorageObjectKind.StorageSubsystem,
+        StorageUnitKind.PhysicalDisk => StorageObjectKind.PhysicalDisk,
         StorageUnitKind.StoragePool => StorageObjectKind.StoragePool,
         StorageUnitKind.StorageTier => StorageObjectKind.StorageTier,
-        StorageUnitKind.PhysicalDisk => StorageObjectKind.PhysicalDisk,
         StorageUnitKind.VirtualDisk => StorageObjectKind.VirtualDisk,
         StorageUnitKind.OsDisk => StorageObjectKind.OsDisk,
         StorageUnitKind.Partition => StorageObjectKind.Partition,
         StorageUnitKind.Volume => StorageObjectKind.Volume,
-        StorageUnitKind.NetworkDisk => StorageObjectKind.NetworkDisk,
-        StorageUnitKind.NetworkDiskGroup or StorageUnitKind.OtherDiskGroup
-            or StorageUnitKind.DirectDiskGroup or StorageUnitKind.VirtualDiskGroup =>
-            StorageObjectKind.LogicalGroup,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        _ => StorageObjectKind.System
     };
 
-    private sealed class PlanDocumentStore(
-        StorageSystemDocument document,
-        SimulationOperationResult applied) : ISimulationDocumentStore
-    {
-        public long BeforeRevision { get; private set; }
-
-        public long AfterRevision { get; private set; }
-
-        public SimulationOperationResult? Result { get; private set; }
-
-        public string? FailureText { get; private set; }
-
-        public Task<SimulationMutationReceipt> ApplyAsync(
-            OperationPlan plan,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            BeforeRevision = document.Revision;
-            AfterRevision = checked(BeforeRevision + 1);
-            Result = applied with
-            {
-                Document = applied.Document with { Revision = AfterRevision }
-            };
-            return Task.FromResult(
-                new SimulationMutationReceipt(
-                    SimulationDocumentSnapshot.Create(plan.SystemId, BeforeRevision, plan.Parameters),
-                    SimulationDocumentSnapshot.Create(plan.SystemId, AfterRevision, plan.Parameters)));
-        }
-
-        public Task RestoreAsync(
-            SimulationMutationReceipt receipt,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Result = null;
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class ApplicationSimulationDocumentStore(
-        StorageSystemDocument document,
-        SimulationEditRequest request,
-        IReadOnlyDictionary<string, string> expectedParameters,
-        ISimulationOperationService editor,
-        Func<StorageSystemDocument, SimulationOperationResult>? resetEditor) : ISimulationDocumentStore
-    {
-        private StorageSystemDocument current = document;
-        private StorageSystemDocument? beforeDocument;
-
-        public long BeforeRevision { get; private set; }
-        public long AfterRevision { get; private set; }
-        public SimulationOperationResult? Result { get; private set; }
-        public string? FailureText { get; private set; }
-        public bool InvalidModel { get; private set; }
-
-        public Task<SimulationMutationReceipt> ApplyAsync(
-            OperationPlan plan,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!DictionaryEqual(plan.Parameters, expectedParameters))
-            {
-                throw new InvalidOperationException("The simulation edit parameters changed after planning.");
-            }
-
-            beforeDocument = current;
-            BeforeRevision = current.Revision;
-            SimulationOperationResult result;
-            try
-            {
-                result = request.Kind == SimulationEditKind.ResetDocument
-                    ? resetEditor?.Invoke(current)
-                        ?? SimulationOperationResult.Failure(
-                            current,
-                            "The built-in simulation reset adapter is unavailable.")
-                    : editor.Apply(current, request);
-            }
-            catch (Exception exception) when (exception is ArgumentException or OverflowException)
-            {
-                InvalidModel = true;
-                throw;
-            }
-            if (!result.Succeeded)
-            {
-                FailureText = result.Error;
-                throw new InvalidOperationException("The application simulation document adapter rejected the edit.");
-            }
-
-            AfterRevision = checked(BeforeRevision + 1);
-            Result = result with
-            {
-                Document = result.Document with { Revision = AfterRevision }
-            };
-            current = Result.Document;
-            return Task.FromResult(
-                new SimulationMutationReceipt(
-                    SimulationDocumentSnapshot.Create(plan.SystemId, BeforeRevision, expectedParameters),
-                    SimulationDocumentSnapshot.Create(plan.SystemId, AfterRevision, expectedParameters)));
-        }
-
-        public Task RestoreAsync(
-            SimulationMutationReceipt receipt,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (beforeDocument is null || receipt.After.Revision != AfterRevision)
-            {
-                throw new InvalidOperationException("The simulation revision cannot be restored.");
-            }
-
-            current = beforeDocument;
-            Result = null;
-            return Task.CompletedTask;
-        }
-
-        private static bool DictionaryEqual(
-            IReadOnlyDictionary<string, string> left,
-            IReadOnlyDictionary<string, string> right) =>
-            left.Count == right.Count
-            && left.All(pair => right.TryGetValue(pair.Key, out var value)
-                && StringComparer.Ordinal.Equals(pair.Value, value));
-
-    }
+    private static ApplicationResult<SimulationEditReceipt> Failure(
+        ApplicationStatus status, CorrelationId correlation, string code, string message) =>
+        ApplicationResult<SimulationEditReceipt>.FromStatus(status, correlation,
+            new ApplicationMessage(code, message, string.Empty,
+                status == ApplicationStatus.Rejected ? ApplicationMessageSeverity.Warning : ApplicationMessageSeverity.Error, []));
 }

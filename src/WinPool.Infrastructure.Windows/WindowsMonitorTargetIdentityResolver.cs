@@ -11,22 +11,27 @@ public sealed partial class WindowsMonitorTargetIdentityResolver : IMonitorTarge
 {
     private readonly IHardwareInventoryProvider provider;
     private readonly Func<CancellationToken, Task<SystemId>>? localSystemIdentity;
+    private readonly Func<StorageInventoryScope?, CancellationToken, Task<StorageSystemDocument>>? collectFacts;
 
     public WindowsMonitorTargetIdentityResolver(IHardwareInventoryProvider? provider = null,
-        Func<CancellationToken, Task<SystemId>>? localSystemIdentity = null)
+        Func<CancellationToken, Task<SystemId>>? localSystemIdentity = null,
+        Func<StorageInventoryScope?, CancellationToken, Task<StorageSystemDocument>>? collectFacts = null)
     {
         this.provider = provider ?? new WindowsHardwareInventoryProvider(purpose: CollectionPurpose.Storage);
         this.localSystemIdentity = localSystemIdentity;
+        this.collectFacts = collectFacts;
     }
 
     public async Task<MonitorTargetResolution> ResolveAsync(MonitorRequest request, StorageInventoryScope? scope,
         CancellationToken cancellationToken)
     {
         StorageSystemDocument document;
-        try { document = await StorageOperationTiming.MeasureAsync("monitor.identity.collect", async () => scope is null ? await provider.CollectLocalAsync(cancellationToken).ConfigureAwait(false)
+        try { document = await StorageOperationTiming.MeasureAsync("monitor.identity.collect", async () => collectFacts is not null
+            ? await collectFacts(scope, cancellationToken).ConfigureAwait(false)
+            : scope is null ? await provider.CollectLocalAsync(cancellationToken).ConfigureAwait(false)
             : provider is IScopedHardwareInventoryProvider scoped ? await scoped.CollectScopedAsync(scope, cancellationToken).ConfigureAwait(false)
             : throw new InvalidOperationException("The monitor identity provider cannot obtain scoped evidence."),
-            scope?.OperationId, scope?.StepId, scope?.Key ?? "monitor.initial", 1).ConfigureAwait(false); }
+            scope?.OperationId, scope?.StepId, scope?.Key ?? "monitor.initial").ConfigureAwait(false); }
         catch (InventoryScanException exception) { throw new InvalidDataException("Fresh monitoring identity collection failed.", exception); }
         var facts = document.SourceFacts ?? throw new InvalidDataException("Monitor identity facts are missing.");
         if (document.Kind != StorageSystemKind.Local || facts.SystemId != document.SystemId || facts.IsSimulation || facts.IsMerged
@@ -87,7 +92,23 @@ public sealed partial class WindowsMonitorTargetIdentityResolver : IMonitorTarge
                     ProviderIdentity = uniqueId + "|" + objectId + "|" + Text(disks[0], "UniqueId") + "|" + Text(disks[0], "ObjectId"),
                     DisplayName = Text(item, "FriendlyName")
                 });
-            else if (throughputRequested) Unresolved(id, "monitor.identity.exact_os_disk_association_unavailable");
+            else if (throughputRequested)
+            {
+                var poolMemberWithoutCounter = item.ObjectType == FactObjectType.PhysicalDisk && disks.Length == 0
+                    && facts.Relationships.Any(edge => !edge.IsRetained && edge.Kind == "pool-member"
+                        && (edge.FromId == item.Id || edge.ToId == item.Id)
+                        && objects.TryGetValue(edge.FromId == item.Id ? edge.ToId : edge.FromId, out var pool)
+                        && pool.ObjectType == FactObjectType.StoragePool && pool.HasReliableIdentity
+                        && sources[pool.SourceRef].ReadState == FieldReadState.Returned
+                        && pool.Field("IsPrimordial") is
+                            { ReadState: FieldReadState.Returned, Value: { ValueKind: JsonValueKind.False } });
+                if (poolMemberWithoutCounter)
+                    unresolved.Add(new(facts.SystemId, id,
+                        scope?.OperationId ?? new OperationId(Guid.Empty), scope?.StepId ?? "initial",
+                        MonitorEditTargetStatus.Unsupported, "monitor.counter.pool_member_has_no_independent_os_disk",
+                        facts.InventoryCapturedAt));
+                else Unresolved(id, "monitor.identity.exact_os_disk_association_unavailable");
+            }
             if (stateRequested && item.ObjectType == FactObjectType.VirtualDisk)
             {
                 var matches = GuidPattern().Matches(uniqueId);
