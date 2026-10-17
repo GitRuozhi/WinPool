@@ -4,24 +4,26 @@
 
 WinPool is a Windows desktop application for viewing storage topology, editing simulated systems, monitoring devices, and performing supported local storage operations through a controlled workflow.
 
-The current code version is **V0.60**. **V0.61** simplification and performance work is being planned; the documentation targets that version, but implementation has not started. The code version will advance when that work is complete. The first public test build is due before V0.70 for dedicated testers in different environments. Work and evidence currently come from the developer environment. See the [active plan](docs/Plan.md) and [verification scope](docs/Quality.md).
+**The V0.61 portable test candidate is complete.** Collection, real execution, simulation commits, and monitoring now use the simplified paths. The first public test build is due before V0.70 for dedicated testers in different environments; current work and evidence come from the developer environment, and the candidate has not been publicly released. See the [current plan](docs/Plan.md) for the candidate and execution results, [Directory.Build.props](Directory.Build.props) for the actual version, and [Quality](docs/Quality.md) for verified coverage.
 
 ## Using WinPool
 
 - Manage shows pools, tiers, physical and virtual disks, partitions, and their relationships. Developer mode in Settings exposes the hardware report, testing roadmap, and current-run messages.
-- Storage structure previews a draft before applying its changes together. Disk/partition submits individual actions. New pools generate a virtual disk and partition goals by default; existing RAW virtual disks are not automatically partitioned. Drafts survive page navigation during the current App lifetime.
+- Storage structure previews a draft before the Agent executes the confirmed structural job. Disk/partition submits individual actions. New pools generate virtual disk and partition goals by default; existing RAW virtual disks are not automatically partitioned. Drafts survive page navigation during the current App lifetime, and simulation documents load on demand.
 - Simulation and JSON import/export do not modify real disks. Simulation results do not prove that Windows can execute the same configuration.
-- Real editing starts off and uses exact targets and the current controlled confirmation. Available operations depend on Windows/provider capabilities. Unknown outcomes block further writes and are not automatically replayed. Real MBR-to-GPT conversion, extending existing VDs/tiers to MAX, and direct pool-member migration remain unsupported; see [Product](docs/Product.md) for the complete boundaries.
-- Monitoring records to a separate database, rotates at 1 GiB, and archives with the bundled 7-Zip. Historical archives are not automatically deleted. CSV export covers the active database only; there is no monitoring-history browser.
+- Real editing starts off and uses exact targets and the current controlled confirmation. An accepted job may continue after the App closes while the Agent remains alive; an Agent restart performs read-only recovery without continuing writes. Unknown outcomes block further writes. Capabilities depend on Windows/provider support. Real MBR-to-GPT conversion, extending existing VDs/tiers to MAX, and direct pool-member migration remain unsupported; see [Product](docs/Product.md).
+- Monitoring supports 0.2–20 Hz and pushes batches to a shared chart/alert cache, reseeding its window after connection or sequence gaps. Recording uses a separate database, rotates at 1 GiB, and archives with bundled 7-Zip. Historical archives are not automatically deleted. CSV export covers the active database only; there is no monitoring-history browser.
 - English, Simplified Chinese, themes, and keyboard controls are available. Hardware fields retain their original values; review their contents before sharing exports.
 
-Known slow or failed collection at ordinary privilege, connection timeouts, and repeated processing await V0.61 fixes. Diagnostic speed improvements do not describe an optimization already deployed in the current product. Sources are listed in the [review index](docs/Review/README.md).
+Implementation does not establish coverage across every environment or performance scenario. Quality records actual ordinary-privilege startup, hardware-operation, and candidate results; historical reviews and speed measurements do not replace current verification.
 
 ## Running and building
 
 The support target starts at Windows 10 22H2 x64, with Windows 11 24H2/25H2 x64 as primary platforms. Coverage across environments remains external testing work; these targets are not a completed verification matrix.
 
 Use the complete x64 portable runtime directory with matching App and Agent files. Run `WinPool.App.exe`; the Agent appears in the user tray. Exit both before replacing files. Data defaults to `%LocalAppData%\WinPool`, with an explicitly selected writable `Data` directory beside the program also supported. No formal MSIX or Store release is available.
+
+Candidates provide a ZIP containing `TESTING.md` and a separate SHA-256 checksum file. Extract the complete folder before running. Feedback should include the version, Windows/device environment, reproduction steps, and relevant errors. Candidate preparation and internal acceptance do not constitute a public release.
 
 On Windows with PowerShell and the SDK specified by `global.json`:
 

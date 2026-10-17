@@ -17,6 +17,6 @@
 | 控件样式、颜色与图标 | [App.xaml](../../src/WinPool.App/App.xaml)及所改页面／控件的实际使用处 |
 | 模拟编辑规则与预览 | [StorageEditRules](../../src/WinPool.Application/StorageEditRules.cs)、[EditWorkspace](../../src/WinPool.Application/EditWorkspace.cs) |
 | 消息生命周期与呈现 | [GlobalNotificationService](../../src/WinPool.Application/GlobalNotificationService.cs)、[ApplicationNotificationPresenter](../../src/WinPool.App/Services/ApplicationNotificationPresenter.cs) |
-| 真实操作结果反馈 | [RealOperationFeedback](../../src/WinPool.App/Services/RealOperationFeedback.cs)及调用方 |
+| 真实操作结果反馈 | [RealOperationFeedback](../../src/WinPool.Application/RealOperationFeedback.cs)及调用方 |
 
 旧 DesignTables 入口与通知触发表已[原样归档](../Archive/20261017-noncore-docs/README.md)；其中已过期的“查看操作结果”入口不再适用，尺寸和时长直接读当前源码。归档不改变产品行为，也不要求为文档迁移运行代码测试。

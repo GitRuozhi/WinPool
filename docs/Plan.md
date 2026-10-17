@@ -1,8 +1,8 @@
 # WinPool V0.61：减负、性能与首稿测试包
 
-状态：**唯一活动计划；文档已编制，待用户审阅并批准代码与测试。** 激活只表示当前规划入口。本轮只读源码和改文档，没有编辑代码、改版本字段、构建、测试、启动程序或操作存储。
+状态：**已完成；2026-10-18 按用户批准完整执行，V0.61 便携候选已通过解压后的普通权限验收。** W1–W8均已关闭；候选尚未推送、发布、上传或发送。实际证据及未覆盖范围见[Quality](Quality.md)。
 
-- 基线：2026-10-17，`main / d56b4b4ac2f847cfd720dead251e26baa7ff1ed7`；代码与 `Directory.Build.props` 仍为 **V0.60**。
+- 基线：2026-10-17，`main / d56b4b4ac2f847cfd720dead251e26baa7ff1ed7`；当时的代码与 `Directory.Build.props` 为 **V0.60**；本轮实现现已推进 **V0.61 / 0.6.1.0**。
 - 用户确定：**本轮文档和下一轮全部代码工作都属于 V0.61**，不拆成多个版本。代码修改收口后才将版本源推进 V0.61。
 - 优先级：**减负、减少冗余／防御性重复／过度工程 → 性能**。目标是在 V0.70 前交出第一稿公开测试版；本计划目标为 V0.61 便携候选包，不等待全部环境验证。
 - 当前仅开发者环境；跨 Windows／设备组合交给专门测试人员。本计划不等于上传、tag、Release 或发送测试包的指令。
@@ -10,9 +10,9 @@
 
 ## 1. 可行性结论与修订
 
-原提案总体可行，主要重复调用、预演和传输与当前源码吻合；需要补全入口、契约和迁移顺序后执行。这里是本轮静态结论，不是新性能实测。
+批准时确认原提案总体可行，主要重复调用、预演和传输与当时源码吻合；本计划补全入口、契约和迁移顺序后执行。下表保留批准前静态判断，实施结果见§6及Quality。
 
-| 原方案判断 | 源码现况与本计划处理 |
+| 原方案判断 | 批准前源码现况与本计划处理 |
 | --- | --- |
 | 普通权限采集先修discovery | 成立。Storage默认启用；discovery与物理盘枚举处于同一失败域。scoped已关闭discovery、Hardware不注入该发现步骤。W1按用途修正，不能全产品盲删 |
 | 单操作最多3次采集 | 需限定为一个实际Windows写调用且首次后态成功；多步OperationId、结构Apply、MAX不套这个总数。见§4 |
@@ -55,7 +55,7 @@
 
 ## 4. 公共契约与计量
 
-以下是**待实现合同**，名称可沿用现有类型，字段含义和边界不可省略。
+以下是本版执行合同，字段含义和边界不可省略；当前实现与验证结果见§6。
 
 | 数据 | 最小内容与所有者 |
 | --- | --- |
@@ -76,7 +76,7 @@
 
 ### W1 采集控制流与唯一实现
 
-入口：[EmbeddedStorageInventoryScript](../src/WinPool.Infrastructure.Windows/EmbeddedStorageInventoryScript.cs)、[ScopedStorageInventoryScript](../src/WinPool.Infrastructure.Windows/ScopedStorageInventoryScript.cs)、[InventoryPipeline](../src/WinPool.Infrastructure.Windows/InventoryPipeline.cs)、[AgentInventoryCoordinator](../src/WinPool.Agent/AgentInventoryCoordinator.cs)、[Agent组成](../src/WinPool.Agent/Program.cs)、[AgentLocalSystemIdentity](../src/WinPool.Agent/AgentLocalSystemIdentity.cs)。原稿的`EmbeddedScopedStorageInventoryScript`不存在，使用上述实际文件。
+入口：[EmbeddedStorageInventoryScript](../src/WinPool.Infrastructure.Windows/EmbeddedStorageInventoryScript.cs)、[InventoryPipeline](../src/WinPool.Infrastructure.Windows/InventoryPipeline.cs)、[AgentInventoryCollector](../src/WinPool.Agent/AgentInventoryCollector.cs)、[AgentInventoryCoordinator](../src/WinPool.Agent/AgentInventoryCoordinator.cs)、[Agent组成](../src/WinPool.Agent/Program.cs)、[AgentLocalSystemIdentity](../src/WinPool.Agent/AgentLocalSystemIdentity.cs)。原稿的`EmbeddedScopedStorageInventoryScript`不存在；原`ScopedStorageInventoryScript`已并入固定模板并退役。
 
 1. `ForPurpose`／普通reader显式采用无discovery读取；保持Hardware和scoped既有用途。把确需重新发现的受控变更后的discovery改为显式选项；不得仅延长60秒超时。
 2. 将discovery诊断与`Get-SourceSet MSFT_PhysicalDisk`枚举分开，发现失败仍枚举。不要把发现失败写成枚举失败使parser丢弃成功数据；需要新发现才能确认后态时，失败如实影响完整性。
@@ -217,15 +217,17 @@ dotnet test tests/WinPool.Persistence.Tests/WinPool.Persistence.Tests.csproj -c 
 
 | 包 | 当前状态 | 关闭时只补什么 |
 | --- | --- | --- |
-| W1 采集 | 未开始 | 实现提交、相关回归／普通刷新结果 |
-| W2 真实执行 | 未开始 | 三次预算、结构／MAX／恢复结果与代表实机证据 |
-| W3 模拟/UI | 未开始 | 唯一预演／reducer、CAS／幂等结果 |
-| W4 IPC/监控/启动 | 未开始 | 轻量消息、批次／重连、按需加载与退出结果 |
-| W5 退役删并 | 未开始 | 已撤链及确有消费者的保留项，一段即可 |
-| W6 验证反馈 | 未开始 | fixture修复、定向与最终一次门结果 |
-| W7 文档/工作方式 | 已验证（仅文档） | 当前本地链接／章节、16份原件归档完整性及Git文档范围已核对；未运行产品测试 |
-| W8 V0.61候选 | 未开始 | 实际版本、集中验收、包路径／校验值／未覆盖项 |
+| W1 采集 | 已验证 | 单模板／共享collector；定向回归、Medium启动及Storage刷新通过，实际provider约3.03 s |
+| W2 真实执行 | 已验证 | typed临写／后态、Agent结构job及只读恢复；单写3次采集、HDD与普通MAX／自动布局／清理实机通过 |
+| W3 模拟/UI | 已验证 | 共享reducer／轻量提交／schema20／按需正文；回归与大文档、命名、撤销、提交、导出／导入GUI通过 |
+| W4 IPC/监控/启动 | 已验证 | 协议14、样本批次、单cache、事件状态；相关回归、20 Hz跨编辑／前端重连、数据根重启交接通过 |
+| W5 退役删并 | 已验证 | 旧比较／inventory项目、纯转发接口、模拟执行栈与旧RPC已退；完整构建与相关测试通过 |
+| W6 验证反馈 | 已验证 | 完整门后关闭已定位失败，当前有效2489 passed／4 explicit skip；WAL局部回归2项通过，最终Release构建0警告／0错误，见Quality |
+| W7 文档/工作方式 | 已验证 | 当前本地链接／章节、16份原件归档完整性及Git文档范围已核对；事实按所属文档维护 |
+| W8 V0.61候选 | 已验证 | V0.61／0.6.1.0；585个运行文件＋TESTING.md，zip及SHA-256齐全；解压后Medium启动／Storage刷新／监控恢复／正常退出通过 |
 
-代码执行批准尚未收到。下一位执行者先核对本节授权状态和HEAD差异，再从§3顺序0开始；不要把文档激活、历史WDC授权或W7完成当成本轮代码已获批准。
+代码执行批准已于2026-10-18收到并完成：实现提交 `24b5e96`，打包目录识别修正 `12e0f97`。最终构建0警告／0错误；有效自动回归2489 passed／4 explicit skip，包含完整门后必要的受影响修复回归，未重复整套。单写底层采集恰3次；候选Medium手动Storage provider约2.53 s，不编造与历史条件不同样本的提速比例。
 
-批准后用同表记录未开始／实施中／已实现待验证／已验证／受阻，最多附提交和已有输出链接。最终交付五项即可：基线／版本、完成及退役行为、验证证据、真实未解决／未覆盖项、候选包与说明。没有额外全量审查、性能平台或多份交接报告。
+候选源代码基线为 `12e0f979d65b273da95f108c8dc001c5fb4f1622`；包内如实标记打包时工作树有尚未提交的文档及既有 `Ref/`，运行文件均来自已验证树，未包含上述内容。候选、说明、校验值与实际解压验收入口见[Quality的交付记录](Quality.md#v061-candidate)。
+
+WDC已恢复在线GPT／16 MiB MSR／其余NTFS 64 KiB `WinPool_Test`／E:，两Samsung结构139项核对通过。原13个模拟文档不变，偏好恢复10 Hz／持续监控开启／本机Monitor，App和Agent已正常退出，未留未终结结构作业。跨Windows、多成员／SSD／SCM／冗余／多层硬件和长时矩阵仍未覆盖；UAC安全桌面确认未自动化，不冒充本轮通过项。本计划不再继续扩大实现或自行发布。
