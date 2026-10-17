@@ -321,6 +321,8 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 
 `build/Rebuild-WinPool.ps1` 先仅移走中间输出，保留旧运行树直到新构建合并成功，然后写入快捷方式；运行前须关闭占用标准树的 WinPool 进程。`build/Clean-WinPool.ps1 -WhatIf` 可预览，默认只移动明确生成物，保留运行树的 `Data`、测试证据及其它未知 artifacts。两者均不直接删除旧文件，也不按进程名结束未知路径的进程。它们不是纯文档任务或普通检查的默认入口。
 
+`build/Repair-WinPoolIntegrityLabel.ps1` 只读检查项目根及 `artifacts/Release` 中 App／Agent 的完整性标签。工作区沙箱可能在工作区根留下可继承的 Low 标签，使此后构建的程序以低完整性进程启动：进程不能写入 `%LOCALAPPDATA%` 等 Medium 位置，shell 还会把它当不可信内容并弹出"未知发布者"与 SmartScreen 提示。脚本发现 Low 时经 UAC 把整棵树重置为 Medium（标签位于 SACL，修改需要 `WRITE_OWNER`）；`-CheckOnly` 只报告不改动，结果同时写入 `%TEMP%` 日志。
+
 运行树替换前，`build/Assert-RealOperationIdle.ps1` 以只读方式检查活动核心库，继续阻断尚未结束的准备、接受及运行状态。所有 WinPool App／Agent 均已停止时，持久化 OutcomeUnknown 不再阻止安装修复版本；有 WinPool 进程运行时仍阻断。此例外只允许替换程序，不修改操作记录、不解除产品写入屏障，也不续写或重放。拒绝信息列出最多十条明确的 `OperationId` 与状态名。停止程序与核清存储结果是不同状态，未知结果应在重启后恢复为只读核对。
 
 未来正式 staging 使用仓库外未占用的新路径，复现同一并集和碰撞检查；不顺便部署、签名或发布。测试命令归 Quality。
