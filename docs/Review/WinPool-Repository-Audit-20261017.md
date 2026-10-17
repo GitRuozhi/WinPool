@@ -70,9 +70,9 @@ App 与 Agent 两个进程具有明确用途：交互呈现与持续后台工作
 
 | 问题 | 证据与影响 | 最小修改方案 |
 | --- | --- | --- |
-| 2 项过时的 UI 源码断言 | `EditorPagesOwnTheirSurfacesWithoutSectionTitles` 仍要求 StartOffsetValue／EndOffsetValue，现用 OffsetMibRangeValue／OffsetAdaptiveRangeValue；`MainWindowPreviewsSavedWorkspaceBeforeAgentRestore` 禁止任意 Border，现有 ProgressSurface 使用 Border。[测试](../tests/WinPool.Architecture.Tests/ArchitectureBoundaryTests.cs#L572) | 更新到当前确认的 UI 行为；起止值、启动恢复与进度表面分别验证，去掉与行为无关的控件标签限制。无需恢复旧 UI 取悦测试 |
-| 30 项恢复 fixture 在 setup 被拒绝 | `PoolCreationRecoveryKeepsBarrierForIncompleteOrMismatchedEvidence` 24 变体、`PoolCreationRecoveryRequiresAndPersistsFreshAggregateForNullPhysicalRoles` 5 变体、`SingleReturnedPoolCreationRecoversExactEmptyPoolWithoutAnotherCall` 1 项。fixture 未注入 capability reader，回落本机 WMI，synthetic subsystem 无法通过 SupportsStoragePoolCreation 门；目标恢复断言尚未执行 | 在 [WindowsRealStorageBackendTests](../tests/WinPool.Infrastructure.Tests/WindowsRealStorageBackendTests.cs) 注入与合成成员一致的能力 reader；fixture 禁止落入 host WMI。复验这 30 项及该恢复用例相关门，不修改产品准入规则 |
-| 首轮 2 项 guard 环境冲突，补验通过 | `MissingCorruptAndAmbiguousRootsRefuseButPristineRootPasses`、`StoppedUnknownResultAllowsRepairWithoutChangingDatabaseOrWriteBarrier`；[guard](../build/Assert-RealOperationIdle.ps1#L196) 按全局进程名检查，与同时运行的 GUI 冲突 | 测试调度声明需要无 WinPool 进程；若改 guard，应按实际运行树／数据根识别实例，不能简单去掉进程保护。此次停 GUI 后 2／2 通过 |
+| 2 项过时的 UI 源码断言 | `EditorPagesOwnTheirSurfacesWithoutSectionTitles` 仍要求 StartOffsetValue／EndOffsetValue，现用 OffsetMibRangeValue／OffsetAdaptiveRangeValue；`MainWindowPreviewsSavedWorkspaceBeforeAgentRestore` 禁止任意 Border，现有 ProgressSurface 使用 Border。[测试](../../tests/WinPool.Architecture.Tests/ArchitectureBoundaryTests.cs#L572) | 更新到当前确认的 UI 行为；起止值、启动恢复与进度表面分别验证，去掉与行为无关的控件标签限制。无需恢复旧 UI 取悦测试 |
+| 30 项恢复 fixture 在 setup 被拒绝 | `PoolCreationRecoveryKeepsBarrierForIncompleteOrMismatchedEvidence` 24 变体、`PoolCreationRecoveryRequiresAndPersistsFreshAggregateForNullPhysicalRoles` 5 变体、`SingleReturnedPoolCreationRecoversExactEmptyPoolWithoutAnotherCall` 1 项。fixture 未注入 capability reader，回落本机 WMI，synthetic subsystem 无法通过 SupportsStoragePoolCreation 门；目标恢复断言尚未执行 | 在 [WindowsRealStorageBackendTests](../../tests/WinPool.Infrastructure.Tests/WindowsRealStorageBackendTests.cs) 注入与合成成员一致的能力 reader；fixture 禁止落入 host WMI。复验这 30 项及该恢复用例相关门，不修改产品准入规则 |
+| 首轮 2 项 guard 环境冲突，补验通过 | `MissingCorruptAndAmbiguousRootsRefuseButPristineRootPasses`、`StoppedUnknownResultAllowsRepairWithoutChangingDatabaseOrWriteBarrier`；[guard](../../build/Assert-RealOperationIdle.ps1#L196) 按全局进程名检查，与同时运行的 GUI 冲突 | 测试调度声明需要无 WinPool 进程；若改 guard，应按实际运行树／数据根识别实例，不能简单去掉进程保护。此次停 GUI 后 2／2 通过 |
 | 3 项明确跳过 | 1 GiB archive 参数、1 GiB rotation 生命周期、7z 参数比较，均为显式手动性能测量 | 保持未验证标记；将其放到归档性能专项，不让日常布局修改触发 GiB 级工作 |
 | opt-in 用例未启用也显示 Passed | `RealAdmissionReadOnlyTests` 普通 Fact 直接 return | 改为明确的 opt-in 分类／动态 skip；此次另显式启用完成真实只读验证，避免将空执行称为硬件覆盖 |
 
@@ -82,7 +82,7 @@ App 与 Agent 两个进程具有明确用途：交互呈现与持续后台工作
 
 NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）：本次 advisory 无命中、无下载失败；35 个去重版本存在更新，其中 13 个直接依赖。没有自动升级。过期不等于漏洞，这也不证明内置 7-Zip 或操作系统无漏洞。性能整改优先级不应被无关的批量依赖升级挤占。
 
-证据：[完整自动化结果](../artifacts/audit-20261017/automated-findings.md)、[最终去重统计](../artifacts/audit-20261017/automated/final-effective-summary.json)、[首轮失败与堆栈](../artifacts/audit-20261017/automated/failures.json)、[TRX](../artifacts/audit-20261017/automated/trx/)、[build.binlog](../artifacts/audit-20261017/automated/build.binlog)。
+证据：[完整自动化结果](../../artifacts/audit-20261017/automated-findings.md)、[最终去重统计](../../artifacts/audit-20261017/automated/final-effective-summary.json)、[首轮失败与堆栈](../../artifacts/audit-20261017/automated/failures.json)、[TRX](../../artifacts/audit-20261017/automated/trx/)、[build.binlog](../../artifacts/audit-20261017/automated/build.binlog)。
 
 ## 4. 性能实测
 
@@ -120,7 +120,7 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 这些时间含 CLI 调用／UI 等待开销，不是纯 Apply 方法 benchmark；创建耗时也不能全部归到模型算法。当前 13 份模拟文档总 JSON 约 2.67 MB，但本轮编辑对象是较小内置文档；未完成大对象高频键入 CPU／分配 profile。因此保留“模拟大场景慢”的待定位范围，同时给出下节已能直接消除的重复路径。
 
-证据：[六次操作逐阶段数据](../artifacts/audit-20261017/gui-operation-timing-summary.json)、[分组统计](../artifacts/audit-20261017/gui-operation-timing-groups.json)、[Hardware 计时](../artifacts/audit-20261017/gui-hardware-refresh-timing.json)、[历史批次](../artifacts/test-results/20261016-label100-operation-timing/summary.json)、[模拟 GUI 记录](../artifacts/audit-20261017/gui/)。
+证据：[六次操作逐阶段数据](../../artifacts/audit-20261017/gui-operation-timing-summary.json)、[分组统计](../../artifacts/audit-20261017/gui-operation-timing-groups.json)、[Hardware 计时](../../artifacts/audit-20261017/gui-hardware-refresh-timing.json)、[历史批次](../../artifacts/test-results/20261016-label100-operation-timing/summary.json)、[模拟 GUI 记录](../../artifacts/audit-20261017/gui/)。
 
 ## 5. 真实桌面 GUI 结果与限制
 
@@ -143,9 +143,9 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 本轮没有重新验证真实建池／删池／格式化／MAX 搜索／真实扩缩分区；这些只引用已存历史记录，不冒充本轮 GUI 通过。多物理成员、SSD／SCM 分层、Mirror／Parity 的实机组合、Windows 11、高 DPI／高对比度、数据位置迁移、导入导出对话框、1 GiB 归档和长时间耐久也未覆盖。完整检查指本次工程检查与明确的本机 E2E 范围已执行完毕，不等于所有产品矩阵均通过。
 
-证据：[前后结构对比](../artifacts/audit-20261017/native-restoration-check.json)、[模拟恢复](../artifacts/audit-20261017/simulation-restoration-check.json)、[偏好对比](../artifacts/audit-20261017/settings-comparison.json)、[监控会话](../artifacts/audit-20261017/monitor-sessions.json)、[监控角色分析](../artifacts/audit-20261017/gui-monitor-role-analysis.json)、[托盘退出](../artifacts/audit-20261017/gui/tray-exit.json)。
+证据：[前后结构对比](../../artifacts/audit-20261017/native-restoration-check.json)、[模拟恢复](../../artifacts/audit-20261017/simulation-restoration-check.json)、[偏好对比](../../artifacts/audit-20261017/settings-comparison.json)、[监控会话](../../artifacts/audit-20261017/monitor-sessions.json)、[监控角色分析](../../artifacts/audit-20261017/gui-monitor-role-analysis.json)、[托盘退出](../../artifacts/audit-20261017/gui/tray-exit.json)。
 
-另有一项恢复偏差：workspace_state.activePage 从 3 变为 0，尽管最终 GUI 和 App 偏好均为 StorageStructure。已定位 [AgentBackedWorkspaceStateService](../src/WinPool.Infrastructure.Windows/AgentBackedWorkspaceStateService.cs#L46) 把 ShellPageKind 名称解析为旧 WorkspacePage，StorageStructure／DiskPartition／Hardware 均不存在于旧枚举，失败后静默写 Manage(0)。原值 3 在旧枚举中是 Monitor，不能手改回 3 来假装恢复。当前启动导航实际读取正确的 app-settings.LastActivePage，因此尚不能断言重启跳错页。该冗余字段确实丢失语义；建议导航只保留 LastActivePage 一个持久来源，workspace 只保存系统／对象选择。此次未修改数据库掩盖偏差。
+另有一项恢复偏差：workspace_state.activePage 从 3 变为 0，尽管最终 GUI 和 App 偏好均为 StorageStructure。已定位 [AgentBackedWorkspaceStateService](../../src/WinPool.Infrastructure.Windows/AgentBackedWorkspaceStateService.cs#L46) 把 ShellPageKind 名称解析为旧 WorkspacePage，StorageStructure／DiskPartition／Hardware 均不存在于旧枚举，失败后静默写 Manage(0)。原值 3 在旧枚举中是 Monitor，不能手改回 3 来假装恢复。当前启动导航实际读取正确的 app-settings.LastActivePage，因此尚不能断言重启跳错页。该冗余字段确实丢失语义；建议导航只保留 LastActivePage 一个持久来源，workspace 只保存系统／对象选择。此次未修改数据库掩盖偏差。
 
 ## 6. 架构与性能问题：具体删并方案
 
@@ -157,14 +157,14 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 | 序号 | 阶段 | 实现位置 | 建议 |
 | --- | --- | --- | --- |
-| 1 | Prepare full capture | [WindowsRealOperationPlanner](../src/WinPool.Infrastructure.Windows/WindowsRealOperationPlanner.cs#L76)、AgentRealOperationService:375 | 保留一次，用于准确预览和冻结意图 |
-| 2 | Accept preflight full capture | [AgentRealOperationService](../src/WinPool.Agent/AgentRealOperationService.cs#L485) | Accept 只验证会话／冻结授权并排入唯一执行工作流；当前事实核验放临写门 |
+| 1 | Prepare full capture | [WindowsRealOperationPlanner](../../src/WinPool.Infrastructure.Windows/WindowsRealOperationPlanner.cs#L76)、AgentRealOperationService:375 | 保留一次，用于准确预览和冻结意图 |
+| 2 | Accept preflight full capture | [AgentRealOperationService](../../src/WinPool.Agent/AgentRealOperationService.cs#L485) | Accept 只验证会话／冻结授权并排入唯一执行工作流；当前事实核验放临写门 |
 | 3 | 后台首步 preflight scoped capture | AgentRealOperationService:1210 | 与下一项合为一处临写事实采集与规则核验 |
-| 4 | Execute exact-before 再次 capture | [WindowsRealStorageBackend.MemberSets](../src/WinPool.Infrastructure.Windows/WindowsRealStorageBackend.MemberSets.cs#L55) | 消费同一 typed StepContext，不再重采同一对象闭包 |
+| 4 | Execute exact-before 再次 capture | [WindowsRealStorageBackend.MemberSets](../../src/WinPool.Infrastructure.Windows/WindowsRealStorageBackend.MemberSets.cs#L55) | 消费同一 typed StepContext，不再重采同一对象闭包 |
 | 5 | 写后 exact-after／postcondition | 同文件:85 | 保留；返回已验证后态，不丢弃再取 |
 | 6 | 全步骤 Verified 后统一 Reconcile | AgentRealOperationService:1370；MemberSets:118 | 正常成功使用第 5 项后态结束；异常／重启／未知结果才进入恢复用例 |
-| 7 | App 完成后 scoped refresh | [AgentInventoryCoordinator](../src/WinPool.Agent/AgentInventoryCoordinator.cs#L148) | 发布第 5 项生成的 inventory revision／呈现数据，不再采集 |
-| 额外 | 监控 Verified 后重新绑定身份 | [MonitoringSessionEdits](../src/WinPool.Monitoring/MonitoringSessionEdits.cs) | 消费同一已验证后态；本轮联机／脱机各额外采集一次已实证 |
+| 7 | App 完成后 scoped refresh | [AgentInventoryCoordinator](../../src/WinPool.Agent/AgentInventoryCoordinator.cs#L148) | 发布第 5 项生成的 inventory revision／呈现数据，不再采集 |
+| 额外 | 监控 Verified 后重新绑定身份 | [MonitoringSessionEdits](../../src/WinPool.Monitoring/MonitoringSessionEdits.cs) | 消费同一已验证后态；本轮联机／脱机各额外采集一次已实证 |
 
 **非 MAX 的正常单次写操作目标：Prepare 一次、临写一次、写后一次，共 3 次。** MAX 一个步骤内包含多个候选写入，应按候选统计；容量拒绝边界需要的两轮观察另计，不能把整个 MAX 宏限制为 3 次。每个阶段内部只持有一个 typed context；事实与 target 不应在同进程各层先转 JSON、再解析、再采集。执行返回的 VerifiedStepObservation 同时供终结、下一步规划、UI 和 monitor 使用。只有观察范围确实不足或发生外部变化才取必要新事实，不预设一串成功后“兜底刷新”。
 
@@ -172,7 +172,7 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 ### 6.2 P1：真实结构由 App 反复接力编排
 
-[RealStructureEditorFlow](../src/WinPool.App/RealStructureEditorFlow.cs#L55) 在 App 查询每成员能力、逐层范围，随后分段删除／建池／建层／建 VD／初始化／布局。每段经 Prepare→Accept→Query→Capture，再把完整事实传回 App 重映射新对象身份，才能启动下一段。用户一次 Apply 成了多个跨进程业务回合；Agent 的权威作业与 App 的结构状态机共同决定进度。
+[RealStructureEditorFlow](../../src/WinPool.App/RealStructureEditorFlow.cs#L55) 在 App 查询每成员能力、逐层范围，随后分段删除／建池／建层／建 VD／初始化／布局。每段经 Prepare→Accept→Query→Capture，再把完整事实传回 App 重映射新对象身份，才能启动下一段。用户一次 Apply 成了多个跨进程业务回合；Agent 的权威作业与 App 的结构状态机共同决定进度。
 
 改为**唯一 Agent 结构 Apply 用例**：App 交付冻结的目标草稿并确认一次；Agent 在一个 OperationId 内解析依赖、保有新对象准确身份、推进内部步骤、复用已验证观察。App 只显示版本化状态和最终结果。创建后才能得知的实际容量、provider MSR、支持的 cluster 等仍在相应步骤读取，不提前虚构能力。
 
@@ -180,7 +180,7 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 ### 6.3 P1：模拟输入和按钮刷新重复完整预演
 
-[StorageStructurePage](../src/WinPool.App/StorageStructurePage.xaml.cs#L2653) 的字段变化进入 UpdateButtonState→RefreshPendingActions，先 SimulationDraftPlanner.Build，再 Precheck；[Build:461 与 Precheck:472](../src/WinPool.Application/SimulationDraftPlanner.cs#L461) 都进入完整 BuildPlanWithItems。每步外层 Evaluate 后，service.Apply 又 Evaluate；同时进行关系重建、SourceFacts／Snapshot 转换。这些发生在 WinUI 事件处理链中。
+[StorageStructurePage](../../src/WinPool.App/StorageStructurePage.xaml.cs#L2653) 的字段变化进入 UpdateButtonState→RefreshPendingActions，先 SimulationDraftPlanner.Build，再 Precheck；[Build:461 与 Precheck:472](../../src/WinPool.Application/SimulationDraftPlanner.cs#L461) 都进入完整 BuildPlanWithItems。每步外层 Evaluate 后，service.Apply 又 Evaluate；同时进行关系重建、SourceFacts／Snapshot 转换。这些发生在 WinUI 事件处理链中。
 
 简化为 `BuildSteps → 补全意图 → PreviewPlan 一次`，由唯一 reducer 返回规则决策及结果。按 baselineRevision＋draftRevision 缓存；按钮可用性只读缓存，未改变事实的选择、展开和进度不重算。字段即时校验只处理该字段；需要完整计算时放后台，按 generation 仅应用最新结果。预演过程保持一个工作模型，最终边界再统一投影／验证，避免每个步骤来回转换整份模型。
 
@@ -188,15 +188,15 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 ### 6.4 P1：没有变化的进度也重建整个界面
 
-[EditorPageBase:447](../src/WinPool.App/EditorPageBase.cs#L447) 每 250 ms Query 后无条件 ReportRealActivity；[WorkspaceRealOperations:26](../src/WinPool.App/ViewModels/WorkspaceRealOperations.cs#L26) 每次发事件；StorageStructurePage:230 随即 RefreshTopology 和 UpdateButtonState。即使状态完全相同，也创建新拓扑 VM、替换 ItemsSource、再生成动作预览。1200 次循环只意味着间隔累计 300 秒，查询和重建还另加时间。
+[EditorPageBase:447](../../src/WinPool.App/EditorPageBase.cs#L447) 每 250 ms Query 后无条件 ReportRealActivity；[WorkspaceRealOperations:26](../../src/WinPool.App/ViewModels/WorkspaceRealOperations.cs#L26) 每次发事件；StorageStructurePage:230 随即 RefreshTopology 和 UpdateButtonState。即使状态完全相同，也创建新拓扑 VM、替换 ItemsSource、再生成动作预览。1200 次循环只意味着间隔累计 300 秒，查询和重建还另加时间。
 
 把状态更新分清三种实际变化：phase 更新进度，busy 边沿更新交互状态，document revision 更新模型。等值直接返回。操作状态以轻量 revision 事件发布；首次附着／重连才 Query 现状。相同状态返回 100 次应产生 0 次额外拓扑投影和 0 次预演。
 
-[WorkspaceViewModel:1723](../src/WinPool.App/ViewModels/WorkspaceViewModel.cs#L1723) 又在单文档提交、Reset、切换系统和本机更新时重建全 catalog 拓扑；普通对象选择则重建 details／comparison，setter 副作用还会重复触发。按 documentId＋revision 缓存投影，只替换变更文档的 root；选择只更新 selection 及对应 details，不重建全部 comparison；语言变更才更新本地化。已有 Snapshot 缓存应复用，不再增加一层并行缓存体系。
+[WorkspaceViewModel:1723](../../src/WinPool.App/ViewModels/WorkspaceViewModel.cs#L1723) 又在单文档提交、Reset、切换系统和本机更新时重建全 catalog 拓扑；普通对象选择则重建 details／comparison，setter 副作用还会重复触发。按 documentId＋revision 缓存投影，只替换变更文档的 root；选择只更新 selection 及对应 details，不重建全部 comparison；语言变更才更新本地化。已有 Snapshot 缓存应复用，不再增加一层并行缓存体系。
 
 ### 6.5 P1：IPC 发送门扩大所有操作的等待
 
-[NamedPipeAgentConnection:368](../src/WinPool.Agent.Client/NamedPipeAgentConnection.cs#L368) 在连接、发送、等响应和重连期间持 sendGate；当前是一帧请求等一帧响应。管理采集、Prepare、模拟提交、监控和设置共享它，一个慢请求可阻止其它调用开始。调用方 Task.WhenAll 无法消除此队头等待。
+[NamedPipeAgentConnection:368](../../src/WinPool.Agent.Client/NamedPipeAgentConnection.cs#L368) 在连接、发送、等响应和重连期间持 sendGate；当前是一帧请求等一帧响应。管理采集、Prepare、模拟提交、监控和设置共享它，一个慢请求可阻止其它调用开始。调用方 Task.WhenAll 无法消除此队头等待。
 
 先移出高频全文查询和长任务同步等待：耗时任务短请求返回 identity，后续经同一状态通道通知。仍需要并发时再在唯一连接实现里增加 correlationId 分发与有界并发，不直接移除锁后并发读写同一 stream，不创建第二套长期备用连接实现。真实写串行门继续由 Agent 管理，不能与所有读取请求一起串行化。
 
@@ -204,9 +204,9 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 | 当前行为 | 具体代价 | 收敛后的协议 |
 | --- | --- | --- |
-| App 算完整模拟文档，发送 document＋plan＋events；Agent 存后返回同一 document；App 解码只取 hash | [StorageSystemRepository:440、572](../src/WinPool.Infrastructure.Windows/StorageSystemRepository.cs#L440)；正文序列化、转义、hash、校验、decode 多轮 | 模拟提交最终只传 documentId＋expectedRevision＋typed intent＋commitId；Agent 调用共享纯用例后 CAS 提交，返回 receipt 及必要变化。App 预览调用同一纯实现 |
+| App 算完整模拟文档，发送 document＋plan＋events；Agent 存后返回同一 document；App 解码只取 hash | [StorageSystemRepository:440、572](../../src/WinPool.Infrastructure.Windows/StorageSystemRepository.cs#L440)；正文序列化、转义、hash、校验、decode 多轮 | 模拟提交最终只传 documentId＋expectedRevision＋typed intent＋commitId；Agent 调用共享纯用例后 CAS 提交，返回 receipt 及必要变化。App 预览调用同一纯实现 |
 | scoped inventory response 和 AgentInventoryUpdatedEvent 都携带整份合并后本机文档 | 同一次采集可以传输／decode 两遍；scoped 不等于响应是 delta | 选一个消息承载全文／变化；另一个只返回 revision receipt，同 revision 不再次应用 |
-| QueryRealOperation 每次返回完整 plan、step targets、evidence；服务端还读取全部 history 求状态码 | [AgentRealOperationService:576、740](../src/WinPool.Agent/AgentRealOperationService.cs#L740) 每轮至少数次 DB 读取／解码，history 本身不在响应中；历史最大单 step evidence 3.62 MB | 常态状态仅 operationId＋revision＋state＋变化 steps；计划 Prepare 取一次，证据明确请求时分页读取 |
+| QueryRealOperation 每次返回完整 plan、step targets、evidence；服务端还读取全部 history 求状态码 | [AgentRealOperationService:576、740](../../src/WinPool.Agent/AgentRealOperationService.cs#L740) 每轮至少数次 DB 读取／解码，history 本身不在响应中；历史最大单 step evidence 3.62 MB | 常态状态仅 operationId＋revision＋state＋变化 steps；计划 Prepare 取一次，证据明确请求时分页读取 |
 | 启动 List 模拟 metadata 后逐份串行 Load 正文 | 本机 13 文档至少 14 次 RPC，共约 2.67 MB，repository gate 覆盖整个加载 | 初始仅 metadata＋所选文档，其余按选择加载；确需批量时有字节预算分页，不无限全量 |
 
 短期可先让模拟成功响应只回 id／revision／hash／commitId，立刻删除全文回显。随后迁移为 Agent intent 提交时，移除旧 CommitDocument 生产入口；纯预览和提交执行共用同一 Application reducer，保留边界输入校验、CAS 和事务原子性，删除模拟 Plan／one-shot Authority／executor 包装中没有独立语义的转发层。
@@ -215,7 +215,7 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 ### 6.7 P1：监控高频拉取完整 Agent 快照
 
-[MonitoringService:691](../src/WinPool.App/Services/MonitoringService.cs#L691) 按 Clamp(1000/rate,50,1000) 拉 GetAgentSnapshot；[MonitorAlertObserver:40](../src/WinPool.App/Services/MonitorAlertObserver.cs#L40) 另每秒拉一次，关闭监控仍运行。20 Hz 设置下理论请求上限约 21 次／秒，实际会被响应和发送门限制；快照包含进程、会话、样本、健康事件和诊断。MonitorPage 又有独立绘图及 500 ms 偏好 timer，绘图复制全部 series 的 60 秒数组。
+[MonitoringService:691](../../src/WinPool.App/Services/MonitoringService.cs#L691) 按 Clamp(1000/rate,50,1000) 拉 GetAgentSnapshot；[MonitorAlertObserver:40](../../src/WinPool.App/Services/MonitorAlertObserver.cs#L40) 另每秒拉一次，关闭监控仍运行。20 Hz 设置下理论请求上限约 21 次／秒，实际会被响应和发送门限制；快照包含进程、会话、样本、健康事件和诊断。MonitorPage 又有独立绘图及 500 ms 偏好 timer，绘图复制全部 series 的 60 秒数组。
 
 当前 AgentMonitorSampleEvent 只有契约，**没有生产者或消费者**，不能描述成“已 push 又重复 poll”。建议只实现一条常态数据路径：Agent 有序批次发送样本增量／状态变化，App 共用一个 monitor cache；初连／重连快照一次，删除旧 monitor poll 和 alert poll。采样、传输、绘图频率独立；绘图仅读取有界窗口及变化 revision。
 
@@ -229,7 +229,7 @@ NuGet 扫描覆盖 23 项目、43 个去重包版本（17 个直接包版本）�
 
 启动时 monitor identity、Storage、Hardware 分别采相近内容；不同模块也可能同时读同一 provider。由 Agent 合并同 generation／scope 的只读采集，完整硬件事实可投影 storage 与 monitor；初始呈现使用已有缓存和 metadata。不要为合并读取再加一个覆盖所有操作的全局大锁。真实 mutationGate 当前 busy 时立即拒绝，其本身不是长队列的证据。
 
-每轮机器绑定读取 registry／WMI，[AgentLocalSystemIdentity](../src/WinPool.Agent/AgentLocalSystemIdentity.cs) 为一个 SystemId 读取并解码整份约 624 KB 本机文档；Manage 又加载一次。启动解析并持有 Agent lifetime 的机器绑定／SystemId，数据根切换或明确重新绑定时失效。目标盘身份与当前关联仍由临写门读取，不能把稳定机器身份和易变存储事实混成一种缓存。
+每轮机器绑定读取 registry／WMI，[AgentLocalSystemIdentity](../../src/WinPool.Agent/AgentLocalSystemIdentity.cs) 为一个 SystemId 读取并解码整份约 624 KB 本机文档；Manage 又加载一次。启动解析并持有 Agent lifetime 的机器绑定／SystemId，数据根切换或明确重新绑定时失效。目标盘身份与当前关联仍由临写门读取，不能把稳定机器身份和易变存储事实混成一种缓存。
 
 MAX 继续遵守已确认的整数 GiB 搜索政策，不建议恢复 UseMaximumSize、固定扣 2 GiB／4 GiB，亦不擅自改为二分。候选数量与初始估计到边界的 GiB 差距相关；当前 single／multi runner 复制了前后采集与容量拒绝流程，single 成功后还多一次 max-verified capture。合并共同的 attempt runner，候选调度保留算法差异，复用成功后态；恢复只解释 journal，不把正常成功送入恢复流程。微软侧原生分层 MAX 限制与 WinPool 重复采集是不同问题。
 
@@ -279,7 +279,7 @@ SQLite 改动排在上述工作之后。每连接重复 PRAGMA、snapshot 同存
 | SimulatedSnapshot | 仅定义 | 明确选择的模拟文档 |
 | MainWindow 的 null-agent 本地存储／采集／监控路径 | 正常组成始终传入 Agent 连接，随后异步连接 | 生产组成要求 Agent；测试注入 fake IAgentConnection |
 
-上述候选集中见 [ProposalFactory](../src/WinPool.App/Services/RealOperationProposalFactory.cs)、[MainWindow](../src/WinPool.App/MainWindow.xaml.cs#L145)、[ProcessCoordinationContracts](../src/WinPool.Application/ProcessCoordinationContracts.cs)、[App/契约检索记录](../artifacts/audit-20261017/app-contract-findings.md)。单个大文件不应机械拆成 ABCD；优先删除重复路径，再按“纯编辑规则／UI 呈现”“执行用例／Windows 适配”两个职责分开。
+上述候选集中见 [ProposalFactory](../../src/WinPool.App/Services/RealOperationProposalFactory.cs)、[MainWindow](../../src/WinPool.App/MainWindow.xaml.cs#L145)、[ProcessCoordinationContracts](../../src/WinPool.Application/ProcessCoordinationContracts.cs)、[App/契约检索记录](../../artifacts/audit-20261017/app-contract-findings.md)。单个大文件不应机械拆成 ABCD；优先删除重复路径，再按“纯编辑规则／UI 呈现”“执行用例／Windows 适配”两个职责分开。
 
 ## 8. 文档与开发工作量
 
@@ -338,10 +338,24 @@ SQLite 改动排在上述工作之后。每连接重复 PRAGMA、snapshot 同存
 
 | 要接手的内容 | 入口 |
 | --- | --- |
-| 真实操作／采集重复链 | [后端审查及六次实机补证](../artifacts/audit-20261017/backend-findings.md)；AgentRealOperationService／WindowsRealStorageBackend.MemberSets／AgentInventoryCoordinator |
-| App／模拟／IPC 调用与可达性 | [App 与契约审查](../artifacts/audit-20261017/app-contract-findings.md)；StorageStructurePage／WorkspaceViewModel／StorageSystemRepository／NamedPipeAgentConnection |
-| 自动化命令、失败、依赖 | [自动化报告](../artifacts/audit-20261017/automated-findings.md)、[机器汇总](../artifacts/audit-20261017/automated-summary.json) |
-| 本轮实际写入及状态 | [计划与事件后态](../artifacts/audit-20261017/operations-after.json)、[GUI 截图与时间](../artifacts/audit-20261017/gui/) |
-| 当前文档规模与断链 | [仓库统计](../artifacts/audit-20261017/repository-metrics.json) |
+| 真实操作／采集重复链 | [后端审查及六次实机补证](../../artifacts/audit-20261017/backend-findings.md)；AgentRealOperationService／WindowsRealStorageBackend.MemberSets／AgentInventoryCoordinator |
+| App／模拟／IPC 调用与可达性 | [App 与契约审查](../../artifacts/audit-20261017/app-contract-findings.md)；StorageStructurePage／WorkspaceViewModel／StorageSystemRepository／NamedPipeAgentConnection |
+| 自动化命令、失败、依赖 | [自动化报告](../../artifacts/audit-20261017/automated-findings.md)、[机器汇总](../../artifacts/audit-20261017/automated-summary.json) |
+| 本轮实际写入及状态 | [计划与事件后态](../../artifacts/audit-20261017/operations-after.json)、[GUI 截图与时间](../../artifacts/audit-20261017/gui/) |
+| 当前文档规模与断链 | [仓库统计](../../artifacts/audit-20261017/repository-metrics.json) |
 
 本次交付只新增本文；没有生产改造、依赖升级或未经验证的删代码。所有测得问题与方案均以当前基线为准。App／Agent 正常退出，真实结构和模拟对象恢复，设置恢复；workspace 冗余 page 字段的已确认偏差单列保留。测试门仍为失败，不能作为发布通过记录。后续实施从 A 开始，完成后以同口径数据替换推断，而不是追加更多旁路与兜底。
+
+## 11. 后续启动权限核查（2026-10-17 下午）
+
+用户补充的截图明确显示：App 已经打开，Agent 因创建 `%LocalAppData%/WinPool/Runtime/agent-endpoint.json.<随机值>.tmp` 被拒绝访问而退出；另有 App SmartScreen 与 Agent 未知发布者提示。该截图不同于 App 本身完全未启动。
+
+本节核查基线为后续 `dcc526f`，不替代上文上午的构建／测试结果。历史[接手审查](WinPool-Takeover-Review-20261017.md)记录过研究根显式 Low 和 exe 继承 Low；本机 `%TEMP%/winpool-repair.log` 则记录 17:06:45–17:09:18 递归设置 Medium。该修复处理成功 204692 项、失败 1005 项，末尾失败样本是 Rubbish 中不存在的生成路径，不能据退出码 0 声称整棵历史树全部成功。本次独立检查研究根、WinPool、Release 和两个 exe 均为 **Medium／NW**；现有修复脚本仅运行 CheckOnly，没有再改 ACL。
+
+桌面 `WinPool.lnk` 的目标及工作目录均为标准 `artifacts/Release`，无附加参数、无 RunAsUser 标志；快捷方式及两个 exe 均无 Zone.Identifier。通过既有 Medium Explorer 调用原快捷方式可启动 Medium App，原 Medium Agent 也可复用。为覆盖截图的准确失败点，又从托盘正常退出两进程，于 **17:44:34 冷启动同一个原桌面快捷方式**：App PID15812、全新 Agent PID6896 均为 Medium（RID8192），约 5 秒观察点已有主窗口和欢迎窗口；Runtime 端点文件已由新 Agent 成功写入，记录 PID6896 及 17:44:36 的新会话。没有复现端点临时文件拒绝访问，也没有使用管理员启动替代这次验证。
+
+历史 Low 与向普通 AppData 写入被拒绝相符，但缺少当时进程令牌／文件 ACL 和标签设置者追踪，不能仅凭截图确定 Low 一定由 Codex 设置。[微软 MIC 文档](https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control)说明低完整性向更高完整性对象写入的限制；SmartScreen／未知发布者提示本身并非 Low 的唯一证据。本轮最初 Codex 在受限模式下连 PowerShell 创建都报 error 5，切回无限制后可执行，这是另一个已观察到的工具执行限制。
+
+仍需区分启动权限与采集性能：17:23:34、17:24:44 有 `Read-only inventory exceeded 60 seconds` 监控恢复失败；随后 Storage provider 约 57.420 秒、Hardware provider 约 9.993 秒。本次冷启动又于 **17:45:37** 复现同一监控采集 60 秒超时，随后托盘进入 Ready；因此权限报错未复现，但不能宣布后台监控已恢复。App／Agent 保留供用户查看。未为此次诊断重建软件、修改快捷方式、放宽防删除 ACL 或执行存储写入。
+
+本地补证位于 `artifacts/startup-diagnosis-20261017/`：integrity-check.log、shortcuts.json、各次 launch-processes.json、cold-shortcut-launch.json、previous-repair-170645.log、agent-startup-timing.json。原始用户日志不提交。
