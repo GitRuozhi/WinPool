@@ -40,7 +40,8 @@ function Get-RuntimeFiles([string]$Root, [switch]$AllowDevelopmentData) {
             }
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Runtime contains a link: $($item.FullName)" }
             if ($relative -match '(?i)(^|/)(OriginArtWork|local-assets|src|tests|build|App|Agent|trees|publish)(/|$)' -or
-                $item.Name -match '(?i)\.(ps1|psm1|psd1|cmd|bat|cs|xaml|csproj|slnx|psd|ai|xcf|blend)$|\.runtimeconfig\.dev\.json$') {
+                (-not $item.PSIsContainer -and
+                    $item.Name -match '(?i)\.(ps1|psm1|psd1|cmd|bat|cs|xaml|csproj|slnx|psd|ai|xcf|blend)$|\.runtimeconfig\.dev\.json$')) {
                 throw "Runtime contains source, script, or another runtime tree: $($item.FullName)"
             }
             if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
