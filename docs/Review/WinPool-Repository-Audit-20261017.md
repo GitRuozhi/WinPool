@@ -359,3 +359,46 @@ SQLite 改动排在上述工作之后。每连接重复 PRAGMA、snapshot 同存
 仍需区分启动权限与采集性能：17:23:34、17:24:44 有 `Read-only inventory exceeded 60 seconds` 监控恢复失败；随后 Storage provider 约 57.420 秒、Hardware provider 约 9.993 秒。本次冷启动又于 **17:45:37** 复现同一监控采集 60 秒超时，随后托盘进入 Ready；因此权限报错未复现，但不能宣布后台监控已恢复。App／Agent 保留供用户查看。未为此次诊断重建软件、修改快捷方式、放宽防删除 ACL 或执行存储写入。
 
 本地补证位于 `artifacts/startup-diagnosis-20261017/`：integrity-check.log、shortcuts.json、各次 launch-processes.json、cold-shortcut-launch.json、previous-repair-170645.log、agent-startup-timing.json。原始用户日志不提交。
+
+## 12. 采集超时的时间线与已定位原因（2026-10-17 17:51–18:02）
+
+**本机普通权限下，自动 provider 缓存发现失败与物理盘枚举被错误耦合，触发约 49 秒的无效回退。** 这不同于 Low 标签造成的 Runtime 文件写入拒绝。上午管理员运行时未触发该路径；本轮最初没有覆盖普通权限冷启动恢复监控，这是验收覆盖遗漏，应由下午的补充诊断纠正，不能把上午的通过外推到普通权限。
+
+| 时间（UTC+08） | 已有证据及范围 |
+| --- | --- |
+| 10 月 7 日 21:59，`6f51bc7` | 加入缓存发现与物理盘枚举的耦合及 GetPhysicalExtent；不是本次审查新增 |
+| 10 月 9 日 15:18:07 | 保留日志中已有相同 60 秒采集超时文案，调用链为 ipc.control.handshake_timeout；不能据相同文案断言与本次完全同因 |
+| 10 月 9 日 16:16，`ac69a50` | 调整为当前单 HDD 快速关联／extent 回退结构 |
+| 10 月 17 日上午至 12:43 | 管理员运行的审查采集正常：Storage 约 4–6 秒，Hardware 约 9 秒，真实操作及监控均有成功证据 |
+| 10 月 17 日 17:10:31 | 今天下午这轮连续故障的最早保留记录；对应约 17:09:31 开始的监控身份采集，随后 17:23、17:24 重复 |
+| 10 月 17 日 17:44–17:46 | 本代理普通权限快捷方式冷启动复现：端点文件可写，但监控恢复及 Storage 采集分别触及 60 秒上限；Hardware 仍约 10 秒 |
+| 10 月 17 日 17:54–17:59 | 下表受控权限与缓存发现对照，确认具体触发链 |
+
+从上午 manifest 重新计算的 471 份源码／配置 SHA-256 全部相同；当前 DLL 与 PDB 匹配，221 份现存编译源码的 checksum 也匹配。下午构建的 SourceLink 指向 `6824b31`，上午构建指向 `74a40af`，调试元数据可使 DLL／PDB 哈希变化；不能仅凭二进制哈希不同认定业务代码改动，也不宣称已逐字证明所有生成器输出等价。本次没有改生产采集实现、存储结构或监控配置。
+
+### 12.1 同机、同版本的定点对照
+
+探针反射读取当前 Release 程序集中的固定内嵌脚本，仍由同一路径 Windows PowerShell 5.1 通过 stdin 执行，并经现有只读命令策略检查。时间点只写 stderr；未落盘独立 inventory.ps1。每次依次运行，实际读取父／子进程 token RID；探针观察上限 75 秒与产品的 60 秒不同，故 53–55 秒返回不等于产品恢复正常。没有重跑全套测试或重建产品。
+
+| 实际权限／采集参数 | 总时长 | 来源查询失败 | extent 回退 |
+| --- | ---: | --- | --- |
+| High，默认 Storage | 4.404 秒 | 首次探针未汇总完整性，不仅据 exit 0 判完整 | — |
+| Medium，默认 Storage | 53.358 秒 | 首次探针未汇总完整性 | — |
+| High，默认 Storage＋分段 trace | 7.042 秒 | 0 | 未进入 |
+| Medium，默认 Storage＋分段 trace | 55.204 秒 | 7 条失败记录，含物理盘来源和关联失败 | GetPhysicalExtent 占 49.145 秒 |
+| Medium，调用已有 `ForPurpose(Storage, discoverProviderCache:false)`＋分段 trace | **3.389 秒** | **0** | **未进入** |
+
+普通权限仍可以读取所需的存储事实。精确触发点是当前默认采集中的缓存发现行为，不能笼统归因为“普通权限不能采集存储”。本机 Medium 的 discovery 约 0.104 秒便返回 Discover failed，High 则成功；日志没有提供可证明的权限 HRESULT，不能扩大成所有 Windows 环境的 API 权限结论。
+
+### 12.2 故障链与修改位置
+
+1. [EmbeddedStorageInventoryScript:121–140](../../src/WinPool.Infrastructure.Windows/EmbeddedStorageInventoryScript.cs#L121) 把 `Update-StorageProviderCache` 和真正的 `Get-PhysicalDisk` 放进同一个 Get-SourceSet。discovery 一旦失败就重抛，后面的普通枚举根本不执行；外层吞异常返回空集合。
+2. `$physicalObjects` 为空，单 HDD 快速关联无法取得唯一物理成员；[同文件:360](../../src/WinPool.Infrastructure.Windows/EmbeddedStorageInventoryScript.cs#L360) 转入 extent 回退。本轮实际等待约 49.145 秒发生在 [GetPhysicalExtent:334](../../src/WinPool.Infrastructure.Windows/EmbeddedStorageInventoryScript.cs#L334)。
+3. extent 返回后，代码又用先前已经为空的同一物理列表验证成员，必然报 `tier-extent-physical-not-unique`；模板／OS 磁盘关联随后连锁失败。额外等待没有修复缺失前提，整个流程接近 60 秒外层期限，负载稍变便超时。
+4. 启动恢复先等待这份采集，工作区因而长时间不就绪；失败后才进入 Ready 并开始另一次 Storage／Hardware 采集。这解释“窗口已开但一直连接／加载”和监控无法恢复的组合。
+
+**建议的直接修复：普通 inventory／monitor 读路径使用现有无 discovery 的固定采集方式；provider 缓存发现只放到确实需要重新发现的受控变更阶段。** 把缓存发现的状态与物理盘读取状态分开，不能因前者失败直接丢掉本可取得的物理盘事实。上游精确成员集合不可用时直接报告该原因，不运行一个返回后仍依赖同一缺失集合的 extent 回退。真实写入后的缓存更新及 fresh 后态语义必须通过相关用例核实，不能简单对全产品删去 discovery，更不应只把 60 秒改大。本节仅定位与验证候选参数，尚未实施上述产品修改。
+
+另发现 17:50 的三条 App XamlUnhandled 是 **5 秒 IPC 连接超时**，不是同一条 60 秒 provider 超时：工作区保存经过 NamedPipeAgentConnection.ConnectAsync:220，MainWindow.FireAndForget:1762 未包含 TimeoutException。应单独修正连接／生命周期与错误呈现，不能把所有等待都叫作采集失败。
+
+证据：[保留日志时间线与源码核对](../../artifacts/collection-failure-timeline.json)、[各次对照原始结果](../../artifacts/startup-diagnosis-20261017/collection-probe/results/)。这些均为本地 ignored artifact，不提交硬件原始数据。
