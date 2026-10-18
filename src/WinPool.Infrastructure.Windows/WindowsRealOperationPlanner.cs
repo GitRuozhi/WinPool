@@ -48,6 +48,9 @@ public sealed partial class WindowsRealOperationPlanner
         OperationId operationId,
         CancellationToken cancellationToken)
     {
+        using var readDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        readDeadline.CancelAfter(TimeSpan.FromSeconds(60));
+        cancellationToken = readDeadline.Token;
         ArgumentNullException.ThrowIfNull(proposal);
         ArgumentNullException.ThrowIfNull(session);
         if (privilege.Current != PrivilegeState.Administrator || !session.IsArmed)
@@ -73,7 +76,8 @@ public sealed partial class WindowsRealOperationPlanner
             && proposal.Steps.Any(item => item.Command is InitializeGptCommand)
             && proposal.Steps.Count != 1)
             throw new ArgumentException("Initialize GPT separately, observe the provider MSR, then confirm a new normalization plan.");
-        var topology = await topologyReader.CaptureAsync(cancellationToken)
+        var profile = WindowsRealStorageReadProfile.ForSteps(proposal.Steps);
+        var topology = await topologyReader.CaptureForPreparationAsync(proposal.Targets, cancellationToken, profile?.Id)
             .ConfigureAwait(false);
         if (proposal.SystemId != topology.SystemId)
             throw new InvalidDataException("The proposal does not name the current local system.");
@@ -139,12 +143,15 @@ public sealed partial class WindowsRealOperationPlanner
             "Windows Storage Management local provider; OS "
                 + topology.Snapshot.Computer.OsBuild + "; physical member "
                 + closure.PhysicalDiskId,
-            now, now.Add(InMemoryOperationAuthority.DefaultLifetime));
+            now, now.Add(InMemoryOperationAuthority.DefaultLifetime), profile?.Id);
     }
 
     public async Task<RealVirtualDiskCreationRange> ReadVirtualDiskCreationRangeAsync(
         StorageObjectId targetId, TrustedRealSession session, CancellationToken cancellationToken)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        cancellationToken = deadline.Token;
         if (privilege.Current != PrivilegeState.Administrator || !session.IsArmed)
             throw new UnauthorizedAccessException("An armed elevated Agent is required.");
         if (targetId.Kind is not (StorageObjectKind.StoragePool or StorageObjectKind.StorageTier))
@@ -193,6 +200,9 @@ public sealed partial class WindowsRealOperationPlanner
         TrustedRealSession session,
         CancellationToken cancellationToken)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        cancellationToken = deadline.Token;
         ArgumentNullException.ThrowIfNull(session);
         if (privilege.Current != PrivilegeState.Administrator || !session.IsArmed)
             throw new UnauthorizedAccessException("An armed elevated Agent is required.");
@@ -250,24 +260,9 @@ public sealed partial class WindowsRealOperationPlanner
             }
         }
 
-        var after = await topologyReader.CaptureAsync(cancellationToken).ConfigureAwait(false);
-        if (!StringComparer.Ordinal.Equals(after.MachineBinding, topology.MachineBinding))
-            throw new InvalidDataException("The local machine binding changed while creation support was being checked.");
-        var afterClosure = ResolveSupportMemberSet(after, physicalTarget).AsComponentClosure(physicalTarget.ProviderKey);
-        var afterPhysical = after.RequireObject(physicalTarget);
-        var afterSubsystem = RequireCreationSubsystem(after, afterPhysical,
-            after.Snapshot.PhysicalDisks.Single(item => item.StableId == afterClosure.PhysicalDiskId));
-        var afterPool = RequireCurrentCreationPool(after,
-            after.Snapshot.PhysicalDisks.Single(item => item.StableId == afterClosure.PhysicalDiskId));
-        if (!StringComparer.Ordinal.Equals(afterClosure.Fingerprint, closure.Fingerprint)
-            || afterClosure.PhysicalDiskId != closure.PhysicalDiskId
-            || afterSubsystem.StableId != subsystem.StableId
-            || afterSubsystem.UniqueId != subsystem.UniqueId
-            || afterSubsystem.ObjectId != subsystem.ObjectId
-            || afterPool?.Id != currentPool?.Id
-            || afterPool?.UniqueId != currentPool?.UniqueId
-            || afterPool?.ObjectId != currentPool?.ObjectId)
-            throw new InvalidDataException("The physical member, pool or subsystem changed while creation support was being checked.");
+        // Advisory support is bound to this observation. A later write still
+        // obtains a new target/member/role preflight; a second complete capture
+        // here cannot reserve the provider state until that future boundary.
 
         var providerEvidence = JsonSerializer.Serialize(new
         {
@@ -307,6 +302,9 @@ public sealed partial class WindowsRealOperationPlanner
         TrustedRealSession session,
         CancellationToken cancellationToken)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        cancellationToken = deadline.Token;
         ArgumentNullException.ThrowIfNull(session);
         if (privilege.Current != PrivilegeState.Administrator || !session.IsArmed)
             throw new UnauthorizedAccessException("An armed elevated Agent is required.");
@@ -341,14 +339,6 @@ public sealed partial class WindowsRealOperationPlanner
             new Dictionary<string, string>(), members);
         var provider = await partitionSizes.ReadAsync(target, cancellationToken)
             .ConfigureAwait(false);
-        var afterLookup = await topologyReader.CaptureAsync(cancellationToken)
-            .ConfigureAwait(false);
-        if (!StringComparer.Ordinal.Equals(afterLookup.MachineBinding, topology.MachineBinding)
-            || !StringComparer.Ordinal.Equals(
-                (ResolveCurrentPoolMemberSet(afterLookup, partitionId)?.AsComponentClosure()
-                    ?? afterLookup.RequireSinglePhysicalClosure([partitionId])).Fingerprint,
-                closure.Fingerprint))
-            throw new InvalidDataException("The partition topology changed while reading supported sizes.");
 
         var (minimum, maximum) = AllowedResizeRange(topology.Snapshot,
             partition, provider);

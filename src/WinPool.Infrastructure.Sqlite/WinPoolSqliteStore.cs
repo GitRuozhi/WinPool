@@ -6,7 +6,7 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
 {
     // Schemas before 17 contain retired product domains and remain rejected.
     // Schemas 17/18 are verified before their narrow, in-place upgrades.
-    public const int CurrentSchemaVersion = 20;
+    public const int CurrentSchemaVersion = 21;
 
     private readonly string connectionString;
 
@@ -43,10 +43,8 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared,
-            // Storage-location migration requires deterministic handle release.
-            // WinPool has one Agent writer, so connection reuse is less valuable
-            // than making each awaited disposal close its native file handles.
-            Pooling = false,
+            // Pools are drained explicitly before root migration and archival.
+            Pooling = true,
             ForeignKeys = true,
             DefaultTimeout = 5
         }.ToString();
@@ -80,11 +78,16 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
                 await Upgrade18To19Async(cancellationToken);
             if (version.Version is 17 or 18 or 19)
                 await Upgrade19To20Async(cancellationToken);
+            if (version.Version is 17 or 18 or 19 or 20)
+                await Upgrade20To21Async(cancellationToken);
 
+            await using var initializedConnection = await OpenConnectionAsync(cancellationToken);
+            await SetJournalModeAsync(initializedConnection, cancellationToken);
             return;
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
+        await SetJournalModeAsync(connection, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -112,17 +115,8 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             return new ExistingDatabaseInspection(false, null);
         }
 
-        var readOnlyConnectionString = new SqliteConnectionStringBuilder
-        {
-            // immutable=1 prevents a read-only schema probe from creating a
-            // SQLite shared-memory sidecar beside an unsupported database.
-            DataSource = $"file:{DatabasePath.Replace('\\', '/')}?immutable=1",
-            Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Private,
-            Pooling = false
-        }.ToString();
-        await using var connection = new SqliteConnection(readOnlyConnectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var inspection = await SqliteReadOnlyInspection.OpenAsync(DatabasePath, cancellationToken);
+        var connection = inspection.Connection;
         await using var tables = connection.CreateCommand();
         tables.CommandText = """
             SELECT COUNT(*)
@@ -138,10 +132,10 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         }
 
         var version = await SqliteSchemaVersionReader.ReadAsync(connection, cancellationToken);
-        if (version?.Version is 17 or 18 or 19 or CurrentSchemaVersion)
+        if (version?.Version is 17 or 18 or 19 or 20 or CurrentSchemaVersion)
         {
             await CurrentSchemaVerifier.VerifyAsync(connection, cancellationToken,
-                version.Version switch { 17 => Legacy17SchemaDefinition, 18 => Legacy18SchemaDefinition, 19 => Legacy19SchemaDefinition, _ => CurrentSchemaDefinition });
+                version.Version switch { 17 => Legacy17SchemaDefinition, 18 => Legacy18SchemaDefinition, 19 => Legacy19SchemaDefinition, 20 => Legacy20SchemaDefinition, _ => CurrentSchemaDefinition });
         }
 
         return new ExistingDatabaseInspection(true, version);
@@ -151,17 +145,65 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
         CancellationToken cancellationToken = default)
     {
         var connection = new SqliteConnection(connectionString);
+        try
+        {
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
         command.CommandText = """
             PRAGMA foreign_keys=ON;
-            PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
             PRAGMA busy_timeout=5000;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
+    }
+
+    private static async Task SetJournalModeAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode=WAL;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task Upgrade20To21Async(CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT schema_version FROM schema_info WHERE singleton=1;";
+        if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) != 20)
+            throw new InvalidDataException("The schema changed while upgrading from 20 to 21.");
+        command.CommandText = """
+            ALTER TABLE operation_plans ADD COLUMN system_id TEXT NOT NULL DEFAULT '';
+            ALTER TABLE operation_plans ADD COLUMN target_ids_json TEXT NOT NULL DEFAULT '[]';
+            UPDATE operation_plans SET system_id=json_extract(sanitized_json,'$.systemId.value'),
+                target_ids_json=json_extract(sanitized_json,'$.targets');
+            ALTER TABLE operation_steps ADD COLUMN created_object_id TEXT;
+            ALTER TABLE operation_steps ADD COLUMN created_os_disk_id TEXT;
+            UPDATE operation_steps SET
+                created_object_id=CASE WHEN json_valid(evidence_json) THEN json_extract(evidence_json,'$.CreatedObjectId') END,
+                created_os_disk_id=CASE WHEN json_valid(evidence_json) THEN json_extract(evidence_json,'$.CreatedOsDiskId') END;
+            ALTER TABLE local_inventory_document RENAME TO local_inventory_document_v20;
+            """ + LocalDocumentSchema + """
+            INSERT INTO local_inventory_document SELECT * FROM local_inventory_document_v20;
+            DROP TABLE local_inventory_document_v20;
+            DROP TABLE inventory_comparisons;
+            DROP TABLE storage_relationships;
+            DROP TABLE storage_objects;
+            DROP TABLE inventory_snapshots;
+            UPDATE schema_info SET schema_version=21, applied_at_utc_ms=$at WHERE singleton=1 AND schema_version=20;
+            """;
+        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private sealed record ExistingDatabaseInspection(
@@ -605,8 +647,41 @@ public sealed class WinPoolSqliteStore : ISqliteDatabaseStore
             StringComparison.Ordinal);
 
     private const string Legacy19SchemaDefinition = Legacy18SchemaDefinition + "\n" + CapacityAttemptSchemaDefinition;
-    private static readonly string CurrentSchemaDefinition = Legacy19SchemaDefinition
+    private static readonly string Legacy20SchemaDefinition = Legacy19SchemaDefinition
         .Replace(LegacySimulationReceiptSchema, SimulationReceiptSchema, StringComparison.Ordinal) + "\n" + StructureJobSchema;
+
+    private static readonly string CurrentSchemaDefinition = CreateCurrentSchema();
+
+    private static string CreateCurrentSchema()
+    {
+        var schema = Legacy20SchemaDefinition;
+        foreach (var table in new[] { "inventory_comparisons", "storage_relationships", "storage_objects", "inventory_snapshots", "local_inventory_document" })
+            schema = System.Text.RegularExpressions.Regex.Replace(schema,
+                @"CREATE TABLE IF NOT EXISTS " + table + @"\([\s\S]*?\);", string.Empty);
+        schema = System.Text.RegularExpressions.Regex.Replace(schema,
+            @"CREATE INDEX IF NOT EXISTS ix_inventory_snapshots_system_time[\s\S]*?;", string.Empty);
+        return schema + "\n" + LocalDocumentSchema + "\n" + Schema21Columns;
+    }
+
+    private const string Schema21Columns = """
+        ALTER TABLE operation_plans ADD COLUMN system_id TEXT NOT NULL DEFAULT '';
+        ALTER TABLE operation_plans ADD COLUMN target_ids_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE operation_steps ADD COLUMN created_object_id TEXT;
+        ALTER TABLE operation_steps ADD COLUMN created_os_disk_id TEXT;
+        """;
+
+    private const string LocalDocumentSchema = """
+        CREATE TABLE local_inventory_document(
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+            snapshot_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            document_schema_version INTEGER NOT NULL,
+            display_name TEXT NOT NULL,
+            sanitized_json TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            captured_at_utc_ms INTEGER NOT NULL
+        );
+        """;
 
     private const string StructureJobSchema = """
         CREATE TABLE real_structure_jobs(

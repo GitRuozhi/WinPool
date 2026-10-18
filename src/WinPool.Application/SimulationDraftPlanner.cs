@@ -500,6 +500,12 @@ public static class SimulationDraftPlanner
             [],
             at);
         var service = new SimulationOperationService();
+        var observed = new List<(StorageRuleDecision Decision, IReadOnlyList<string> Commands)>();
+        var wholePreview = service.ReducePlan(document, new SimulationDraftPlan("preview", steps),
+            (decision, commands) => observed.Add((decision, commands)));
+        // The normal, legal revision produces facts exactly once. Rejected drafts still
+        // retain the detailed independent-action diagnostics that the editor exposes.
+        var acceptedPreview = wholePreview.Succeeded ? wholePreview.Document : null;
         var childItems = new List<SimulationPlanItem>();
         var failedDissolveSteps = new List<(string PoolId, SimulationEditRequest Step, string Reason)>();
         var createdPoolItems = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -526,7 +532,10 @@ public static class SimulationDraftPlanner
             }
             else
             {
-                var applied = service.Reduce(document, operation);
+                var applied = acceptedPreview is not null
+                    ? new SimulationOperationResult(true, acceptedPreview, string.Empty, observed[index].Commands)
+                        { Decision = observed[index].Decision }
+                    : service.Reduce(document, operation);
                 decision = applied.Decision ?? new StorageRuleDecision(
                     applied.Succeeded ? StorageRuleVerdict.Allow : StorageRuleVerdict.Deny,
                     "storage.rule.plan-apply", applied.Error, step.TargetProviderKey);

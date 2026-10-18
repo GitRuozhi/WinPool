@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using WinPool.Application;
 
 namespace WinPool.Infrastructure.Windows;
@@ -11,123 +10,26 @@ public sealed class WindowsPowerShellRunner : IReadOnlyInventoryCommandRunner, I
 {
     private readonly CollectionPurpose purpose;
     private readonly bool discoverProviderCache;
-    public WindowsPowerShellRunner(CollectionPurpose purpose = CollectionPurpose.Hardware, bool discoverProviderCache = false)
-    {
-        this.purpose = purpose;
-        this.discoverProviderCache = discoverProviderCache;
-    }
+    private readonly WindowsPowerShellHost host;
+    public WindowsPowerShellRunner(CollectionPurpose purpose = CollectionPurpose.Hardware, bool discoverProviderCache = false,
+        WindowsPowerShellHost? host = null)
+    { this.purpose = purpose; this.discoverProviderCache = discoverProviderCache; this.host = host ?? WindowsPowerShellHost.Shared; }
     public const int TimeoutSeconds = 60;
-    public static string ExecutablePath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.System),
-        "WindowsPowerShell",
-        "v1.0",
-        "powershell.exe");
-
-    public Task<ReadOnlyCommandResult> RunInventoryAsync(CancellationToken cancellationToken) =>
-        RunCommandAsync(EmbeddedStorageInventoryScript.ForPurpose(purpose, discoverProviderCache), cancellationToken);
-
-    public Task<ReadOnlyCommandResult> RunInventoryAsync(StorageInventoryScope scope, CancellationToken cancellationToken) =>
-        RunCommandAsync(EmbeddedStorageInventoryScript.ForScope(scope, discoverProviderCache), cancellationToken);
-
-    private static async Task<ReadOnlyCommandResult> RunCommandAsync(string command, CancellationToken cancellationToken)
+    public static string ExecutablePath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
+        "WindowsPowerShell", "v1.0", "powershell.exe");
+    public Task<ReadOnlyCommandResult> RunInventoryAsync(CancellationToken cancellationToken) => RunAsync(null, cancellationToken);
+    public Task<ReadOnlyCommandResult> RunInventoryAsync(StorageInventoryScope scope, CancellationToken cancellationToken)
+    { scope.Validate(); return RunAsync(scope, cancellationToken); }
+    private async Task<ReadOnlyCommandResult> RunAsync(StorageInventoryScope? scope, CancellationToken token)
     {
-        ReadOnlyStorageCommandPolicy.EnsureSafe(command);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(TimeoutSeconds));
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = ExecutablePath,
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardInputEncoding = new UTF8Encoding(false),
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-                CreateNoWindow = true
-            }
-        };
-        process.StartInfo.ArgumentList.Add("-NoLogo");
-        process.StartInfo.ArgumentList.Add("-NoProfile");
-        process.StartInfo.ArgumentList.Add("-NonInteractive");
-        process.StartInfo.ArgumentList.Add("-ExecutionPolicy");
-        process.StartInfo.ArgumentList.Add("Bypass");
-        process.StartInfo.ArgumentList.Add("-Command");
-        process.StartInfo.ArgumentList.Add(
-            "[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); "
-            + "& ([ScriptBlock]::Create([Console]::In.ReadToEnd()))");
-
-        var startedAt = Stopwatch.GetTimestamp();
-        if (!process.Start())
-        {
-            throw new InvalidOperationException("Unable to start Windows PowerShell 5.1.");
-        }
-
-        await process.StandardInput.WriteAsync(
-            command.AsMemory(),
-            timeout.Token);
-        process.StandardInput.Close();
-        var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
-        var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-        try
-        {
-            await process.WaitForExitAsync(timeout.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKill(process);
-            if (!cancellationToken.IsCancellationRequested)
-            {
-                throw new TimeoutException(
-                    $"Read-only inventory exceeded {TimeoutSeconds} seconds.");
-            }
-            throw;
-        }
-
-        return new ReadOnlyCommandResult(
-            process.ExitCode,
-            await outputTask,
-            await errorTask,
-            Stopwatch.GetElapsedTime(startedAt));
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-        }
+        var started = Stopwatch.GetTimestamp();
+        var result = await host.QueryAsync(WindowsPowerShellQuery.Inventory,
+            new { IncludeHardware = purpose == CollectionPurpose.Hardware, DiscoverProviderCache = discoverProviderCache,
+                ScopeLocators = scope?.BeforeLocators, ComponentLocators = scope?.BeforeComponentLocators,
+                EvidenceFields = WindowsRealStorageReadProfile.ForId(scope?.EvidenceProfile)?.Fields }, token).ConfigureAwait(false);
+        return new(0, result, "", Stopwatch.GetElapsedTime(started));
     }
 }
-
-public static partial class ReadOnlyStorageCommandPolicy
-{
-    [GeneratedRegex(
-        @"(?im)(?:^|[|;]\s*)(?:New|Set|Remove|Clear|Initialize|Format|Resize|Repair|Optimize|Reset|Update)-(?:Disk|Partition|Volume|Storage|PhysicalDisk|VirtualDisk|StorageTier)\b",
-        RegexOptions.CultureInvariant)]
-    private static partial Regex MutatingStorageCommandRegex();
-
-    public static void EnsureSafe(string command)
-    {
-        if (string.IsNullOrWhiteSpace(command))
-        {
-            throw new InvalidOperationException("A fixed read-only command is required.");
-        }
-        if (MutatingStorageCommandRegex().IsMatch(command))
-        {
-            throw new InvalidOperationException("A mutating storage command was rejected.");
-        }
-    }
-}
-
 public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvider, IScopedHardwareInventoryProvider
 {
     private readonly IReadOnlyInventoryCommandRunner _runner;
@@ -141,8 +43,6 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
         _runner = runner ?? new WindowsPowerShellRunner(purpose, discoverProviderCache);
         _hardwareRunner = runner ?? new WindowsPowerShellRunner(CollectionPurpose.Hardware, discoverProviderCache);
     }
-
-    public static string FixedStorageCommand => EmbeddedStorageInventoryScript.Source;
 
     public Task<StorageSystemDocument> CollectHardwareAsync(CancellationToken cancellationToken) =>
         CollectAsync(CollectionPurpose.Hardware, null, cancellationToken);
@@ -197,18 +97,23 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
             var facts = WinPoolFactCapture.Read(root, context, system, purpose);
             if (scope is not null)
             {
-                string[] required = ["MSFT_StorageSubSystem", "MSFT_StoragePool", "MSFT_PhysicalDisk", "MSFT_VirtualDisk",
-                    "MSFT_StorageTier", "MSFT_Disk", "MSFT_Partition", "MSFT_Volume"];
-                var complete = required.All(name => facts.Sources.Any(x => x.ClassName == name && x.ReadState == FieldReadState.Returned))
-                    && facts.Sources.All(x => x.ReadState is FieldReadState.Returned or FieldReadState.Unavailable)
+                var profile = WindowsRealStorageReadProfile.ForId(scope.EvidenceProfile);
+                string[] required = profile is null ? ["MSFT_StorageSubSystem", "MSFT_StoragePool", "MSFT_PhysicalDisk", "MSFT_VirtualDisk",
+                    "MSFT_StorageTier", "MSFT_Disk", "MSFT_Partition", "MSFT_Volume"]
+                    : root.TryGetProperty("ScopeQueriedClasses", out var queried) ? queried.EnumerateArray().Select(value => value.GetString()!).ToArray() : [];
+                var complete = required.Length > 0 && required.All(name => facts.Sources.Any(x => x.ClassName == name && x.ReadState == FieldReadState.Returned))
+                    && (profile is not null || facts.Sources.All(x => x.ReadState is FieldReadState.Returned or FieldReadState.Unavailable))
+                    && (profile is null || root.TryGetProperty("ScopeClosureComplete", out var closureComplete) && closureComplete.ValueKind == JsonValueKind.True)
                     && facts.Sources.Where(x => x.ClassName.StartsWith("MSFT_", StringComparison.Ordinal)).All(x => x.ReadState == FieldReadState.Returned);
                 var coveredIds = scope.BeforeObjectIds.Concat(facts.Objects.Select(x => x.Id)).Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal).ToImmutableArray();
                 facts = facts with
                 {
                     Sources = facts.Sources.Select(x => x.ClassName.StartsWith("MSFT_", StringComparison.Ordinal)
+                        || profile?.Fields.ContainsKey(x.ClassName) == true
                         || x.ClassName is "Windows.DiskRoles" or "Win32_DiskDrive"
-                        ? x with { Coverage = new(scope.Key, coveredIds, complete && x.ReadState == FieldReadState.Returned, scope.Generation) }
+                        ? x with { Coverage = new(scope.Key, coveredIds, complete && x.ReadState == FieldReadState.Returned, scope.Generation)
+                            { FieldNames = profile is not null && profile.Fields.TryGetValue(x.ClassName, out var fields) ? fields.ToImmutableArray() : null } }
                         : x).ToImmutableArray(),
                     Collections = [],
                     ScopedCollection = new(scope, capturedAt, DateTimeOffset.UtcNow, complete,
@@ -218,7 +123,8 @@ public sealed class WindowsHardwareInventoryProvider : IHardwareInventoryProvide
             if (scope is null && purpose == CollectionPurpose.Hardware)
             {
                 facts = WindowsGraphicsFactCollector.AddTo(facts, capturedAt);
-                facts = WindowsNetworkFactCollector.AddTo(facts, capturedAt);
+                facts = WindowsNetworkFactCollector.AddTo(facts, capturedAt,
+                    root.TryGetProperty("NetworkSupplement", out var network) ? network : default);
             }
             return new StorageSystemDocument(StorageSystemDocument.CurrentSchemaVersion, id, StorageSystemKind.Local,
                 name, facts, [], capturedAt) { SystemId = system };

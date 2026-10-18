@@ -43,7 +43,12 @@ public sealed class LocalInventoryObserver(
                             reportCapture?.Invoke(started);
                             break;
                         case AgentInventoryUpdatedEvent updated:
-                            await ApplyPayloadAsync(updated.Document);
+                            if (updated.Document.Sha256 != appliedRevision)
+                            {
+                                var document = await AgentInventoryReader.LoadReferenceAsync(connection, updated.Document, cancellationToken);
+                                if (document is null) throw new IOException("The referenced inventory body is unavailable.");
+                                await ApplyDocumentAsync(document, AgentInventoryReader.RevisionOf(document));
+                            }
                             reportCapture?.Invoke(updated);
                             break;
                         case AgentInventoryFailedEvent failed:
@@ -75,10 +80,8 @@ public sealed class LocalInventoryObserver(
     {
         try
         {
-            var result = await connection.SendAsync(new LoadAgentInventoryCacheRequest(CorrelationId.New()), cancellationToken);
-            if (!result.IsSuccess || result.Value is not ManageInventoryLoadedResponse loaded)
-                throw new IOException(result.Messages.FirstOrDefault()?.Code ?? "agent.inventory.cache_unavailable");
-            if (loaded.Document is not null) await ApplyPayloadAsync(loaded.Document);
+            var document = await AgentInventoryReader.LoadLatestAsync(connection, cancellationToken);
+            if (document is not null) await ApplyDocumentAsync(document, AgentInventoryReader.RevisionOf(document));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception)
@@ -90,7 +93,13 @@ public sealed class LocalInventoryObserver(
     private async Task ApplyPayloadAsync(LocalInventoryDocumentPayload payload)
     {
         if (payload.Sha256 == appliedRevision) return;
-        await apply(LocalInventoryDocumentCodec.Decode(payload));
-        appliedRevision = payload.Sha256;
+        await ApplyDocumentAsync(LocalInventoryDocumentCodec.Decode(payload), payload.Sha256);
     }
+    private async Task ApplyDocumentAsync(StorageSystemDocument document, string revision)
+    {
+        if (revision == appliedRevision) return;
+        await apply(document);
+        appliedRevision = revision;
+    }
+
 }

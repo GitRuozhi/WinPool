@@ -14,8 +14,11 @@ namespace WinPool.Agent;
 internal sealed class DesktopAgentRuntime :
     IAgentRequestOperations,
     IAgentShutdownActions,
-    IAgentShutdownTerminalActions
+    IAgentShutdownTerminalActions,
+    IAgentShutdownPreparation
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> simulationOwners = new(StringComparer.Ordinal);
+
     private readonly TrayApplicationContext tray;
     private readonly AgentInstanceId instanceId;
     private readonly MonitoringSessionCoordinator monitoring;
@@ -24,6 +27,7 @@ internal sealed class DesktopAgentRuntime :
     private readonly WorkspaceSessionStateRepository workspaceState;
     private readonly SimulationDocumentRepository simulationDocuments;
     private readonly AgentInventoryCoordinator inventoryCoordinator;
+    private readonly AgentInventoryCollector? sharedCollector;
     internal AgentInventoryCoordinator InventoryCoordinator => inventoryCoordinator;
     private readonly IStorageHealthEventSource storageHealthEventSource;
     private readonly StorageHealthEventRepository storageHealthEventRepository;
@@ -46,6 +50,7 @@ internal sealed class DesktopAgentRuntime :
     private readonly Task monitorStateTask;
     private readonly object monitorStateSync = new();
     private long monitorStateRevision;
+    private readonly AgentShutdownPreparationCoordinator shutdownPreparation;
 
     public DesktopAgentRuntime(
         TrayApplicationContext tray,
@@ -56,7 +61,6 @@ internal sealed class DesktopAgentRuntime :
         WorkspaceSessionStateRepository workspaceState,
         SimulationDocumentRepository simulationDocuments,
         IHardwareInventoryProvider manageInventoryProvider,
-        InventorySnapshotRepository inventorySnapshots,
         LocalInventoryDocumentRepository localInventoryDocument,
         AgentLocalSystemIdentity localSystemIdentity,
         IProcessIncarnationVerifier processIncarnationVerifier,
@@ -93,9 +97,9 @@ internal sealed class DesktopAgentRuntime :
         }
 
         this.mainApplicationExecutablePath = Path.GetFullPath(mainApplicationExecutablePath);
+        sharedCollector = manageInventoryProvider as AgentInventoryCollector;
         inventoryCoordinator = new(
             manageInventoryProvider,
-            inventorySnapshots,
             localInventoryDocument,
             localSystemIdentity,
             physicalDiskDeviceResolver ?? new WindowsPhysicalDiskDeviceResolver(),
@@ -105,6 +109,7 @@ internal sealed class DesktopAgentRuntime :
         this.storageHealthEventRepository = storageHealthEventRepository
             ?? throw new ArgumentNullException(nameof(storageHealthEventRepository));
         this.agentEvents = agentEvents ?? throw new ArgumentNullException(nameof(agentEvents));
+        shutdownPreparation = new(processRegistry, processIncarnationVerifier, mainApplicationExecutablePath, agentEvents.Publish);
         this.lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         this.agentPreferences = agentPreferences
             ?? throw new ArgumentNullException(nameof(agentPreferences));
@@ -205,6 +210,9 @@ internal sealed class DesktopAgentRuntime :
             return;
         }
 
+        if (sharedCollector is not null)
+            await sharedCollector.CollectStartupAsync(cancellationToken).ConfigureAwait(false);
+
         var result = await StartMonitoringCoreAsync(
             new StartAgentMonitoringRequest(
                 CreateDefaultMonitorRequest(preferences.MonitoringSampleRateHz),
@@ -286,7 +294,7 @@ internal sealed class DesktopAgentRuntime :
     {
         try
         {
-            var document = await simulationDocuments.LoadAsync(
+            var document = await LoadSimulationPayloadAsync(
                 request.DocumentId,
                 cancellationToken);
             return ApplicationResult<AgentResponse>.Succeeded(
@@ -303,27 +311,38 @@ internal sealed class DesktopAgentRuntime :
         SaveAgentSimulationDocumentRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.Document is null || string.IsNullOrWhiteSpace(request.Document.DocumentId))
+            return Reject(request.CorrelationId, "agent.persistence.simulation_save_rejected");
+        var owner = simulationOwners.GetOrAdd(request.Document.DocumentId, _ => new(1, 1));
+        await owner.WaitAsync(cancellationToken);
         try
         {
-            var document = await simulationDocuments.SaveAsync(
-                request.Document,
-                request.ExpectedPreviousSha256,
-                cancellationToken);
+            var document = await Task.Run(async () =>
+            {
+                await DocumentPayloadLimits.LargeParseGate.WaitAsync(cancellationToken);
+                try { return await simulationDocuments.SaveAsync(request.Document, request.ExpectedPreviousSha256, cancellationToken); }
+                finally { DocumentPayloadLimits.LargeParseGate.Release(); }
+            }, cancellationToken);
             return ApplicationResult<AgentResponse>.Succeeded(
-                new SimulationDocumentSavedResponse(document),
+                new SimulationDocumentSavedResponse(new SimulationDocumentMetadata(document.DocumentId, document.DocumentSchemaVersion, document.DisplayName, document.Sha256, document.Revision, document.UpdatedAtUtc)),
                 request.CorrelationId);
         }
         catch (Exception exception) when (exception is
-            ArgumentException or JsonException or SimulationDocumentConflictException)
+            ArgumentException or JsonException or InvalidDataException or SimulationDocumentConflictException)
         {
             return Reject(request.CorrelationId, "agent.persistence.simulation_save_rejected");
         }
+        finally { owner.Release(); }
     }
 
     public async Task<ApplicationResult<AgentResponse>> DeleteSimulationDocumentAsync(
         DeleteAgentSimulationDocumentRequest request,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(request.DocumentId))
+            return Reject(request.CorrelationId, "agent.persistence.simulation_delete_rejected");
+        var owner = simulationOwners.GetOrAdd(request.DocumentId, _ => new(1, 1));
+        await owner.WaitAsync(cancellationToken);
         try
         {
             var deleted = await simulationDocuments.DeleteAsync(
@@ -339,6 +358,7 @@ internal sealed class DesktopAgentRuntime :
         {
             return Reject(request.CorrelationId, "agent.persistence.simulation_delete_rejected");
         }
+        finally { owner.Release(); }
     }
 
     public async Task<ApplicationResult<AgentResponse>> LookupSimulationCommitAsync(
@@ -356,6 +376,10 @@ internal sealed class DesktopAgentRuntime :
     public async Task<ApplicationResult<AgentResponse>> CommitSimulationEditAsync(
         CommitAgentSimulationEditRequest request, CancellationToken cancellationToken)
     {
+        if (request.Intent is null || string.IsNullOrWhiteSpace(request.Intent.DocumentId))
+            return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
+        var owner = simulationOwners.GetOrAdd(request.Intent.DocumentId, _ => new(1, 1));
+        await owner.WaitAsync(cancellationToken);
         try
         {
             var intent = request.Intent;
@@ -372,6 +396,7 @@ internal sealed class DesktopAgentRuntime :
                     || string.IsNullOrWhiteSpace(edit.AllocatedJobId)
                     || string.IsNullOrWhiteSpace(edit.AllocatedMsrId)))
                 return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
+            await DocumentPayloadLimits.ValidateIntentAsync(intent, cancellationToken);
             var existing = await simulationDocuments.FindByCommitIdAsync(intent.CommitId, cancellationToken);
             if (existing is not null)
             {
@@ -379,17 +404,24 @@ internal sealed class DesktopAgentRuntime :
                     return Reject(request.CorrelationId, "agent.persistence.simulation_commit_conflict");
                 return ApplicationResult<AgentResponse>.Succeeded(new SimulationEditCommittedResponse(existing), request.CorrelationId);
             }
-            var payload = await simulationDocuments.LoadAsync(intent.DocumentId, cancellationToken);
+            var payload = await LoadSimulationPayloadAsync(intent.DocumentId, cancellationToken);
             if (payload is null || payload.Revision != intent.ExpectedRevision)
                 return Reject(request.CorrelationId, "agent.persistence.simulation_commit_conflict");
-            var document = SimulationDocumentCodec.Decode(payload);
-            var reduced = new SimulationOperationService().ReducePlan(document,
-                new SimulationDraftPlan(intent.CommitId, intent.Edits));
-            if (!reduced.Succeeded)
-                return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
-            var candidate = reduced.Document with { Revision = checked(document.Revision + 1) };
-            var receipt = await simulationDocuments.CommitEditAsync(
-                SimulationDocumentCodec.Encode(candidate), payload.Sha256, intent, cancellationToken);
+            var candidate = await DocumentPayloadLimits.RunLargeAsync(() =>
+            {
+                var document = SimulationDocumentCodec.Decode(payload);
+                var reduced = new SimulationOperationService().ReducePlan(document,
+                    new SimulationDraftPlan(intent.CommitId, intent.Edits));
+                return reduced.Succeeded
+                    ? SimulationDocumentCodec.Encode(reduced.Document with { Revision = checked(document.Revision + 1) }) : null;
+            }, cancellationToken);
+            if (candidate is null) return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected");
+            var receipt = await Task.Run(async () =>
+            {
+                await DocumentPayloadLimits.LargeParseGate.WaitAsync(cancellationToken);
+                try { return await simulationDocuments.CommitEditAsync(candidate, payload.Sha256, intent, cancellationToken); }
+                finally { DocumentPayloadLimits.LargeParseGate.Release(); }
+            }, cancellationToken);
             return ApplicationResult<AgentResponse>.Succeeded(new SimulationEditCommittedResponse(receipt), request.CorrelationId);
         }
         catch (SimulationDocumentConflictException)
@@ -406,7 +438,16 @@ internal sealed class DesktopAgentRuntime :
         }
         catch (Exception exception) when (exception is ArgumentException or JsonException or InvalidDataException or OverflowException)
         { return Reject(request.CorrelationId, "agent.persistence.simulation_edit_rejected"); }
+        finally { owner.Release(); }
     }
+
+    private Task<SimulationDocumentPayload?> LoadSimulationPayloadAsync(string documentId, CancellationToken cancellationToken) =>
+        Task.Run(async () =>
+        {
+            await DocumentPayloadLimits.LargeParseGate.WaitAsync(cancellationToken);
+            try { return await simulationDocuments.LoadAsync(documentId, cancellationToken); }
+            finally { DocumentPayloadLimits.LargeParseGate.Release(); }
+        }, cancellationToken);
 
     public Task<ApplicationResult<AgentResponse>> CaptureManageInventoryAsync(
         CaptureAgentManageInventoryRequest request,
@@ -589,8 +630,18 @@ internal sealed class DesktopAgentRuntime :
 
     public Task NotifyClientsAsync(
         ShutdownReason reason,
-        CancellationToken cancellationToken) =>
-        Task.CompletedTask;
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        agentEvents.Publish(new AgentShutdownEvent(reason, DateTimeOffset.UtcNow));
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> PrepareClientsAsync(Guid attemptId, ShutdownReason reason, CancellationToken cancellationToken) =>
+        shutdownPreparation.PrepareClientsAsync(attemptId, reason, cancellationToken);
+    public bool AcknowledgePreparation(AcknowledgeAgentShutdownPreparationRequest request, AgentVerifiedPeer? peer) =>
+        shutdownPreparation.AcknowledgePreparation(request, peer);
+    public void EndPreparation(Guid attemptId, bool proceeding) => shutdownPreparation.EndPreparation(attemptId, proceeding);
 
     public async Task StopMonitoringAsync(CancellationToken cancellationToken)
     {

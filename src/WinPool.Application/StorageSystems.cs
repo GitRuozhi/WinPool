@@ -273,155 +273,118 @@ public sealed class SimulationOperationService : ISimulationOperationService
         => Reduce(document, request.FrozenAtUtc is not null ? request
             : SimulationEditIntent.Freeze(request, Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow));
 
-    /// <summary>Pure reduction of a frozen edit; no IO, random IDs or clock reads.</summary>
-    public SimulationOperationResult Reduce(StorageSystemDocument document, SimulationEditRequest request)
-    {
-        if (document.Kind != StorageSystemKind.Simulation)
-        {
-            return SimulationOperationResult.Failure(document, "Local storage systems are read-only.");
-        }
-
-        var decision = request.Kind == SimulationEditKind.ResetDocument
-            ? new StorageRuleDecision(StorageRuleVerdict.Allow, "simulation.reset", string.Empty, request.TargetProviderKey)
-            : StorageEditRules.Evaluate(document.Snapshot, request);
-        if (decision.Verdict == StorageRuleVerdict.Deny)
-        {
-            return SimulationOperationResult.Failure(document, decision.Message) with { Decision = decision };
-        }
-
-        if (decision.Verdict == StorageRuleVerdict.InsufficientInfo)
-        {
-            return SimulationOperationResult.Failure(document, decision.Message) with { Decision = decision };
-        }
-
-        try
-        {
-            var snapshot = request.Kind switch
-            {
-                SimulationEditKind.Rename => Rename(document.Snapshot, request),
-                SimulationEditKind.ChangeDriveLetter => ChangeDriveLetter(document.Snapshot, request),
-                SimulationEditKind.FormatPartition => FormatPartition(document.Snapshot, request),
-                SimulationEditKind.DeletePartition => DeletePartition(document.Snapshot, request),
-                SimulationEditKind.ConvertDisk => ConvertDisk(document.Snapshot, request),
-                SimulationEditKind.ClearDisk => ClearDisk(document.Snapshot, request),
-                SimulationEditKind.SetDiskOffline => SetDiskOffline(document.Snapshot, request),
-                SimulationEditKind.InitializeDisk => InitializeDisk(document.Snapshot, request),
-                SimulationEditKind.CreatePartition => CreatePartition(document.Snapshot, request),
-                SimulationEditKind.ExtendPartition => ResizePartition(document.Snapshot, request, extend: true),
-                SimulationEditKind.ShrinkPartition => ResizePartition(document.Snapshot, request, extend: false),
-                SimulationEditKind.CreateStoragePool => CreateStoragePool(document.Snapshot, request),
-                SimulationEditKind.CreateVirtualDisk => CreateVirtualDisk(document.Snapshot, request),
-                SimulationEditKind.MovePhysicalDisk => MovePhysicalDisk(document.Snapshot, request),
-                SimulationEditKind.EvictPhysicalDiskFromTiers =>
-                    EvictPhysicalDiskFromTiers(document.Snapshot, request),
-                SimulationEditKind.CreateTieredPool => CreateTieredPool(document.Snapshot, request),
-                SimulationEditKind.UpdateStoragePool => UpdateStoragePool(document.Snapshot, request),
-                SimulationEditKind.DissolveStoragePool => DissolveStoragePool(document.Snapshot, request),
-                SimulationEditKind.DeleteEmptyStoragePool => DeleteEmptyStoragePool(document.Snapshot, request),
-                SimulationEditKind.DeleteVirtualDisk => DeleteVirtualDisk(document.Snapshot, request),
-                SimulationEditKind.SetDiskUsage => SetDiskUsage(document.Snapshot, request),
-                SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive => document.Snapshot,
-                SimulationEditKind.ResetDocument => document.Snapshot,
-                _ => throw new ArgumentOutOfRangeException(nameof(request))
-            };
-
-            var jobs = document.Jobs;
-            if (request.Kind is SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive)
-            {
-                var now = request.FrozenAtUtc ?? throw new ArgumentException("The edit time must be frozen.");
-                if (request.Kind == SimulationEditKind.OptimizePool)
-                {
-                    var pool = snapshot.StoragePools.FirstOrDefault(x => x.StableId == request.TargetProviderKey);
-                    if (pool is null || pool.IsPrimordial)
-                    {
-                        throw new InvalidOperationException("Only a non-primordial simulated pool can be optimized.");
-                    }
-                    jobs = jobs.Append(new SimulationJob(
-                        request.AllocatedJobId!,
-                        "OptimizeStoragePool",
-                        pool.StableId,
-                        SimulationJobStatus.Completed,
-                        now,
-                        now,
-                        "Simulated no-op. No rearrangement or performance improvement is claimed.")).ToArray();
-                }
-                else
-                {
-                    jobs = jobs.Append(new SimulationJob(
-                        request.AllocatedJobId!,
-                        "OptimizeVolume",
-                        request.TargetProviderKey,
-                        SimulationJobStatus.Completed,
-                        now,
-                        now,
-                        "Simulated no-op. No rearrangement or performance improvement is claimed.")).ToArray();
-                }
-            }
-
-            if (request.Kind == SimulationEditKind.ResetDocument)
-            {
-                var builtin = SimulationCatalog.TryCreateDocument(document.Id, request.FrozenAtUtc);
-                if (builtin is null) return SimulationOperationResult.Failure(document, "Only a built-in simulation document can be reset.");
-                return new(true, document with
-                {
-                    DisplayName = builtin.DisplayName, Jobs = [], UpdatedAt = request.FrozenAtUtc!.Value,
-                    SourceFacts = builtin.SourceFacts! with { SystemId = document.SystemId,
-                        Revision = checked((document.SourceFacts?.Revision ?? 0) + 1) }
-                }, string.Empty, ["# Internal action: restore the built-in simulation. No Windows command."]) { Decision = decision };
-            }
-
-            snapshot = StorageRelationshipProjector.Rebuild(snapshot);
-            var graphErrors = StorageRelationshipProjector.Validate(snapshot);
-            if (graphErrors.Count > 0)
-            {
-                return SimulationOperationResult.Failure(document, graphErrors[0]);
-            }
-
-            return new SimulationOperationResult(
-                true,
-                document with
-                {
-                    Jobs = jobs, UpdatedAt = request.FrozenAtUtc ?? throw new ArgumentException("The edit time must be frozen."),
-                    SourceFacts = WinPoolSimulationFacts.ApplyCandidate(document.SourceFacts, document.Snapshot, snapshot, document.SystemId)
-                },
-                string.Empty,
-                SimulationCommandPreview.Build(request, document.Snapshot, snapshot)) { Decision = decision };
-        }
-        catch (InvalidOperationException ex)
-        {
-            return SimulationOperationResult.Failure(document, ex.Message);
-        }
-    }
+    /// <summary>Pure reduction of frozen edits; one mutable work snapshot and one source-facts publication.</summary>
+    public SimulationOperationResult Reduce(StorageSystemDocument document, SimulationEditRequest request) =>
+        ReducePlan(document, new SimulationDraftPlan("single", [request]));
 
     public SimulationOperationResult ApplyPlan(StorageSystemDocument document, SimulationDraftPlan plan) =>
         ReducePlan(document, plan.Steps.All(step => step.FrozenAtUtc is not null) ? plan
             : plan with { Steps = SimulationEditIntent.Freeze(plan.Steps, plan.PlanId, DateTimeOffset.UtcNow) });
 
-    public SimulationOperationResult ReducePlan(
-        StorageSystemDocument document,
-        SimulationDraftPlan plan)
+    public SimulationOperationResult ReducePlan(StorageSystemDocument document, SimulationDraftPlan plan) =>
+        ReducePlan(document, plan, null);
+
+    internal SimulationOperationResult ReducePlan(StorageSystemDocument document, SimulationDraftPlan plan,
+        Action<StorageRuleDecision, IReadOnlyList<string>>? observeStep)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(plan);
+        if (document.Kind != StorageSystemKind.Simulation)
+            return SimulationOperationResult.Failure(document, "Local storage systems are read-only.");
         if ((plan.BaselineSystemId is { } system && system != document.SystemId)
             || (plan.BaselineRevision is { } revision && revision != document.Revision)
             || (plan.BaselineInventoryVersion is { } version && !StringComparer.Ordinal.Equals(version, document.InventoryVersion)))
             return SimulationOperationResult.Failure(document, "The editing baseline changed. Refresh or reconcile the draft before applying it.");
-        var current = document;
+        if (plan.IsEmpty) return new(true, document, string.Empty, []);
+        var snapshot = document.Snapshot;
+        var jobs = document.Jobs;
         var commands = new List<string>();
-        foreach (var step in plan.Steps)
+        var displayName = document.DisplayName;
+        var previousFacts = document.SourceFacts;
+        var logicalSteps = 0L;
+        var updatedAt = document.UpdatedAt;
+        StorageRuleDecision? decision = null;
+        try
         {
-            var result = Reduce(current, step);
-            if (!result.Succeeded)
+            foreach (var request in plan.Steps)
             {
-                return SimulationOperationResult.Failure(document, result.Error);
+                decision = request.Kind == SimulationEditKind.ResetDocument
+                    ? new StorageRuleDecision(StorageRuleVerdict.Allow, "simulation.reset", string.Empty, request.TargetProviderKey)
+                    : StorageEditRules.Evaluate(snapshot, request);
+                if (decision.Verdict is StorageRuleVerdict.Deny or StorageRuleVerdict.InsufficientInfo)
+                    return SimulationOperationResult.Failure(document, decision.Message) with { Decision = decision };
+                var before = snapshot;
+                updatedAt = request.FrozenAtUtc ?? throw new ArgumentException("The edit time must be frozen.");
+                if (request.Kind == SimulationEditKind.ResetDocument)
+                {
+                    var builtin = SimulationCatalog.TryCreateDocument(document.Id, updatedAt);
+                    if (builtin is null) return SimulationOperationResult.Failure(document, "Only a built-in simulation document can be reset.");
+                    // Reset replaces old hardware supplements as the original single-step rule did.
+                    previousFacts = builtin.SourceFacts! with { SystemId = document.SystemId,
+                        Revision = checked((previousFacts?.Revision ?? 0) + logicalSteps + 1) };
+                    snapshot = builtin.Snapshot;
+                    displayName = builtin.DisplayName; jobs = []; logicalSteps = 0;
+                    commands.Add("# Internal action: restore the built-in simulation. No Windows command.");
+                    observeStep?.Invoke(decision, [commands[^1]]);
+                    continue;
+                }
+                snapshot = request.Kind switch
+            {
+                SimulationEditKind.Rename => Rename(snapshot, request),
+                SimulationEditKind.ChangeDriveLetter => ChangeDriveLetter(snapshot, request),
+                SimulationEditKind.FormatPartition => FormatPartition(snapshot, request),
+                SimulationEditKind.DeletePartition => DeletePartition(snapshot, request),
+                SimulationEditKind.ConvertDisk => ConvertDisk(snapshot, request),
+                SimulationEditKind.ClearDisk => ClearDisk(snapshot, request),
+                SimulationEditKind.SetDiskOffline => SetDiskOffline(snapshot, request),
+                SimulationEditKind.InitializeDisk => InitializeDisk(snapshot, request),
+                SimulationEditKind.CreatePartition => CreatePartition(snapshot, request),
+                SimulationEditKind.ExtendPartition => ResizePartition(snapshot, request, extend: true),
+                SimulationEditKind.ShrinkPartition => ResizePartition(snapshot, request, extend: false),
+                SimulationEditKind.CreateStoragePool => CreateStoragePool(snapshot, request),
+                SimulationEditKind.CreateVirtualDisk => CreateVirtualDisk(snapshot, request),
+                SimulationEditKind.MovePhysicalDisk => MovePhysicalDisk(snapshot, request),
+                SimulationEditKind.EvictPhysicalDiskFromTiers =>
+                    EvictPhysicalDiskFromTiers(snapshot, request),
+                SimulationEditKind.CreateTieredPool => CreateTieredPool(snapshot, request),
+                SimulationEditKind.UpdateStoragePool => UpdateStoragePool(snapshot, request),
+                SimulationEditKind.DissolveStoragePool => DissolveStoragePool(snapshot, request),
+                SimulationEditKind.DeleteEmptyStoragePool => DeleteEmptyStoragePool(snapshot, request),
+                SimulationEditKind.DeleteVirtualDisk => DeleteVirtualDisk(snapshot, request),
+                SimulationEditKind.SetDiskUsage => SetDiskUsage(snapshot, request),
+                SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive => snapshot,
+                SimulationEditKind.ResetDocument => snapshot,
+                _ => throw new ArgumentOutOfRangeException(nameof(request))
+            };
+
+
+                if (request.Kind is SimulationEditKind.OptimizePool or SimulationEditKind.OptimizeDrive)
+                {
+                    var pool = request.Kind == SimulationEditKind.OptimizePool
+                        ? snapshot.StoragePools.FirstOrDefault(item => item.StableId == request.TargetProviderKey) : null;
+                    if (request.Kind == SimulationEditKind.OptimizePool && (pool is null || pool.IsPrimordial))
+                        throw new InvalidOperationException("Only a non-primordial simulated pool can be optimized.");
+                    jobs = jobs.Append(new SimulationJob(request.AllocatedJobId!,
+                        request.Kind == SimulationEditKind.OptimizePool ? "OptimizeStoragePool" : "OptimizeVolume",
+                        request.TargetProviderKey, SimulationJobStatus.Completed, updatedAt, updatedAt,
+                        "Simulated no-op. No rearrangement or performance improvement is claimed.")).ToArray();
+                }
+                // Step rules consume the object collections directly. Relationships and facts are derived once below.
+                var stepCommands = SimulationCommandPreview.Build(request, before, snapshot);
+                commands.AddRange(stepCommands);
+                observeStep?.Invoke(decision, stepCommands);
+                logicalSteps++;
             }
-
-            current = result.Document;
-            commands.AddRange(result.Commands);
+            snapshot = StorageRelationshipProjector.Rebuild(snapshot);
+            var graphErrors = StorageRelationshipProjector.Validate(snapshot);
+            if (graphErrors.Count > 0) return SimulationOperationResult.Failure(document, graphErrors[0]);
+            var facts = logicalSteps == 0 ? previousFacts! : WinPoolSimulationFacts.ApplyCandidate(
+                previousFacts, document.Snapshot, snapshot, document.SystemId, logicalSteps);
+            return new(true, document with { Jobs = jobs, UpdatedAt = updatedAt,
+                DisplayName = displayName, SourceFacts = facts }, string.Empty, commands) { Decision = decision };
         }
-
-        return new SimulationOperationResult(true, current, string.Empty, commands);
+        catch (InvalidOperationException exception)
+        { return SimulationOperationResult.Failure(document, exception.Message); }
     }
 
     private static StorageSnapshot Rename(StorageSnapshot snapshot, SimulationEditRequest request)

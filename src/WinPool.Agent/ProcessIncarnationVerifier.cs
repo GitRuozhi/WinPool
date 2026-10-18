@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+using WinPool.Application;
 
 namespace WinPool.Agent;
 
@@ -9,9 +10,19 @@ public sealed record ProcessIncarnation(
     string ImagePath,
     DateTimeOffset StartedAtUtc);
 
+public enum ProcessIncarnationState { Alive, Exited, Unverifiable }
+public sealed record ProcessIncarnationObservation(ProcessIncarnationState State, ProcessIncarnation? Incarnation, string? Error);
+
 public interface IProcessIncarnationVerifier
 {
     ProcessIncarnation? TryRead(int processId);
+
+    ProcessIncarnationObservation Observe(int processId)
+    {
+        var witness = TryRead(processId);
+        return witness is null ? new(ProcessIncarnationState.Unverifiable, null, "Process identity could not be read.")
+            : new(ProcessIncarnationState.Alive, witness, null);
+    }
 
     bool IsExpectedExecutable(int processId, string expectedExecutablePath);
 
@@ -27,6 +38,29 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
     private const uint WaitTimeout = 258;
 
     public ProcessIncarnation? TryRead(int processId) => TryRead(processId, false, out _);
+
+    public ProcessIncarnationObservation Observe(int processId)
+    {
+        if (processId <= 0) return new(ProcessIncarnationState.Unverifiable, null, "Invalid process ID.");
+        using var handle = OpenProcess(ProcessQueryLimitedInformation | Synchronize, false, processId);
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            // ERROR_INVALID_PARAMETER proves that no process with this PID exists.
+            return error == 87 ? new(ProcessIncarnationState.Exited, null, null)
+                : new(ProcessIncarnationState.Unverifiable, null, new System.ComponentModel.Win32Exception(error).Message);
+        }
+        var wait = WaitForSingleObject(handle, 0);
+        if (wait == 0) return new(ProcessIncarnationState.Exited, null, null);
+        if (wait != WaitTimeout) return new(ProcessIncarnationState.Unverifiable, null, "The process exit signal cannot be verified.");
+        var path = ReadImagePath(handle);
+        var started = ReadStartedAtUtc(handle);
+        if (path is null || started is null) return new(ProcessIncarnationState.Unverifiable, null, "The live process identity cannot be read.");
+        wait = WaitForSingleObject(handle, 0);
+        return wait == 0 ? new(ProcessIncarnationState.Exited, null, null)
+            : wait != WaitTimeout ? new(ProcessIncarnationState.Unverifiable, null, "The process exit signal cannot be verified.")
+            : new(ProcessIncarnationState.Alive, new(processId, path, started.Value), null);
+    }
 
     public ProcessIncarnation? TryReadWithIntegrity(int processId, out int? integrityLevel) =>
         TryRead(processId, true, out integrityLevel);
@@ -131,6 +165,11 @@ public sealed class WindowsProcessIncarnationVerifier : IProcessIncarnationVerif
 
 public static class ProcessIncarnationMatcher
 {
+    public static bool Matches(ProcessIncarnation? witness, PowerShellHostCall call, string expectedExecutablePath) =>
+        witness is not null && witness.ProcessId == call.ProcessId
+        && witness.StartedAtUtc == call.StartedAtUtc
+        && HasExpectedImage(witness.ImagePath, expectedExecutablePath);
+
     public static bool HasExpectedImage(
         ProcessIncarnation? witness,
         int expectedProcessId,

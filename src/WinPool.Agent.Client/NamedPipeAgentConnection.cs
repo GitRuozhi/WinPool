@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.CompilerServices;
@@ -111,7 +112,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private readonly TimeProvider timeProvider;
     private readonly Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync;
     private readonly SemaphoreSlim connectionGate = new(1, 1);
-    private readonly SemaphoreSlim requestGate = new(1, 1);
+    private readonly SemaphoreSlim pendingSlots = new(32, 32);
+    private readonly ConcurrentDictionary<Guid, TaskCompletionSource<IpcEnvelope>> pending = new();
+    private CancellationTokenSource? controlCancellation;
+    private Task? controlReaderTask;
     private readonly SemaphoreSlim sendGate = new(1, 1);
     private readonly SemaphoreSlim eventRecoveryGate = new(1, 1);
     private readonly CancellationTokenSource lifetimeCancellation = new();
@@ -121,14 +125,12 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private readonly TaskCompletionSource disposeCompletion = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Guid clientProcessInstanceId = Guid.NewGuid();
-    private readonly TimeSpan controlConnectionReuseIdleLimit;
     private readonly AgentClientEventFanout eventFanout = new();
     private NamedPipeClientStream? stream;
     private NamedPipeClientStream? eventStream;
     private CancellationTokenSource? eventCancellation;
     private Task? eventReaderTask;
     private AgentHandshake? handshake;
-    private long lastControlTransferStartedTimestamp = -1;
     private int disposeStarted;
     private int activeOperations;
 
@@ -145,8 +147,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         IAgentProcessLauncher launcher,
         TimeProvider? timeProvider,
         Func<CancellationToken, Task>? beforeEventRecoveryConnectAsync,
-        IAgentProcessLiveness? agentProcessLiveness = null,
-        TimeSpan? controlConnectionReuseIdleLimit = null)
+        IAgentProcessLiveness? agentProcessLiveness = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(endpointPath);
         this.endpointPath = Path.GetFullPath(endpointPath);
@@ -155,13 +156,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             agentProcessLiveness ?? new WindowsAgentProcessLiveness();
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.beforeEventRecoveryConnectAsync = beforeEventRecoveryConnectAsync;
-        this.controlConnectionReuseIdleLimit = controlConnectionReuseIdleLimit
-            ?? IpcProtocol.ControlConnectionReuseIdleLimit;
-        if (this.controlConnectionReuseIdleLimit <= TimeSpan.Zero
-            || this.controlConnectionReuseIdleLimit >= IpcProtocol.RequestTransferTimeout)
-        {
-            throw new ArgumentOutOfRangeException(nameof(controlConnectionReuseIdleLimit));
-        }
+
     }
 
     public static string DefaultEndpointPath =>
@@ -260,6 +255,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 }
 
                 stream = client;
+                controlCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+                controlReaderTask = ReadControlResponsesAsync(client, controlCancellation.Token);
                 await ConnectEventStreamAsync(
                     reply,
                     endpoint,
@@ -364,45 +361,10 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     {
         ArgumentNullException.ThrowIfNull(request);
         using var operation = EnterOperation(cancellationToken);
-        try
-        {
-            await sendGate.WaitAsync(operation.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && !IsDisposing)
-        {
-            return Failure<AgentResponse>(ApplicationStatus.Cancelled,
-                request.CorrelationId, "agent.request.cancelled");
-        }
-        try
-        {
-            var connected = await ConnectAsync(operation.Token).ConfigureAwait(false);
-            if (!connected.IsSuccess)
-            {
-                return new(connected.Status, null, connected.Messages, request.CorrelationId);
-            }
-
-            try
-            {
-                return await SendConnectedAsync(request, operation.Token, enforceIdleLease: true)
-                    .ConfigureAwait(false);
-            }
-            catch (ControlConnectionIdleLeaseExpiredException)
-            {
-                // The request gate checked the lease before writing any byte.
-                // Renew once; never retry a request after transport has begun.
-                var renewed = await ReconnectAsync(operation.Token).ConfigureAwait(false);
-                if (!renewed.IsSuccess)
-                {
-                    return new(renewed.Status, null, renewed.Messages, request.CorrelationId);
-                }
-
-                return await SendConnectedAsync(request, operation.Token).ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            sendGate.Release();
-        }
+        var connected = await ConnectAsync(operation.Token).ConfigureAwait(false);
+        if (!connected.IsSuccess)
+            return new(connected.Status, null, connected.Messages, request.CorrelationId);
+        return await SendConnectedAsync(request, operation.Token).ConfigureAwait(false);
     }
 
     public async IAsyncEnumerable<AgentEvent> WatchAsync(
@@ -437,7 +399,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             await activeOperationsDrained.Task.ConfigureAwait(false);
             await DisposeStreamAsync().ConfigureAwait(false);
             connectionGate.Dispose();
-            requestGate.Dispose();
+            pendingSlots.Dispose();
             sendGate.Dispose();
             eventRecoveryGate.Dispose();
             lifetimeCancellation.Dispose();
@@ -450,153 +412,104 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
     private async Task<ApplicationResult<AgentResponse>> SendConnectedAsync(
         AgentRequest request,
-        CancellationToken cancellationToken,
-        bool enforceIdleLease = false)
+        CancellationToken cancellationToken)
     {
         using var operation = EnterOperation(cancellationToken);
-        var requestGateAcquired = false;
-        var transportStarted = false;
+        var sent = false;
+        var slot = false;
+        var correlation = request.CorrelationId.Value;
+        TaskCompletionSource<IpcEnvelope>? completion = null;
         try
         {
-            await requestGate.WaitAsync(operation.Token).ConfigureAwait(false);
-            requestGateAcquired = true;
-            ThrowIfDisposed();
-            if (stream?.IsConnected != true || handshake is null)
+            await pendingSlots.WaitAsync(operation.Token).ConfigureAwait(false);
+            slot = true;
+            var target = stream;
+            if (target?.IsConnected != true || handshake is null)
+                return Failure<AgentResponse>(ApplicationStatus.RequiresEnvironment, request.CorrelationId, "agent.request.not_connected");
+            completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!pending.TryAdd(correlation, completion))
+                throw new InvalidDataException("The request correlation is already pending.");
+            var envelope = request is SaveAgentSimulationDocumentRequest or CommitAgentSimulationEditRequest
+                ? await DocumentPayloadLimits.RunLargeAsync(() => Envelope(Guid.NewGuid(), correlation,
+                    RequestMessageType(request), request, request.GetType()), operation.Token)
+                : Envelope(Guid.NewGuid(), correlation, RequestMessageType(request), request, request.GetType());
+            if (!ReferenceEquals(stream, target)) throw new IOException("The control connection changed before send.");
+            using var transfer = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+            transfer.CancelAfter(IpcProtocol.RequestTransferTimeout);
+            using var payloadCancellation = CancellationTokenSource.CreateLinkedTokenSource(transfer.Token, operation.Token);
+            var writing = IpcPayloadTransfer.WriteAsync(target, envelope, sendGate, payloadCancellation.Token, () => sent = true);
+            try { await writing.WaitAsync(operation.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (operation.Token.IsCancellationRequested)
             {
-                return Failure<AgentResponse>(
-                    ApplicationStatus.RequiresEnvironment,
-                    request.CorrelationId,
-                    "agent.request.not_connected");
+                _ = writing.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                throw;
             }
-
-            if (enforceIdleLease
-                && (lastControlTransferStartedTimestamp < 0
-                    || timeProvider.GetElapsedTime(
-                        lastControlTransferStartedTimestamp,
-                        timeProvider.GetTimestamp()) >= controlConnectionReuseIdleLimit))
-            {
-                throw new ControlConnectionIdleLeaseExpiredException();
-            }
-
-            var messageType = RequestMessageType(request);
-            // The server begins its next idle read only after this response.
-            // Starting the client's lease here is deliberately conservative.
-            lastControlTransferStartedTimestamp = timeProvider.GetTimestamp();
-            var wireFrame = IpcFrameCodec.Encode(Envelope(
-                    Guid.NewGuid(),
-                    request.CorrelationId.Value,
-                    messageType,
-                    request,
-                    request.GetType()));
-            transportStarted = true;
-            await IpcFrameCodec.WriteAsync(
-                stream!, wireFrame,
-                operation.Token);
-            var responseEnvelope = await IpcFrameCodec.ReadAsync(
-                stream!,
-                operation.Token);
-            if (responseEnvelope.MessageType != AgentControlMessageTypes.Response
-                || responseEnvelope.CorrelationId != request.CorrelationId.Value)
-            {
-                throw new InvalidDataException(
-                    "WinPool Agent returned a mismatched response.");
-            }
-
-            var payload = responseEnvelope.Payload
-                .Deserialize<AgentResponseWirePayload>(JsonOptions)
-                ?? throw new InvalidDataException(
-                    "WinPool Agent returned an empty response.");
-            var response = DeserializeResponse(payload);
-            Observe(response);
-            return new(
-                payload.Status,
-                response,
-                payload.Messages,
-                payload.CorrelationId);
+            var responseEnvelope = await completion.Task.WaitAsync(operation.Token).ConfigureAwait(false);
+            var decoded = responseEnvelope.Payload.TryGetProperty("responseType", out var responseType)
+                && responseType.GetString() is nameof(SimulationDocumentLoadedResponse) or nameof(ManageInventoryLoadedResponse)
+                    or nameof(AgentRealOperationEvidenceResponse)
+                ? await DocumentPayloadLimits.RunLargeAsync(() => DecodeControlResponse(responseEnvelope), operation.Token)
+                : DecodeControlResponse(responseEnvelope);
+            Observe(decoded.Response);
+            return new(decoded.Payload.Status, decoded.Response, decoded.Payload.Messages, decoded.Payload.CorrelationId);
         }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested
-                && !IsDisposing)
+        catch (IpcPayloadBusyException)
         {
-            if (transportStarted)
-            {
-                await DisposeStreamAsync().ConfigureAwait(false);
-                return ApplicationResult<AgentResponse>.FromStatus(
-                    ApplicationStatus.OutcomeUnknown,
-                    request.CorrelationId,
-                    new ApplicationMessage(
-                        "agent.request.outcome_unknown",
-                        "agent.request.outcome_unknown",
-                        string.Empty,
-                        ApplicationMessageSeverity.Warning,
-                        []));
-            }
-
-            return Failure<AgentResponse>(
-                ApplicationStatus.Cancelled,
-                request.CorrelationId,
-                "agent.request.cancelled");
+            return Failure<AgentResponse>(ApplicationStatus.Rejected, request.CorrelationId, "agent.request.busy");
         }
-        catch (IpcFrameTooLargeException) when (!transportStarted)
+        catch (IpcFrameTooLargeException)
         {
-            return Failure<AgentResponse>(ApplicationStatus.Rejected,
-                request.CorrelationId, "agent.request.frame_too_large");
+            return Failure<AgentResponse>(ApplicationStatus.Rejected, request.CorrelationId, "agent.request.frame_too_large");
         }
-        catch (Exception exception) when (
-            exception is IOException
-                or TimeoutException
-                or InvalidDataException
-                or JsonException
-                or NotSupportedException)
+        catch (OperationCanceledException) when (operation.Token.IsCancellationRequested)
         {
-            await DisposeStreamAsync();
-            if (transportStarted)
-            {
-                return ApplicationResult<AgentResponse>.FromStatus(
-                    ApplicationStatus.OutcomeUnknown,
-                    request.CorrelationId,
-                    new ApplicationMessage(
-                        "agent.request.outcome_unknown",
-                        "agent.request.outcome_unknown",
-                        string.Empty,
-                        ApplicationMessageSeverity.Warning,
-                        []));
-            }
-
-            return Failure<AgentResponse>(
-                ApplicationStatus.RequiresEnvironment,
-                request.CorrelationId,
-                "agent.request.connection_lost");
+            return Failure<AgentResponse>(sent ? ApplicationStatus.OutcomeUnknown : ApplicationStatus.Cancelled,
+                request.CorrelationId, sent ? "agent.request.outcome_unknown" : "agent.request.cancelled");
         }
-        catch (OperationCanceledException) when (IsDisposing)
+        catch (Exception exception) when (exception is IOException or TimeoutException or JsonException or NotSupportedException)
         {
-            await DisposeStreamAsync();
-            if (transportStarted && request is (
-                    PrepareAgentRealOperationRequest
-                    or AcceptAgentRealOperationRequest
-                    or StopAgentRealOperationFollowingStepsRequest))
-            {
-                return ApplicationResult<AgentResponse>.FromStatus(
-                    ApplicationStatus.OutcomeUnknown,
-                    request.CorrelationId,
-                    new ApplicationMessage(
-                        "agent.request.outcome_unknown",
-                        "agent.request.outcome_unknown",
-                        string.Empty,
-                        ApplicationMessageSeverity.Warning,
-                        []));
-            }
-
-            return Failure<AgentResponse>(
-                ApplicationStatus.RequiresEnvironment,
-                request.CorrelationId,
-                "agent.request.connection_lost");
+            return Failure<AgentResponse>(sent ? ApplicationStatus.OutcomeUnknown : ApplicationStatus.RequiresEnvironment,
+                request.CorrelationId, sent ? "agent.request.outcome_unknown" : "agent.request.connection_lost");
         }
         finally
         {
-            if (requestGateAcquired)
+            if (completion is not null) ((ICollection<KeyValuePair<Guid, TaskCompletionSource<IpcEnvelope>>>)pending).Remove(new(correlation, completion));
+            if (slot) pendingSlots.Release();
+        }
+    }
+
+    private static (AgentResponseWirePayload Payload, AgentResponse? Response) DecodeControlResponse(IpcEnvelope envelope)
+    {
+        var payload = envelope.Payload.Deserialize<AgentResponseWirePayload>(JsonOptions)
+            ?? throw new InvalidDataException("WinPool Agent returned an empty response.");
+        return (payload, DeserializeResponse(payload));
+    }
+
+    private async Task ReadControlResponsesAsync(NamedPipeClientStream target, CancellationToken cancellationToken)
+    {
+        await using var bodies = new IpcPayloadTransfer(DocumentPayloadLimits.LargeParseGate, sendGate, (correlation, code) =>
+        {
+            if (pending.TryRemove(correlation, out var completion)) completion.TrySetException(new IpcPayloadBusyException(code));
+        });
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
             {
-                requestGate.Release();
+                var envelope = await bodies.ReadAsync(target, cancellationToken).ConfigureAwait(false);
+                if (envelope.MessageType != AgentControlMessageTypes.Response)
+                    throw new InvalidDataException("The Agent returned an invalid control response.");
+                if (ReferenceEquals(stream, target) && pending.TryRemove(envelope.CorrelationId, out var completion))
+                    completion.TrySetResult(envelope);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or TimeoutException or OperationCanceledException or ObjectDisposedException or JsonException or FormatException)
+        {
+            if (ReferenceEquals(stream, target))
+            {
+                foreach (var entry in pending)
+                    if (pending.TryRemove(entry.Key, out var completion)) completion.TrySetException(new IOException("The control connection closed.", exception));
+                await target.DisposeAsync().ConfigureAwait(false);
             }
         }
     }
@@ -908,38 +821,19 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         NamedPipeClientStream failedEventStream,
         CancellationToken cancellationToken)
     {
-        await requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                if (!ReferenceEquals(eventStream, failedEventStream))
-                {
-                    return;
-                }
-
-                handshake = null;
-                await failedEventStream.DisposeAsync().ConfigureAwait(false);
-                eventStream = null;
-                eventCancellation?.Dispose();
-                eventCancellation = null;
-                eventReaderTask = null;
-                if (stream is not null)
-                {
-                    await stream.DisposeAsync().ConfigureAwait(false);
-                    stream = null;
-                }
-            }
-            finally
-            {
-                connectionGate.Release();
-            }
+            if (!ReferenceEquals(eventStream, failedEventStream)) return;
+            handshake = null;
+            await failedEventStream.DisposeAsync().ConfigureAwait(false);
+            eventStream = null;
+            eventCancellation?.Dispose();
+            eventCancellation = null;
+            eventReaderTask = null;
+            await DisposeControlStreamAsync().ConfigureAwait(false);
         }
-        finally
-        {
-            requestGate.Release();
-        }
+        finally { connectionGate.Release(); }
     }
 
     private static AgentEvent? DeserializeEvent(AgentEventWirePayload payload) =>
@@ -958,6 +852,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             nameof(AgentRealStructureJobStatusEvent) => payload.Event.Deserialize<AgentRealStructureJobStatusEvent>(JsonOptions),
             nameof(AgentProcessStateEvent) =>
                 payload.Event.Deserialize<AgentProcessStateEvent>(JsonOptions),
+            nameof(PrepareAgentShutdownEvent) => payload.Event.Deserialize<PrepareAgentShutdownEvent>(JsonOptions),
+            nameof(AgentShutdownPreparationEndedEvent) => payload.Event.Deserialize<AgentShutdownPreparationEndedEvent>(JsonOptions),
             nameof(AgentShutdownEvent) =>
                 payload.Event.Deserialize<AgentShutdownEvent>(JsonOptions),
             nameof(AgentStateReseedEvent) =>
@@ -1018,6 +914,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
                 AgentControlMessageTypes.QueryRealPartitionResizeRange,
             StopAgentRealOperationFollowingStepsRequest =>
                 AgentControlMessageTypes.StopRealOperationFollowingSteps,
+            AcknowledgeAgentShutdownPreparationRequest => AgentControlMessageTypes.AcknowledgeShutdownPreparation,
             RequestAgentShutdownRequest => AgentControlMessageTypes.Shutdown,
             _ => throw new NotSupportedException(
                 $"Unsupported Agent request {request.GetType().Name}.")
@@ -1136,7 +1033,6 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private async ValueTask DisposeStreamAsync()
     {
         handshake = null;
-        lastControlTransferStartedTimestamp = -1;
         eventCancellation?.Cancel();
         if (eventStream is not null)
         {
@@ -1150,15 +1046,22 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         }
         eventCancellation?.Dispose();
         eventCancellation = null;
-        if (stream is not null)
-        {
-            await stream.DisposeAsync();
-            stream = null;
-        }
+        await DisposeControlStreamAsync().ConfigureAwait(false);
     }
 
-    private sealed class ControlConnectionIdleLeaseExpiredException : Exception
+    private async ValueTask DisposeControlStreamAsync()
     {
+        controlCancellation?.Cancel();
+        var old = stream;
+        stream = null;
+        if (old is not null) await old.DisposeAsync().ConfigureAwait(false);
+        foreach (var entry in pending)
+            if (pending.TryRemove(entry.Key, out var completion)) completion.TrySetException(new IOException("The control generation ended."));
+        if (controlReaderTask is not null)
+            await controlReaderTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        controlReaderTask = null;
+        controlCancellation?.Dispose();
+        controlCancellation = null;
     }
 
     private void ThrowIfDisposed()

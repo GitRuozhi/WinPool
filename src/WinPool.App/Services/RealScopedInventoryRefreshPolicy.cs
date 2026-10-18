@@ -1,4 +1,3 @@
-using System.Text.Json;
 using WinPool.Application;
 
 namespace WinPool.App.Services;
@@ -35,10 +34,16 @@ public static class RealScopedInventoryRefreshPolicy
             || current.Scope.Generation != returned.Scope.Generation
             || current.StartedAt != returned.StartedAt || current.CompletedAt != returned.CompletedAt
             || currentFacts.InventoryCapturedAt != responseFacts.InventoryCapturedAt
-            || active.InventoryVersion != response.InventoryVersion)
+            || currentFacts.InventoryVersion != responseFacts.InventoryVersion
+            || currentFacts.ObservationId == Guid.Empty
+            || currentFacts.ObservationId != responseFacts.ObservationId
+            || currentFacts.Revision != responseFacts.Revision
+            || currentFacts.IsMerged != responseFacts.IsMerged)
             return false;
 
-        // A projection fingerprint alone does not cover all source evidence or retained-cache metadata.
-        return JsonSerializer.Serialize(currentFacts) == JsonSerializer.Serialize(responseFacts);
+        // Both deliveries came through the validated Agent document boundary.
+        // The observation owner identifies the complete facts, including source
+        // evidence and retained-cache metadata, without re-encoding the body.
+        return true;
     }
 }

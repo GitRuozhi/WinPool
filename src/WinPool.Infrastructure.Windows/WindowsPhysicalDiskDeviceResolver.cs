@@ -1,5 +1,5 @@
-using System.Management;
-using System.Runtime.InteropServices;
+
+
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -17,34 +17,15 @@ public sealed class WindowsPhysicalDiskDeviceResolver : IPhysicalDiskDeviceResol
 {
     public string? ResolvePnpDeviceId(int diskNumber)
     {
-        if (diskNumber < 0)
-        {
-            return null;
-        }
-
+        if (diskNumber < 0) return null;
         try
         {
-            using var searcher = new ManagementObjectSearcher(
-                "root\\CIMV2",
-                $"SELECT PNPDeviceID FROM Win32_DiskDrive WHERE Index = {diskNumber}");
-            using var results = searcher.Get();
-            foreach (ManagementBaseObject result in results)
-            {
-                var deviceId = result["PNPDeviceID"]?.ToString()?.Trim();
-                if (!string.IsNullOrWhiteSpace(deviceId))
-                {
-                    return deviceId;
-                }
-            }
+            var json = WindowsPowerShellHost.Shared.QueryAsync(WindowsPowerShellQuery.PhysicalDevice,
+                new { DiskNumber = diskNumber }, CancellationToken.None).GetAwaiter().GetResult();
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return document.RootElement.GetProperty("DeviceId").GetString()?.Trim();
         }
-        catch (Exception exception) when (
-            exception is ManagementException
-                or COMException
-                or UnauthorizedAccessException
-                or InvalidOperationException)
-        {
-        }
-
-        return null;
+        catch (Exception error) when (error is InvalidOperationException or TimeoutException or IOException or System.Text.Json.JsonException)
+        { return null; }
     }
 }

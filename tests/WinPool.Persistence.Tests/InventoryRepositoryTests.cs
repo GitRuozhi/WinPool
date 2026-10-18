@@ -8,125 +8,27 @@ namespace WinPool.Persistence.Tests;
 public sealed class InventoryRepositoryTests
 {
     [Fact]
-    public async Task SnapshotRoundTripPreservesIdsPropertiesAndDiagnostics()
+    public async Task LatestDocumentAndSystemIdentityCommitTogetherWithoutHistoricalCopies()
     {
         await using var database = await InventoryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var repository = new InventorySnapshotRepository(database.Store, lease);
-        var snapshot = CreateSnapshot(
-            "version-a",
-            DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000));
-
-        var saved = await repository.SaveAsync(
-            snapshot,
-            PersistedSystemKind.Local,
-            "Test computer");
-        var loaded = await new InventorySnapshotRepository(database.Store)
-            .GetAsync(saved.SnapshotId);
-
-        Assert.NotNull(loaded);
-        Assert.Equal(snapshot.InventoryVersion, loaded.Snapshot.InventoryVersion);
-        Assert.Contains(loaded.Snapshot.Objects, item => item.Id.ProviderKey == "RAW-SYSTEM-ID"
-            && item.Properties["serialNumber"] == "SECRET-SERIAL");
-        Assert.Contains(loaded.Snapshot.Objects, item => item.Id.ProviderKey == "RAW-VOLUME-ID"
-            && item.Properties["volumeGuid"] == "SECRET-GUID");
-        Assert.Contains(loaded.Snapshot.IdentityDiagnostics, item => item.DiagnosticText == "SECRET-DIAGNOSTIC");
-        var relationship = Assert.Single(loaded.Snapshot.Relationships!);
-        Assert.Contains(
-            loaded.Snapshot.Objects,
-            item => item.Id == relationship.FromObjectId);
-        Assert.Contains(
-            loaded.Snapshot.Objects,
-            item => item.Id == relationship.ToObjectId);
-
+        var systemId = SystemId.New();
+        var payload = new LocalInventoryDocumentPayload("local:test", 3, "Test",
+            "{\"kind\":\"local\"}", new string('a',64), DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000));
+        var snapshotId = Guid.NewGuid();
+        var repository = new LocalInventoryDocumentRepository(database.Store, lease);
+        await repository.SaveAsync(snapshotId, payload, systemId, "Test", "canonical-binding");
+        var loaded = await repository.LoadAsync();
+        Assert.Equal(snapshotId, loaded!.SnapshotId);
+        Assert.Equal(payload, loaded.Document);
+        Assert.Equal(payload, await new ReadOnlyLocalInventoryReader(database.Store.DatabasePath).LoadAsync());
         await using var connection = await database.Store.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT sanitized_json
-            FROM inventory_snapshots
-            WHERE snapshot_id = $snapshot;
-            """;
-        command.Parameters.AddWithValue(
-            "$snapshot",
-            saved.SnapshotId.ToString("N"));
-        var databaseText = Assert.IsType<string>(
-            await command.ExecuteScalarAsync());
-        Assert.Contains("RAW-SYSTEM-ID", databaseText, StringComparison.Ordinal);
-        Assert.Contains("RAW-VOLUME-ID", databaseText, StringComparison.Ordinal);
-        Assert.Contains("SECRET-SERIAL", databaseText, StringComparison.Ordinal);
-        Assert.Contains("SECRET-DIAGNOSTIC", databaseText, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task SnapshotListUsesStableNewestFirstPaging()
-    {
-        await using var database = await InventoryDatabase.CreateAsync();
-        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var writer = new InventorySnapshotRepository(database.Store, lease);
-        var systemId = SystemId.New();
-        var first = CreateSnapshot(
-            "version-1",
-            DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000),
-            systemId);
-        var second = CreateSnapshot(
-            "version-2",
-            first.CapturedAtUtc.AddMinutes(1),
-            systemId);
-        await writer.SaveAsync(first, PersistedSystemKind.Local, "Test");
-        await writer.SaveAsync(second, PersistedSystemKind.Local, "Test");
-
-        var reader = new InventorySnapshotRepository(database.Store);
-        var page = await reader.ListAsync(systemId, 1);
-        var older = await reader.ListAsync(
-            systemId,
-            5,
-            page.Single().Snapshot.CapturedAtUtc);
-
-        Assert.Equal("version-2", page.Single().Snapshot.InventoryVersion);
-        Assert.Equal("version-1", older.Single().Snapshot.InventoryVersion);
-    }
-
-    [Fact]
-    public async Task ReadOnlyInventoryRepositoriesCannotWrite()
-    {
-        await using var database = await InventoryDatabase.CreateAsync();
-        var snapshot = CreateSnapshot("version", DateTimeOffset.UtcNow);
-
-        await Assert.ThrowsAsync<AgentWriteOwnershipException>(
-            () => new InventorySnapshotRepository(database.Store).SaveAsync(
-                snapshot,
-                PersistedSystemKind.Local,
-                "Test"));
-    }
-
-    [Fact]
-    public async Task LatestManageDocumentIsBoundToItsInventorySnapshot()
-    {
-        await using var database = await InventoryDatabase.CreateAsync();
-        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var snapshot = await new InventorySnapshotRepository(database.Store, lease)
-            .SaveAsync(
-                CreateSnapshot("manage", DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000)),
-                PersistedSystemKind.Local,
-                "Test");
-        var payload = new LocalInventoryDocumentPayload(
-            "local:test",
-            2,
-            "Test",
-            "{\"kind\":\"local\"}",
-            new string('a', 64),
-            DateTimeOffset.FromUnixTimeMilliseconds(1_725_000_000_000));
-        var repository = new LocalInventoryDocumentRepository(database.Store, lease);
-
-        await repository.SaveAsync(snapshot.SnapshotId, payload);
-        var loaded = await repository.LoadAsync();
-
-        Assert.NotNull(loaded);
-        Assert.Equal(snapshot.SnapshotId, loaded.SnapshotId);
-        Assert.Equal(payload, loaded.Document);
-        // App can read committed history while the Agent owns the database.
-        var history = await new ReadOnlyLocalInventoryReader(database.Store.DatabasePath).LoadAsync();
-        Assert.Equal(payload, history);
+        command.CommandText = "SELECT machine_binding_hash FROM systems WHERE system_id=$id;";
+        command.Parameters.AddWithValue("$id", systemId.Value.ToString("N"));
+        Assert.Equal("canonical-binding", await command.ExecuteScalarAsync());
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN ('inventory_snapshots','storage_objects','storage_relationships','inventory_comparisons');";
+        Assert.Equal(0L, await command.ExecuteScalarAsync());
     }
 
     [Fact]
@@ -139,7 +41,7 @@ public sealed class InventoryRepositoryTests
 
     [Theory]
     [InlineData(16)]
-    [InlineData(21)]
+    [InlineData(22)]
     public async Task StartupHistoryRejectsOtherSchemasWithoutChangingThem(int version)
     {
         await using var database = await InventoryDatabase.CreateAsync();
@@ -191,21 +93,12 @@ public sealed class InventoryRepositoryTests
     {
         await using var database = await InventoryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var snapshots = new InventorySnapshotRepository(database.Store, lease);
         var resolver = new LocalSystemIdentityResolver(database.Store, lease);
         var first = SystemId.New();
         var preferred = SystemId.New();
         var binding = LocalSystemIdentityResolver.CreateAuthorityBinding("LOCALHOST");
-        await snapshots.SaveAsync(
-            CreateSnapshot("first", DateTimeOffset.FromUnixTimeMilliseconds(1), first),
-            PersistedSystemKind.Local,
-            "LOCALHOST",
-            canonicalLocalSystemBinding: binding);
-        await snapshots.SaveAsync(
-            CreateSnapshot("preferred", DateTimeOffset.FromUnixTimeMilliseconds(2), preferred),
-            PersistedSystemKind.Local,
-            "LOCALHOST",
-            canonicalLocalSystemBinding: binding);
+        await SeedSystemAsync(database.Store, first, PersistedSystemKind.Local, "LOCALHOST", binding);
+        await SeedSystemAsync(database.Store, preferred, PersistedSystemKind.Local, "LOCALHOST", binding);
 
         var resolved = await resolver.ResolveAsync("LOCALHOST", preferred);
         var repeated = await resolver.ResolveAsync("LOCALHOST", preferred);
@@ -221,15 +114,10 @@ public sealed class InventoryRepositoryTests
     {
         await using var database = await InventoryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var snapshots = new InventorySnapshotRepository(database.Store, lease);
         var resolver = new LocalSystemIdentityResolver(database.Store, lease);
         var preferred = SystemId.New();
-        await snapshots.SaveAsync(
-            CreateSnapshot("preferred", DateTimeOffset.FromUnixTimeMilliseconds(1), preferred),
-            PersistedSystemKind.Local,
-            "LOCALHOST",
-            canonicalLocalSystemBinding:
-                LocalSystemIdentityResolver.CreateAuthorityBinding("LOCALHOST"));
+        await SeedSystemAsync(database.Store, preferred, PersistedSystemKind.Local, "LOCALHOST",
+            LocalSystemIdentityResolver.CreateAuthorityBinding("LOCALHOST"));
         await using (var connection = await database.Store.OpenConnectionAsync())
         {
             await using var command = connection.CreateCommand();
@@ -252,69 +140,26 @@ public sealed class InventoryRepositoryTests
     {
         await using var database = await InventoryDatabase.CreateAsync();
         await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
-        var snapshots = new InventorySnapshotRepository(database.Store, lease);
         var resolver = new LocalSystemIdentityResolver(database.Store, lease);
         var simulation = SystemId.New();
-        await snapshots.SaveAsync(
-            CreateSnapshot("simulation", DateTimeOffset.FromUnixTimeMilliseconds(1), simulation),
-            PersistedSystemKind.Simulation,
-            "Simulation");
+        await SeedSystemAsync(database.Store, simulation, PersistedSystemKind.Simulation, "Simulation", "simulation-binding");
 
         var resolved = await resolver.ResolveAsync("LOCALHOST", simulation);
 
         Assert.NotEqual(simulation, resolved.SystemId);
     }
 
-    private static InventorySnapshot CreateSnapshot(
-        string version,
-        DateTimeOffset capturedAt,
-        SystemId? existingSystemId = null)
+    private static async Task SeedSystemAsync(WinPoolSqliteStore store, SystemId systemId,
+        PersistedSystemKind kind, string name, string binding)
     {
-        var systemId = existingSystemId ?? SystemId.New();
-        var system = new StorageObjectId(
-            systemId,
-            StorageObjectKind.System,
-            "RAW-SYSTEM-ID");
-        var volume = new StorageObjectId(
-            systemId,
-            StorageObjectKind.Partition,
-            "RAW-VOLUME-ID");
-        return new(
-            systemId,
-            InventoryProviderKind.NativeWindows,
-            version,
-            new string('a', 64),
-            capturedAt,
-            [
-                new(
-                    system,
-                    null,
-                    "Computer",
-                    IdentityStability.Stable,
-                    new Dictionary<string, string?>
-                    {
-                        ["serialNumber"] = "SECRET-SERIAL",
-                        ["model"] = "Test"
-                    }),
-                new(
-                    volume,
-                    system,
-                    "C:",
-                    IdentityStability.Stable,
-                    new Dictionary<string, string?>
-                    {
-                        ["volumeGuid"] = "SECRET-GUID",
-                        ["fileSystem"] = "NTFS"
-                    })
-            ],
-            [
-                new(
-                    volume,
-                    IdentityStability.Stable,
-                    "test.identity",
-                    "SECRET-DIAGNOSTIC")
-            ],
-            [new(system, volume, "contains")]);
+        await using var connection = await store.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO systems(system_id,kind,display_name,machine_binding_hash,created_at_utc_ms) VALUES($id,$kind,$name,$binding,1);";
+        command.Parameters.AddWithValue("$id", systemId.Value.ToString("N"));
+        command.Parameters.AddWithValue("$kind", (int)kind);
+        command.Parameters.AddWithValue("$name", name);
+        command.Parameters.AddWithValue("$binding", binding);
+        await command.ExecuteNonQueryAsync();
     }
 
     private sealed class InventoryDatabase : IAsyncDisposable
@@ -342,7 +187,7 @@ public sealed class InventoryRepositoryTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            Store.DrainConnectionPool();
             if (System.IO.Directory.Exists(Directory))
             {
                 System.IO.Directory.Delete(Directory, recursive: true);

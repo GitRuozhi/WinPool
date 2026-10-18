@@ -25,9 +25,9 @@ public sealed class AgentInventoryCoordinatorTests
         await harness.coordinator.PublishFreshAsync(raw, null);
         var updated = Assert.Single(harness.Events.OfType<AgentInventoryUpdatedEvent>());
         Assert.True(updated.IsAutomatic);
-        var published = LocalInventoryDocumentCodec.Decode(updated.Document);
+        var published = await harness.LoadAsync();
         AssertMembership(published, ["new"]);
-        Assert.Equal(updated.Document, await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync());
+        Assert.Equal(updated.Document.Sha256, (await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync())!.Sha256);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public sealed class AgentInventoryCoordinatorTests
         harness.provider.ScopedCapture = current => Task.FromResult(Scoped(current, 1, current.Generation));
         var previous = await harness.coordinator.CaptureManageScopedAsync(previousScope, CorrelationId.New(), CancellationToken.None);
         Assert.Equal(ApplicationStatus.Succeeded, previous.Status);
-        var savedPrevious = LocalInventoryDocumentCodec.Decode(harness.Events.OfType<AgentInventoryUpdatedEvent>().Last().Document);
+        var savedPrevious = await harness.LoadAsync();
         var previousGeneration = savedPrevious.SourceFacts!.ScopedCollection!.Scope.Generation;
         Assert.True(previousGeneration > 0);
 
@@ -64,7 +64,7 @@ public sealed class AgentInventoryCoordinatorTests
         await harness.coordinator.PublishFreshAsync(raw, currentScope);
 
         var updated = Assert.Single(harness.Events.OfType<AgentInventoryUpdatedEvent>());
-        var saved = LocalInventoryDocumentCodec.Decode(updated.Document);
+        var saved = await harness.LoadAsync();
         var savedScope = saved.SourceFacts!.ScopedCollection!.Scope;
         Assert.Equal(currentScope.OperationId, savedScope.OperationId);
         Assert.Equal(currentScope.StepId, savedScope.StepId);
@@ -73,7 +73,7 @@ public sealed class AgentInventoryCoordinatorTests
         Assert.Equal(savedScope.Generation, latest.CaptureGeneration);
         Assert.Equal(savedScope.Generation, latest.Coverage!.Generation);
         Assert.Equal(1, harness.provider.ScopedCalls);
-        Assert.Equal(updated.Document, await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync());
+        Assert.Equal(updated.Document.Sha256, (await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync())!.Sha256);
         Assert.Equal(0, raw.SourceFacts!.ScopedCollection!.Scope.Generation);
         Assert.Equal(77, Assert.Single(raw.SourceFacts.Sources).CaptureGeneration);
         Assert.Equal(unchanged, WinPoolFactsCodec.Encode(raw.SourceFacts));
@@ -122,7 +122,7 @@ public sealed class AgentInventoryCoordinatorTests
         var result = await scopedTask;
         Assert.Equal(ApplicationStatus.Succeeded, result.Status);
         Assert.Equal(1, harness.provider.ScopedCalls);
-        var saved = LocalInventoryDocumentCodec.Decode(harness.Events.OfType<AgentInventoryUpdatedEvent>().Last().Document);
+        var saved = await harness.LoadAsync();
         Assert.Equal(new[] { "a", "b" }, saved.SourceFacts!.Objects.Select(x => x.Id).Order(StringComparer.Ordinal));
         Assert.True(saved.SourceFacts.IsMerged);
         Assert.True(saved.SourceFacts.ScopedCollection!.Complete);
@@ -148,8 +148,8 @@ public sealed class AgentInventoryCoordinatorTests
             e => Assert.True(Assert.IsType<AgentInventoryUpdatedEvent>(e).IsAutomatic));
         var reports = harness.Events.OfType<AgentInventoryUpdatedEvent>().ToArray();
         Assert.Equal(new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware }, reports.Select(x => x.Purpose));
-        Assert.Equal(reports[1].Document, (await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync()));
-        AssertMembership(LocalInventoryDocumentCodec.Decode(reports[1].Document), ["ethernet"]);
+        Assert.Equal(reports[1].Document.Sha256, (await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync())!.Sha256);
+        AssertMembership(await harness.LoadAsync(), ["ethernet"]);
 
         // Manual commands still capture and publish after the one-time startup sequence.
         await harness.CaptureAsync(NetworkCapture(2, ["ethernet", "wifi"]), CollectionPurpose.Storage);
@@ -224,7 +224,7 @@ public sealed class AgentInventoryCoordinatorTests
         await harness.coordinator.CaptureStartupAsync(CancellationToken.None);
         var saved = Assert.IsType<AgentInventoryUpdatedEvent>(harness.Events[1]);
         Assert.Equal(CollectionPurpose.Hardware, Assert.IsType<AgentInventoryFailedEvent>(harness.Events[3]).Purpose);
-        Assert.Equal(saved.Document, await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync());
+        Assert.Equal(saved.Document.Sha256, (await new ReadOnlyLocalInventoryReader(harness.databasePath).LoadAsync())!.Sha256);
     }
 
     [Theory]
@@ -448,7 +448,7 @@ public sealed class AgentInventoryCoordinatorTests
             await store.InitializeAsync();
             lease = AgentWriteOwnerLease.Acquire(store, "inventory-regression");
             var localDocument = new LocalInventoryDocumentRepository(store, lease);
-            coordinator = new(provider, new InventorySnapshotRepository(store, lease), localDocument,
+            coordinator = new(provider, localDocument,
                 new AgentLocalSystemIdentity(localDocument, new LocalSystemIdentityResolver(store, lease)),
                 new UnusedDeviceResolver(), Events.Add);
         }
@@ -462,17 +462,15 @@ public sealed class AgentInventoryCoordinatorTests
             Assert.Equal(ApplicationStatus.Succeeded, result.Status);
             Assert.Null(provider.Next);
             var response = Assert.IsType<ManageInventoryCaptureResponse>(result.Value);
-            var payload = Events.OfType<AgentInventoryUpdatedEvent>().Last().Document;
+            var payload = (await new LocalInventoryDocumentRepository(store, lease).LoadAsync())!.Document;
             Assert.Equal(payload.DocumentId, response.DocumentId);
             Assert.Equal(payload.Sha256, response.Revision);
             Assert.True(response.Generation > 0);
             var captured = LocalInventoryDocumentCodec.Decode(payload);
             var loaded = await LoadAsync();
             Assert.Equal(WinPoolFactsCodec.Encode(captured.SourceFacts!), WinPoolFactsCodec.Encode(loaded.SourceFacts!));
-            var snapshot = await new InventorySnapshotRepository(store).GetAsync(response.SnapshotId);
-            Assert.NotNull(snapshot);
-            Assert.Equal(captured.SystemId, snapshot.Snapshot.SystemId);
-            Assert.Equal(captured.InventoryVersion, snapshot.Snapshot.InventoryVersion);
+            var persisted = await new LocalInventoryDocumentRepository(store, lease).LoadAsync();
+            Assert.Equal(response.SnapshotId, persisted!.SnapshotId);
             return loaded;
         }
 
@@ -483,7 +481,7 @@ public sealed class AgentInventoryCoordinatorTests
             return await LoadAsync();
         }
 
-        private async Task<StorageSystemDocument> LoadAsync()
+        public async Task<StorageSystemDocument> LoadAsync()
         {
             var result = await coordinator.LoadManageAsync(new(CorrelationId.New()), CancellationToken.None);
             Assert.Equal(ApplicationStatus.Succeeded, result.Status);

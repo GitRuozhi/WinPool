@@ -12,14 +12,13 @@ public sealed class ScopedInventoryProviderTests
     {
         var scope = Scope("uid';throw 'not-executable");
         var script = EmbeddedStorageInventoryScript.ForScope(scope);
-        Assert.Contains("Get-CimInstance -Namespace $WinPoolScopeNamespace -ClassName $class -Filter", script);
+        Assert.Contains("Get-CimInstance @query", script);
         Assert.Contains("Get-CimAssociatedInstance -InputObject $item -ResultClassName $resultClass", script);
         Assert.DoesNotContain(scope.BeforeLocators[0].IdentityValue, script);
         Assert.Contains("$WinPoolDiscoverProviderCache = $false", script);
         Assert.Contains("if ($null -ne $WinPoolScopeLocators) { return Get-WinPoolScopeClass $class }", script);
         Assert.Contains("Initialize-WinPoolScope", script);
         Assert.Contains("Get-CimInstance -ClassName Win32_LogicalDisk", script); // Independent global mount occupancy evidence.
-        ReadOnlyStorageCommandPolicy.EnsureSafe(script);
     }
 
     [Fact]

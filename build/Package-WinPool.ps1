@@ -17,11 +17,12 @@ $minor = [int]$props.SelectSingleNode('/Project/PropertyGroup/WinPoolVersionMino
 $iteration = [int]$props.SelectSingleNode('/Project/PropertyGroup/WinPoolVersionIteration').InnerText
 $version = 'V{0}.{1}{2}' -f $major, $minor, $iteration
 $fileVersion = '{0}.{1}.{2}.0' -f $major, $minor, $iteration
-$baseline = (& git -C $repository rev-parse --verify HEAD).Trim()
-if ($LASTEXITCODE -ne 0) { throw 'The source Git baseline could not be read.' }
-$changes = @(& git -C $repository status --porcelain=v1 --untracked-files=normal)
-if ($LASTEXITCODE -ne 0) { throw 'The source Git status could not be read.' }
-$sourceState = if ($changes.Count -gt 0) { 'dirty / 有未提交变更' } else { 'clean / 无未提交变更' }
+$identityPath = Join-Path $repository 'artifacts/build/runtime-Release.identity.json'
+if (-not (Test-Path -LiteralPath $identityPath -PathType Leaf)) { throw 'The runtime has no build-time identity; build it before packaging.' }
+$buildIdentity = Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+$baseline = [string]$buildIdentity.buildSha
+if ($baseline -notmatch '^[0-9a-f]{40}$') { throw 'The build-time source identity is invalid.' }
+$sourceState = [string]$buildIdentity.controlledInputState
 
 function Get-RuntimeFiles([string]$Root, [switch]$AllowDevelopmentData) {
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw "Runtime tree missing: $Root" }
@@ -70,8 +71,12 @@ foreach ($name in @('App', 'Agent')) {
 foreach ($relative in @('WinPool.App.pri', 'App.xbf', 'MainWindow.xbf', 'Assets/CAppIcon.ico')) {
     if (-not $appFiles.ContainsKey($relative)) { throw "Required App resource missing: $relative" }
 }
-foreach ($relative in @('Tools/7zip/7za.exe', 'Tools/7zip/License.txt', 'Tools/7zip/NOTICE.txt')) {
+foreach ($relative in @('Tools/7zip/7za.exe', 'Tools/7zip/License.txt', 'Tools/7zip/NOTICE.txt', 'Tools/7zip/LGPL-2.1.txt')) {
     if (-not $agentFiles.ContainsKey($relative)) { throw "Required bundled 7-Zip file missing: $relative" }
+}
+if (-not $appFiles.ContainsKey('Tools/Licenses/README.md') -or
+    -not $agentFiles.ContainsKey('Tools/Licenses/README.md')) {
+    throw 'Bundled runtime license notices are missing.'
 }
 
 # Verify the complete runtime union against the already validated standard tree.
@@ -89,6 +94,10 @@ foreach ($map in @($appFiles, $agentFiles)) {
 if ($expectedHashes.ContainsKey('TESTING.md')) { throw 'Input runtime already contains the package testing-notes path.' }
 if ($expectedHashes.Count -ne $standardFiles.Count) { throw 'Runtime inputs differ from the validated standard tree file set.' }
 foreach ($relative in $expectedHashes.Keys) {
+    if (-not $buildIdentity.runtimeFiles.Contains($relative) -or
+        $buildIdentity.runtimeFiles[$relative] -ne $expectedHashes[$relative]) {
+        throw "Runtime differs from its build-time identity: $relative"
+    }
     if (-not $standardFiles.ContainsKey($relative) -or
         (Get-FileHash -LiteralPath $standardFiles[$relative] -Algorithm SHA256).Hash -ne $expectedHashes[$relative]) {
         throw "Runtime input differs from the validated standard tree: $relative"
@@ -111,6 +120,10 @@ foreach ($relative in $expectedHashes.Keys) {
     }
 }
 
+$signatureSummary = @('App', 'Agent') | ForEach-Object {
+    $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $packageRoot "WinPool.$_.exe")
+    "WinPool.$_.exe=$($signature.Status)"
+}
 $notes = @"
 # WinPool $version 测试候选 / Test candidate
 
@@ -119,9 +132,16 @@ $notes = @"
 - 源码状态 / Source state: $sourceState
 - 打包时间 / Packaged at: $([DateTime]::UtcNow.ToString('u'))
 - 开发机已测范围 / Developer-machine tested scope: $TestedScope
+- EXE 签名状态 / Executable signature status: $($signatureSummary -join '; ')
 
 解压整个目录并运行 WinPool.App.exe。App 与 Agent 必须配套。关闭主窗口后 Agent 仍在托盘；从托盘退出 WinPool，再替换程序文件。
 Extract the complete folder and run WinPool.App.exe. Keep App and Agent together. Closing the window leaves the Agent in the tray; exit WinPool from the tray before replacing program files.
+
+产品使用 Windows 自带的 Windows PowerShell 5.1 存储宿主，不要求安装 PowerShell 7 或开发 SDK。.NET、WindowsDesktop 和 Windows App SDK 运行资产已随包提供。Windows 10 22H2、Windows 11 24H2/25H2 是兼容验证目标；本包实测范围以本页登记为准，外部环境由开发者另行提供结果。.NET 10 上游支持列表未列 Windows 10 Pro 22H2，项目兼容目标与上游支持须分别理解。
+Storage uses the system Windows PowerShell 5.1 host; PowerShell 7 and development SDKs are unnecessary. .NET, WindowsDesktop and Windows App SDK runtime assets are bundled. Windows 10 22H2 and Windows 11 24H2/25H2 are compatibility targets; this page records the actual tested scope, with external results supplied separately. Windows 10 Pro 22H2 is not listed in the upstream .NET 10 support matrix.
+
+通常以普通权限启动；执行真实存储修改时使用产品的提权交接与确认流程。取消UAC不进入真实写入；不要为普通查看一律以管理员运行。
+Start with ordinary user privileges. Use the product elevation handoff and confirmation flow for real storage changes. Cancelling UAC does not enter the real write flow.
 
 默认数据为 %LocalAppData%\WinPool；设置中可显式选择程序旁可写的 Data。程序包不含已有开发数据。数据位置指针为 %LocalAppData%\WinPool.storage-location.json。
 Data defaults to %LocalAppData%\WinPool; Settings can explicitly select a writable Data folder beside the program. Existing developer data is absent from this package. The location pointer is %LocalAppData%\WinPool.storage-location.json.
@@ -129,17 +149,29 @@ Data defaults to %LocalAppData%\WinPool; Settings can explicitly select a writab
 可查看拓扑、编辑模拟系统、导入/导出 JSON、监控及执行产品已支持的真实存储操作。模拟编辑不写真实磁盘；真实编辑默认关闭，按准确目标确认；Unknown 结果阻止后续写入，不自动重放。
 Available areas include topology, simulation editing, JSON import/export, monitoring, and supported real storage operations. Simulation edits do not write disks. Real editing defaults off and requires target confirmation; an unknown outcome blocks further writes without replay.
 
+Unknown时使用只读重查确认结果；Agent重启不续写已发请求。结构任务中止后须重新确认剩余目标，才可继续执行。新建MAX采用整数GiB搜索并保留已验证成功值，容量拒绝须证明目标无变化；不以provider报错或原生MAX作为成功依据。
+Use read-only recheck for an unknown outcome; restarting the Agent never replays an issued request. Confirm remaining structure goals again after an interrupted job. Creation MAX searches in integer GiB and retains verified successful sizes; capacity rejection requires proof that the target was unchanged.
+
+模拟编辑在合法 Apply/Enter 后立即显示本地候选，后台合并保存；保存中、失败和冲突均有状态。保存失败保留本地内容；退出或提权交接须先完成保存或明确处理未保存内容。完整可导入 JSON envelope 的规范 UTF-8 编码上限为 64 MiB，单个原子编辑 intent 独立限 64 MiB；限制按编码字节计，不是内存上限。
+Valid Apply/Enter actions show a local simulation candidate and schedule a merged background save. Pending, failed and conflicting saves are reported; failures retain local content. Exit and elevation handoff require saving or explicitly resolving unsaved content. A complete importable JSON envelope has a 64 MiB canonical UTF-8 limit; an atomic edit intent has a separate 64 MiB limit. These are encoded-byte limits, not memory limits.
+
+尚未Apply／Enter的输入仍为草稿，不表示已保存。程序异常终止时，不保证恢复未保存的内存草稿；正常退出时按保存状态提示处理。
+Input not completed with Apply/Enter remains a draft. Unsaved in-memory drafts are not guaranteed to survive a crash; resolve the reported save state during normal exit.
+
 当前限制：没有安装包或 Store 发布；Windows/provider 能力决定真实操作支持；不支持真实 MBR→GPT、已有 VD/层扩展到 MAX、直接池成员迁移；CSV 只导出当前活动监控库，没有历史浏览器。
 Current limits: no installer or Store release; real operations depend on Windows/provider capabilities. Real MBR-to-GPT conversion, expanding an existing VD/tier to MAX, and direct pool-member migration are unsupported. CSV exports the current monitoring database; there is no history browser.
 
 外部建议：核对不同 Windows x64 环境的启动/刷新/退出、模拟草稿/提交/导入导出、20 Hz 监控及断连重连。SSD/SCM、多成员、冗余、多层硬件和长时运行/DPI矩阵尚需专门覆盖；本包不代表这些组合均已通过。
 Suggested external checks: startup/refresh/exit on different Windows x64 environments, simulation drafts/commit/import/export, and 20 Hz monitoring with reconnect. SSD/SCM, multiple members, redundancy, multiple hardware tiers, long runs, and DPI combinations need dedicated coverage.
 
-反馈请附版本、Windows/设备环境、复现步骤、预期/实际结果和相关错误；硬件报告保留原值，分享前确认内容范围。
-Feedback: include version, Windows/device environment, reproduction steps, expected/actual results, and relevant errors. Hardware reports retain original field values; review the content before sharing.
+反馈入口：https://github.com/GitRuozhi/WinPool/issues 。请附版本及 ZIP SHA-256、Windows/设备环境、复现步骤、预期/实际结果、错误码和自愿提供的相关日志；硬件报告保留原值，分享前确认内容范围。
+Feedback: https://github.com/GitRuozhi/WinPool/issues . Include version and ZIP SHA-256, Windows/device environment, reproduction steps, expected/actual results, error codes and any logs you choose to share. Hardware reports retain original values; review the content before sharing.
 
-WinPool 自有代码保留所有权利；随附 7-Zip 的许可证与来源说明见 Tools/7zip/License.txt 和 NOTICE.txt。
-All rights are reserved for WinPool's own code. Bundled 7-Zip licensing and source notices are in Tools/7zip/License.txt and NOTICE.txt.
+签名状态见本页顶部；NotSigned 表示未签名，系统可能显示未知发布者或来源提示，不需要关闭系统防护。
+The signature status is recorded above. NotSigned means unsigned; Windows may show publisher or origin prompts. Disabling system protection is unnecessary.
+
+WinPool 自有代码保留所有权利。随包运行库的许可／notice 及来源见 Tools/Licenses/README.md；7-Zip 单独见 Tools/7zip/License.txt 和 NOTICE.txt。
+All rights are reserved for WinPool's own code. Runtime licenses, notices and sources are indexed in Tools/Licenses/README.md; 7-Zip is covered separately in Tools/7zip/License.txt and NOTICE.txt.
 "@
 [IO.File]::WriteAllText((Join-Path $packageRoot 'TESTING.md'), $notes + "`n", [Text.UTF8Encoding]::new($false))
 $zipPath = Join-Path $batchRoot "$packageName.zip"

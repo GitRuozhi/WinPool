@@ -52,6 +52,11 @@ public sealed partial class MainWindow : Window
     private bool _requestingElevation;
     private bool _closingAfterAgentShutdown;
     private bool _closePreparationStarted;
+    private bool _closeNegotiating;
+    private bool _agentShutdownPrepared;
+    private Guid? _agentPreparationAttempt;
+    private readonly AppShutdownPreparationObserver _shutdownPreparationObserver;
+
     private bool _allowWindowClose;
     private bool _windowClosed;
     private bool _showingNotificationMessage;
@@ -212,6 +217,42 @@ public sealed partial class MainWindow : Window
         _agentPreferencesSynchronizer.Start();
         _agentInventorySynchronizer = new AgentInventorySynchronizer(ViewModel, agentConnection, DispatcherQueue);
         _monitorAlertObserver = new MonitorAlertObserver(ViewModel, DispatcherQueue);
+        using var appProcess = System.Diagnostics.Process.GetCurrentProcess();
+        _shutdownPreparationObserver = new AppShutdownPreparationObserver(agentConnection, Environment.ProcessId,
+            appProcess.StartTime.ToUniversalTime(), (request, token) => OnUiAsync(async () =>
+            {
+                token.ThrowIfCancellationRequested();
+                if (_windowClosed || _closePreparationStarted) return false;
+                _agentPreparationAttempt = request.ShutdownAttemptId;
+                var prepared = await PrepareSimulationForLifecycleAsync(token);
+                if (prepared) await SaveWorkspaceBeforeAgentShutdownAsync(token);
+                token.ThrowIfCancellationRequested();
+                if (_agentPreparationAttempt != request.ShutdownAttemptId || _closePreparationStarted || _windowClosed) return false;
+                _agentShutdownPrepared = prepared;
+                return prepared;
+            }), completed => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_agentPreparationAttempt != completed.ShutdownAttemptId) return;
+                _agentPreparationAttempt = null;
+                if (!completed.Proceeding) { _agentShutdownPrepared = false; ResumeSimulationEditing(); }
+            }));
+        _shutdownPreparationObserver.Start();
+        ViewModel.SimulationSaveStateChanged += _ => RefreshSimulationSaveStatus();
+        ViewModel.ConfirmLocalDraftExportAsync = async (document, error) =>
+        {
+            var zh = ViewModel.Localization.IsChinese;
+            var dialog = new ContentDialog
+            {
+                Title = zh ? "耐久保存未完成" : "The durable save did not complete",
+                Content = error.Message + (zh ? "\n是否导出当前本地草稿副本？这不会把草稿标记为已保存。" : "\nExport the current local draft copy? This will not mark it as saved."),
+                PrimaryButtonText = zh ? "导出本地草稿" : "Export local draft",
+                CloseButtonText = zh ? "取消" : "Cancel", DefaultButton = ContentDialogButton.Close,
+                RequestedTheme = RootGrid.RequestedTheme
+            };
+            return await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot) == ContentDialogResult.Primary;
+        };
+        RefreshSimulationSaveStatus();
+
     }
 
     private async void RootGrid_Loaded(object sender, RoutedEventArgs e)
@@ -574,11 +615,29 @@ public sealed partial class MainWindow : Window
     /// </summary>
     internal void RequestClose(bool agentAlreadyStopped = false, bool lastActivePageAlreadySaved = false)
     {
-        if (_closePreparationStarted || _allowWindowClose || _windowClosed)
+        if (_closeNegotiating || _closePreparationStarted || _allowWindowClose || _windowClosed
+            || _agentPreparationAttempt is not null && !_agentShutdownPrepared) return;
+        _closeNegotiating = true;
+        _ = NegotiateCloseAsync();
+        async Task NegotiateCloseAsync()
         {
-            return;
+            try
+            {
+                if (!_agentShutdownPrepared && !await PrepareSimulationForLifecycleAsync(CancellationToken.None)) return;
+                BeginPreparedClose(agentAlreadyStopped, lastActivePageAlreadySaved);
+            }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or OperationCanceledException)
+            { LogClosePreparationFailure(exception); }
+            finally
+            {
+                _closeNegotiating = false;
+                if (!_closePreparationStarted) ResumeSimulationEditing();
+            }
         }
+    }
 
+    private void BeginPreparedClose(bool agentAlreadyStopped, bool lastActivePageAlreadySaved)
+    {
         _closingAfterAgentShutdown |= agentAlreadyStopped;
         _closePreparationStarted = true;
         RootGrid.IsHitTestVisible = false;
@@ -603,8 +662,129 @@ public sealed partial class MainWindow : Window
         _ = PrepareCloseAndCloseAsync(monitorObserverStop, lastActivePageAlreadySaved);
     }
 
+    private Task<bool> OnUiAsync(Func<Task<bool>> action)
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(async () =>
+        {
+            try { completion.TrySetResult(await action()); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+        })) completion.TrySetResult(false);
+        return completion.Task;
+    }
+
+    private void ResumeSimulationEditing()
+    {
+        if (_closePreparationStarted || _windowClosed) return;
+        ViewModel.SetSimulationEditingEnabled(true);
+        RootFrame.IsEnabled = true;
+        ActiveSystemSelector.IsEnabled = true;
+    }
+
+    private async Task<bool> PrepareSimulationForLifecycleAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ViewModel.SetSimulationEditingEnabled(false);
+        RootFrame.IsEnabled = false;
+        ActiveSystemSelector.IsEnabled = false;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try { await ViewModel.FlushSimulationEditsAsync(cancellationToken); return true; }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException)
+            {
+                var zh = ViewModel.Localization.IsChinese;
+                var dialog = new ContentDialog
+                {
+                    Title = zh ? "模拟修改尚未保存" : "Simulation changes have not been saved",
+                    Content = exception.Message + (zh ? "\n本地内容已保留。可以重试，导出草稿副本，或明确丢弃后退出。" : "\nThe local content is retained. Retry, export a draft copy, or explicitly discard it before leaving."),
+                    PrimaryButtonText = zh ? "重试保存" : "Retry save",
+                    SecondaryButtonText = zh ? "导出／丢弃…" : "Export / discard…",
+                    CloseButtonText = zh ? "取消退出" : "Cancel",
+                    DefaultButton = ContentDialogButton.Close,
+                    RequestedTheme = RootGrid.RequestedTheme
+                };
+                using var registration = cancellationToken.Register(() => DispatcherQueue.TryEnqueue(dialog.Hide));
+                var choice = await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (choice == ContentDialogResult.Primary)
+                {
+                    try { await ViewModel.RetryAllSimulationSavesAsync(cancellationToken); }
+                    catch (Exception retryError) when (retryError is IOException or InvalidOperationException) { }
+                    continue;
+                }
+                if (choice != ContentDialogResult.Secondary) { ResumeSimulationEditing(); return false; }
+                var alternatives = new ContentDialog
+                {
+                    Title = zh ? "保留或丢弃本地草稿" : "Keep or discard the local draft",
+                    Content = zh ? "导出不会标记为已保存。丢弃会放弃未保存的本地修改，并继续退出。" : "Exporting does not mark the document as saved. Discarding abandons unsaved local changes and continues leaving.",
+                    PrimaryButtonText = zh ? "导出草稿副本" : "Export draft copies",
+                    SecondaryButtonText = zh ? "丢弃修改并继续" : "Discard and continue",
+                    CloseButtonText = zh ? "返回" : "Back",
+                    DefaultButton = ContentDialogButton.Close, RequestedTheme = RootGrid.RequestedTheme
+                };
+                using var alternateRegistration = cancellationToken.Register(() => DispatcherQueue.TryEnqueue(alternatives.Hide));
+                var alternative = await DialogCoordinator.ShowAsync(alternatives, RootGrid.XamlRoot);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (alternative == ContentDialogResult.Primary) await ViewModel.ExportUnsavedSimulationDraftsAsync(cancellationToken);
+                if (alternative == ContentDialogResult.Secondary)
+                {
+                    await ViewModel.DiscardUnsavedSimulationEditsAsync(cancellationToken);
+                    return true;
+                }
+            }
+        }
+    }
+
+    private void RefreshSimulationSaveStatus()
+    {
+        SimulationSaveStatusButton.Content = ViewModel.SimulationSaveStatus;
+        SimulationSaveStatusButton.Visibility = ViewModel.IsUsingSimulatedInventory ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void SimulationSaveStatusButton_Click(object sender, RoutedEventArgs e)
+    {
+        var state = ViewModel.ActiveSimulationSaveState;
+        if (state is null || state.IsDurable) return;
+        var zh = ViewModel.Localization.IsChinese;
+        var dialog = new ContentDialog
+        {
+            Title = ViewModel.SimulationSaveStatus, Content = state.Error ?? (zh ? "修改已保留在本地，等待后台保存。" : "Changes are retained locally while the background save finishes."),
+            PrimaryButtonText = zh ? "重试／立即保存" : "Retry / save now",
+            SecondaryButtonText = state.Phase == SimulationSavePhase.Conflict
+                ? zh ? "处理版本冲突…" : "Resolve conflict…"
+                : zh ? "导出本地草稿" : "Export local draft",
+            CloseButtonText = zh ? "保留草稿" : "Keep draft", DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = RootGrid.RequestedTheme
+        };
+        var choice = await DialogCoordinator.ShowAsync(dialog, RootGrid.XamlRoot);
+        try
+        {
+            if (choice == ContentDialogResult.Primary) await ViewModel.RetrySimulationSaveAsync(ViewModel.ActiveDocument.Id);
+            else if (choice == ContentDialogResult.Secondary && state.Phase == SimulationSavePhase.Conflict)
+            {
+                var conflict = new ContentDialog
+                {
+                    Title = zh ? "草稿与Agent版本冲突" : "The local draft conflicts with the Agent version",
+                    Content = zh ? "可以导出本地草稿副本，或明确丢弃本地草稿和未完成表单并载入Agent版本。不会自动合并。" : "Export a local draft copy, or explicitly discard the local draft and unfinished form and load the Agent version. No automatic merge is performed.",
+                    PrimaryButtonText = zh ? "导出草稿副本" : "Export draft copy",
+                    SecondaryButtonText = zh ? "丢弃并载入Agent版" : "Discard and load Agent version",
+                    CloseButtonText = zh ? "保留本地草稿" : "Keep local draft", DefaultButton = ContentDialogButton.Close,
+                    RequestedTheme = RootGrid.RequestedTheme
+                };
+                var resolution = await DialogCoordinator.ShowAsync(conflict, RootGrid.XamlRoot);
+                if (resolution == ContentDialogResult.Primary) await ViewModel.ExportLocalSimulationDraftAsync();
+                else if (resolution == ContentDialogResult.Secondary) await ViewModel.DiscardSimulationDraftAsync(state.DocumentId);
+            }
+            else if (choice == ContentDialogResult.Secondary) await ViewModel.ExportLocalSimulationDraftAsync();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        { NotificationService.PublishError("WinPool", exception.Message, "simulation", "simulation:save-retry"); }
+    }
+
     private void StopCloseTimeUiSources()
     {
+        _shutdownPreparationObserver.Dispose();
         ViewModel.StopRealOperationRecovery();
         RootGrid.Loaded -= RootGrid_Loaded;
         RootGrid.SizeChanged -= RootGrid_SizeChanged;
@@ -678,14 +858,7 @@ public sealed partial class MainWindow : Window
 
             try
             {
-                if (ViewModel.Monitoring.UsesAgent)
-                {
-                    await ViewModel.Monitoring.DetachAsync();
-                }
-                else
-                {
-                    await ViewModel.Monitoring.StopAsync();
-                }
+                await ViewModel.Monitoring.DetachAsync();
                 ViewModel.Monitoring.Dispose();
             }
             catch (Exception exception) when (
@@ -712,6 +885,7 @@ public sealed partial class MainWindow : Window
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
         _windowClosed = true;
+        _shutdownPreparationObserver.Dispose();
         _startupCancellation.Cancel();
     }
 
@@ -778,7 +952,7 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    internal bool IsCloseInProgress => _closePreparationStarted || _windowClosed;
+    internal bool IsCloseInProgress => _closeNegotiating || _closePreparationStarted || _windowClosed;
 
     internal void ActivateTarget(ApplicationStartupTarget target)
     {
@@ -1235,16 +1409,28 @@ public sealed partial class MainWindow : Window
 
     internal async Task SaveWorkspaceBeforeAgentShutdownAsync(CancellationToken cancellationToken)
     {
-        if (!_workspaceInitializationComplete)
-        {
-            return;
-        }
+        await ViewModel.FlushSimulationEditsAsync(cancellationToken);
+        if (!_workspaceInitializationComplete) return;
         if (ViewModel.CanPersistWorkspaceUiState)
         {
             await _workspaceStateService.SaveAsync(ViewModel.CaptureUiState(), cancellationToken);
         }
         await ViewModel.SetLastActivePageAsync(
             (SelectedShellItem?.Page ?? ShellPageKind.Manage).ToString(), cancellationToken);
+    }
+
+    internal async Task<bool> PrepareWorkspaceForAgentShutdownAsync(CancellationToken cancellationToken)
+    {
+        if (!await PrepareSimulationForLifecycleAsync(cancellationToken)) return false;
+        await SaveWorkspaceBeforeAgentShutdownAsync(cancellationToken);
+        return true;
+    }
+
+    internal void CancelLifecyclePreparation()
+    {
+        if (_closePreparationStarted || _windowClosed) return;
+        _agentShutdownPrepared = false;
+        ResumeSimulationEditing();
     }
 
     private async Task<bool> PersistWorkspaceForElevationHandoffAsync(
@@ -1260,6 +1446,7 @@ public sealed partial class MainWindow : Window
                 LogElevationPhase("persist_skipped_startup");
                 return true;
             }
+            if (!await PrepareSimulationForLifecycleAsync(_startupCancellation.Token)) return false;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_startupCancellation.Token);
             timeout.CancelAfter(TimeSpan.FromSeconds(12));
             if (ViewModel.CanPersistWorkspaceUiState)
@@ -1682,6 +1869,7 @@ public sealed partial class MainWindow : Window
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        RefreshSimulationSaveStatus();
         if (_closePreparationStarted || _windowClosed)
         {
             return;

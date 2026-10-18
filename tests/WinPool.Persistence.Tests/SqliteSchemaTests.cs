@@ -10,12 +10,11 @@ public sealed class SqliteSchemaTests
     private static readonly string[] RequiredTables =
     [
         "schema_info", "workspace_state", "systems",
-        "inventory_snapshots", "local_inventory_document", "storage_objects", "storage_relationships",
+        "local_inventory_document",
         "operation_plans", "operation_steps", "operation_capacity_attempts", "execution_events",
         "simulation_documents", "simulation_edit_commits", "real_structure_jobs", "real_structure_job_children",
         "monitor_sessions", "monitor_devices", "monitor_samples", "storage_health_events",
         "monitor_rollups",
-        "inventory_comparisons",
         "agent_sessions", "worker_processes"
     ];
 
@@ -48,9 +47,10 @@ public sealed class SqliteSchemaTests
     }
 
     [Fact]
-    public async Task ValidCurrentSchemaCanBeReopenedWithoutChangingItsFiles()
+    public async Task ValidCurrentSchemaReopenPreservesFilesAfterItsPoolIsClosed()
     {
         await using var database = await TemporaryDatabase.CreateAsync();
+        database.Store.DrainConnectionPool();
         var paths = new[]
         {
             database.Store.DatabasePath,
@@ -59,17 +59,20 @@ public sealed class SqliteSchemaTests
         };
         var before = paths.ToDictionary(
             path => path,
-            path => File.Exists(path) ? File.ReadAllBytes(path) : null,
+            path => File.Exists(path) ? ReadSharedBytes(path) : null,
             StringComparer.Ordinal);
 
         await database.Store.InitializeAsync();
+        // An initialized WAL store may keep empty sidecars while its physical
+        // connection remains pooled. Compare the closed-store state.
+        database.Store.DrainConnectionPool();
 
         foreach (var path in paths)
         {
             Assert.Equal(before[path] is not null, File.Exists(path));
             if (before[path] is not null)
             {
-                Assert.Equal(before[path], File.ReadAllBytes(path));
+                Assert.Equal(before[path], ReadSharedBytes(path));
             }
         }
     }
@@ -261,7 +264,7 @@ public sealed class SqliteSchemaTests
             applied_at_utc_ms INTEGER NOT NULL
         );
         INSERT INTO schema_info(singleton, schema_version, applied_at_utc_ms)
-        VALUES(1, 20, 0);
+        VALUES(1, 21, 0);
         """,
         "schema_info.checks")]
     [InlineData(
@@ -270,7 +273,7 @@ public sealed class SqliteSchemaTests
         DROP TABLE local_inventory_document;
         CREATE TABLE local_inventory_document(
             singleton INTEGER PRIMARY KEY,
-            snapshot_id TEXT NOT NULL REFERENCES inventory_snapshots(snapshot_id),
+            snapshot_id TEXT NOT NULL,
             document_id TEXT NOT NULL,
             document_schema_version INTEGER NOT NULL,
             display_name TEXT NOT NULL,
@@ -310,7 +313,7 @@ public sealed class SqliteSchemaTests
                 DROP TABLE operation_capacity_attempts;
                 UPDATE schema_info SET schema_version=18 WHERE singleton=1;
                 INSERT INTO operation_plans(operation_id,plan_hash,environment_id,risk,state,sanitized_json,created_at_utc_ms)
-                    VALUES($operation,'hash','environment',4,11,'{}',1000);
+                    VALUES($operation,'hash','environment',4,11,'{"systemId":{"value":"aaddef02-36e9-484a-bdc5-94b8be40b945"},"targets":[]}',1000);
                 INSERT INTO operation_steps(operation_id,step_id,sequence_no,state,sanitized_json,target_json,evidence_json)
                     VALUES($operation,'step',0,7,'{}','exact-old-target','original-unknown-receipt');
                 """;
@@ -347,7 +350,7 @@ public sealed class SqliteSchemaTests
                 UPDATE schema_info SET schema_version = 17 WHERE singleton = 1;
                 INSERT INTO operation_plans(operation_id, plan_hash, environment_id,
                     risk, state, sanitized_json, created_at_utc_ms)
-                VALUES($operation, $hash, 'environment', 4, 3, '{}', 1000);
+                VALUES($operation, $hash, 'environment', 4, 3, '{"systemId":{"value":"aaddef02-36e9-484a-bdc5-94b8be40b945"},"targets":[]}', 1000);
                 INSERT INTO operation_steps(operation_id, step_id, sequence_no, state, sanitized_json)
                 VALUES($operation, 'step', 0, 1, '{}');
                 INSERT INTO execution_events(operation_id, timestamp_utc_ms, kind, code, sanitized_message)
@@ -385,8 +388,8 @@ public sealed class SqliteSchemaTests
             command.CommandText = """
                 UPDATE schema_info SET schema_version=19 WHERE singleton=1;
                 INSERT INTO operation_plans(operation_id,plan_hash,environment_id,risk,state,sanitized_json,created_at_utc_ms)
-                VALUES('old-simulation','old-intent','environment',1,4,'{}',1000),
-                      ('real-unknown','real-hash','environment',4,11,'real-journal',1000);
+                VALUES('old-simulation','old-intent','environment',1,4,'{"systemId":{"value":"aaddef02-36e9-484a-bdc5-94b8be40b945"},"targets":[]}',1000),
+                      ('real-unknown','real-hash','environment',4,11,'{"systemId":{"value":"aaddef02-36e9-484a-bdc5-94b8be40b945"},"targets":[],"original":"real-journal"}',1000);
                 INSERT INTO simulation_edit_commits(operation_id,commit_id,document_id,before_sha256,after_sha256,
                     document_revision,document_schema_version,display_name,sanitized_json,updated_at_utc_ms,committed_at_utc_ms)
                 VALUES('old-simulation','original-commit','simulation:old','before','after',5,3,'Old','{}',1001,1002);
@@ -402,29 +405,73 @@ public sealed class SqliteSchemaTests
         Assert.Equal(5, receipt.AfterRevision);
         Assert.Equal("after", receipt.AfterSha256);
         await using var verify = await database.Store.OpenConnectionAsync();
-        Assert.Equal("real-journal", await ScalarTextAsync(verify, "SELECT sanitized_json FROM operation_plans WHERE operation_id='real-unknown';"));
+        Assert.Contains("real-journal", await ScalarTextAsync(verify, "SELECT sanitized_json FROM operation_plans WHERE operation_id='real-unknown';"), StringComparison.Ordinal);
         Assert.Equal(11, await ScalarInt64Async(verify, "SELECT state FROM operation_plans WHERE operation_id='real-unknown';"));
         Assert.Equal(0, await ScalarInt64Async(verify, "SELECT COUNT(*) FROM pragma_foreign_key_list('simulation_edit_commits');"));
         await database.Store.InitializeAsync();
     }
 
-    private static async Task RestoreLegacyReceiptSchemaAsync(SqliteConnection connection)
+    [Fact]
+    public async Task Schema20UpgradeKeepsLatestCaptureAndUnknownEvidenceWhileRetiringInventoryCopies()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        var capture = Guid.NewGuid().ToString("N");
+        var system = Guid.NewGuid();
+        await using (var connection = await database.Store.OpenConnectionAsync())
+        {
+            await RestoreLegacyReceiptSchemaAsync(connection, "schema20.sql", 20);
+            await using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO systems(system_id,kind,display_name,machine_binding_hash,created_at_utc_ms)
+                    VALUES($system,0,'retained','binding',1);
+                INSERT INTO inventory_snapshots(snapshot_id,system_id,inventory_version,captured_at_utc_ms,provider_kind,sanitized_json)
+                    VALUES($capture,$system,'old-version',1,0,'{"copy":"retired"}');
+                INSERT INTO local_inventory_document(singleton,snapshot_id,document_id,document_schema_version,display_name,sanitized_json,sha256,captured_at_utc_ms)
+                    VALUES(1,$capture,'local:retained',3,'retained','{"actual":"kept"}','hash',1);
+                INSERT INTO operation_plans(operation_id,plan_hash,environment_id,risk,state,sanitized_json,created_at_utc_ms)
+                    VALUES('unknown','plan','environment',4,11,$plan,1);
+                INSERT INTO operation_steps(operation_id,step_id,sequence_no,state,sanitized_json,evidence_json)
+                    VALUES('unknown','issued',0,7,'{}','{"CreatedObjectId":"vd:kept","CreatedOsDiskId":"os:kept","original":"unknown receipt"}');
+                """;
+            insert.Parameters.AddWithValue("$system", system.ToString("N"));
+            insert.Parameters.AddWithValue("$capture", capture);
+            insert.Parameters.AddWithValue("$plan", System.Text.Json.JsonSerializer.Serialize(new { systemId = new { value = system }, targets = Array.Empty<object>() }));
+            await insert.ExecuteNonQueryAsync();
+        }
+        await database.Store.InitializeAsync();
+        await database.Store.InitializeAsync(); // upgraded and new databases share the exact schema contract
+        await using var verify = await database.Store.OpenConnectionAsync();
+        Assert.Equal(capture, await ScalarTextAsync(verify, "SELECT snapshot_id FROM local_inventory_document;"));
+        Assert.Equal("{\"actual\":\"kept\"}", await ScalarTextAsync(verify, "SELECT sanitized_json FROM local_inventory_document;"));
+        Assert.Equal(0, await ScalarInt64Async(verify, "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN ('inventory_snapshots','storage_objects','storage_relationships','inventory_comparisons');"));
+        Assert.Equal(0, await ScalarInt64Async(verify, "SELECT COUNT(*) FROM pragma_foreign_key_list('local_inventory_document');"));
+        Assert.Equal(system.ToString("D"), await ScalarTextAsync(verify, "SELECT system_id FROM operation_plans;"));
+        Assert.Equal("vd:kept", await ScalarTextAsync(verify, "SELECT created_object_id FROM operation_steps;"));
+        Assert.Equal("os:kept", await ScalarTextAsync(verify, "SELECT created_os_disk_id FROM operation_steps;"));
+        Assert.Contains("unknown receipt", await ScalarTextAsync(verify, "SELECT evidence_json FROM operation_steps;"), StringComparison.Ordinal);
+        Assert.Equal(11, await ScalarInt64Async(verify, "SELECT state FROM operation_plans;"));
+    }
+
+    private static async Task RestoreLegacyReceiptSchemaAsync(SqliteConnection connection, string file = "schema19.sql", int version = 19)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            DROP TABLE real_structure_job_children;
-            DROP TABLE real_structure_jobs;
-            DROP INDEX ix_simulation_edit_commits_document_revision;
-            DROP TABLE simulation_edit_commits;
-            CREATE TABLE simulation_edit_commits(
-                operation_id TEXT PRIMARY KEY REFERENCES operation_plans(operation_id),
-                commit_id TEXT NOT NULL UNIQUE, document_id TEXT NOT NULL,
-                before_sha256 TEXT NOT NULL, after_sha256 TEXT NOT NULL, document_revision INTEGER NOT NULL,
-                document_schema_version INTEGER NOT NULL, display_name TEXT NOT NULL, sanitized_json TEXT NOT NULL,
-                updated_at_utc_ms INTEGER NOT NULL, committed_at_utc_ms INTEGER NOT NULL);
-            CREATE INDEX ix_simulation_edit_commits_document_revision ON simulation_edit_commits(document_id,document_revision DESC);
-            """;
+        var tables = new List<string>();
+        command.CommandText = "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%';";
+        await using (var reader = await command.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) tables.Add(reader.GetString(0));
+        command.CommandText = "PRAGMA foreign_keys=OFF;" + string.Join("", tables.Select(name => "DROP TABLE [" + name + "];"));
         await command.ExecuteNonQueryAsync();
+        command.CommandText = await ReadFixtureAsync(file)
+            + $"INSERT INTO schema_info(singleton,schema_version,applied_at_utc_ms) VALUES(1,{version},1000); PRAGMA foreign_keys=ON;";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<string> ReadFixtureAsync(string file)
+    {
+        await using var resource = typeof(SqliteSchemaTests).Assembly.GetManifestResourceStream(
+            "WinPool.Persistence.Tests.Fixtures." + file)!;
+        using var reader = new StreamReader(resource);
+        return await reader.ReadToEndAsync();
     }
 
     [Fact]
@@ -504,6 +551,14 @@ public sealed class SqliteSchemaTests
         Assert.DoesNotContain("SECRET", persistedDeviceId, StringComparison.Ordinal);
     }
 
+    private static byte[] ReadSharedBytes(string path)
+    {
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var copy = new MemoryStream();
+        input.CopyTo(copy);
+        return copy.ToArray();
+    }
+
     private static async Task<string> ScalarTextAsync(SqliteConnection connection, string sql)
     {
         await using var command = connection.CreateCommand();
@@ -525,10 +580,11 @@ public sealed class SqliteSchemaTests
         WinPoolSqliteStore store,
         int? expectedVersion)
     {
+        store.DrainConnectionPool();
         var paths = new[] { store.DatabasePath, store.DatabasePath + "-wal", store.DatabasePath + "-shm" };
         var before = paths.ToDictionary(
             path => path,
-            path => File.Exists(path) ? File.ReadAllBytes(path) : null,
+            path => File.Exists(path) ? ReadSharedBytes(path) : null,
             StringComparer.Ordinal);
 
         var exception = await Assert.ThrowsAsync<LegacySqliteSchemaNotSupportedException>(
@@ -541,7 +597,7 @@ public sealed class SqliteSchemaTests
             Assert.Equal(before[path] is not null, File.Exists(path));
             if (before[path] is not null)
             {
-                Assert.Equal(before[path], File.ReadAllBytes(path));
+                Assert.Equal(before[path], ReadSharedBytes(path));
             }
         }
     }
@@ -550,10 +606,11 @@ public sealed class SqliteSchemaTests
         WinPoolSqliteStore store,
         string expectedMismatch)
     {
+        store.DrainConnectionPool();
         var paths = new[] { store.DatabasePath, store.DatabasePath + "-wal", store.DatabasePath + "-shm" };
         var before = paths.ToDictionary(
             path => path,
-            path => File.Exists(path) ? File.ReadAllBytes(path) : null,
+            path => File.Exists(path) ? ReadSharedBytes(path) : null,
             StringComparer.Ordinal);
 
         var exception = await Assert.ThrowsAsync<CurrentSqliteSchemaCorruptException>(
@@ -566,7 +623,7 @@ public sealed class SqliteSchemaTests
             Assert.Equal(before[path] is not null, File.Exists(path));
             if (before[path] is not null)
             {
-                Assert.Equal(before[path], File.ReadAllBytes(path));
+                Assert.Equal(before[path], ReadSharedBytes(path));
             }
         }
     }
@@ -595,7 +652,7 @@ public sealed class SqliteSchemaTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            Store.DrainConnectionPool();
             if (System.IO.Directory.Exists(Directory))
             {
                 System.IO.Directory.Delete(Directory, recursive: true);

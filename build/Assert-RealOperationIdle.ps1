@@ -103,7 +103,7 @@ public static class WinPoolBuildSqliteProbe
                 throw new InvalidOperationException("SQLite quick_check failed.");
             long version = Scalar(database,
                 "SELECT schema_version FROM schema_info WHERE singleton = 1;");
-            if (version != 17 && version != 18 && version != 19 && version != 20)
+            if (version != 17 && version != 18 && version != 19 && version != 20 && version != 21)
                 throw new InvalidOperationException("Unsupported core schema " + version + ".");
             // An unknown result remains a product write barrier, but once the
             // runtime is stopped it must not prevent installing a repair.
@@ -131,8 +131,63 @@ public static class WinPoolBuildSqliteProbe
         }
         finally { sqlite3_close(database); }
     }
+
+    public static string[] ReadUnfinishedCallTargets(string path)
+    {
+        IntPtr database;
+        int result = sqlite3_open_v2(path, out database, 1, IntPtr.Zero);
+        if (result != 0) throw new InvalidOperationException("Cannot read durable host witnesses.");
+        try
+        {
+            var targets = new List<string>();
+            var queries = new List<string> {
+                "SELECT s.target_json FROM operation_steps s JOIN operation_plans p USING(operation_id) " +
+                "WHERE p.risk>=4 AND p.state NOT IN (4,5,6,7,10) AND s.target_json IS NOT NULL;" };
+            if (Scalar(database,"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='operation_capacity_attempts';") != 0)
+                queries.Add("SELECT a.attempt_json FROM operation_capacity_attempts a JOIN operation_plans p USING(operation_id) " +
+                    "WHERE p.risk>=4 AND p.state NOT IN (4,5,6,7,10);");
+            foreach (var sql in queries)
+            {
+                IntPtr statement;
+                if (sqlite3_prepare_v2(database,sql,-1,out statement,IntPtr.Zero) != 0)
+                    throw new InvalidOperationException(Error(database));
+                try
+                {
+                    while ((result=sqlite3_step(statement)) == 100)
+                        targets.Add(Marshal.PtrToStringUTF8(sqlite3_column_text(statement,0)) ?? "");
+                    if (result != 101) throw new InvalidOperationException(Error(database));
+                }
+                finally { sqlite3_finalize(statement); }
+            }
+            return targets.ToArray();
+        }
+        finally { sqlite3_close(database); }
+    }
 }
 '@
+}
+
+function Test-WinPoolIssuedHostAlive([string]$Database) {
+    foreach ($json in [WinPoolBuildSqliteProbe]::ReadUnfinishedCallTargets($Database)) {
+        $target = $json | ConvertFrom-Json -ErrorAction Stop
+        if ($target.PSObject.Properties['TargetEvidenceJson']) { $target = $target.TargetEvidenceJson | ConvertFrom-Json -ErrorAction Stop }
+        if (-not $target.PSObject.Properties['HostCall'] -or $null -eq $target.HostCall) { continue }
+        $witness = $target.HostCall
+        $hostProcess = $null
+        try { $hostProcess = [Diagnostics.Process]::GetProcessById([int]$witness.ProcessId) }
+        catch [ArgumentException] { continue }
+        try {
+            if ($hostProcess.HasExited) { continue }
+            $expected = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell/v1.0/powershell.exe'
+            # Newer PowerShell decodes ISO dates as DateTime. Converting that
+            # value to display text first would discard fractional seconds.
+            $expectedStart = if ($witness.StartedAtUtc -is [DateTime]) { [DateTimeOffset]::new($witness.StartedAtUtc) }
+                else { [DateTimeOffset]::Parse([string]$witness.StartedAtUtc,[Globalization.CultureInfo]::InvariantCulture) }
+            if ([IO.Path]::GetFullPath($hostProcess.MainModule.FileName) -eq [IO.Path]::GetFullPath($expected) -and
+                [Math]::Abs(($hostProcess.StartTime.ToUniversalTime() - $expectedStart.UtcDateTime).TotalMilliseconds) -lt 1) { return $true }
+        } finally { $hostProcess.Dispose() }
+    }
+    return $false
 }
 
 function Assert-WinPoolRealOperationIdle {
@@ -189,12 +244,20 @@ function Assert-WinPoolRealOperationIdle {
     }
 
     $activeRoot = if ($mode -eq 'Portable') { $portable } else { $standard }
+    $runtimePrefix = $runtime.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    $defaultStandard = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'WinPool'
+    $hasRelatedProcess = $false
+    foreach ($process in @(Get-Process -Name 'WinPool.App','WinPool.Agent' -ErrorAction SilentlyContinue)) {
+        if ($process.HasExited) { continue }
+        $image = [IO.Path]::GetFullPath($process.MainModule.FileName)
+        if ($image.StartsWith($runtimePrefix,[StringComparison]::OrdinalIgnoreCase) -or
+            ($mode -eq 'Standard' -and $standard -eq $defaultStandard)) { $hasRelatedProcess = $true }
+    }
     $database = Join-Path $activeRoot 'winpool.db'
     if (-not (Test-Path -LiteralPath $database -PathType Leaf)) {
         $hasContent = (Test-Path -LiteralPath $activeRoot) -and
             (@(Get-ChildItem -LiteralPath $activeRoot -Force -ErrorAction Stop).Count -gt 0)
-        $hasProcess = @(Get-Process -Name 'WinPool.App', 'WinPool.Agent' -ErrorAction SilentlyContinue).Count -gt 0
-        if ($pointerPaths.Count -gt 0 -or $hasContent -or $hasProcess) {
+        if ($pointerPaths.Count -gt 0 -or $hasContent -or $hasRelatedProcess) {
             throw "Active WinPool data root has no readable core database: $activeRoot"
         }
         return
@@ -203,7 +266,7 @@ function Assert-WinPoolRealOperationIdle {
         throw "Core database is a link: $database"
     }
     try {
-        $hasLiveWinPool = @(Get-Process -Name 'WinPool.App', 'WinPool.Agent' -ErrorAction SilentlyContinue).Count -gt 0
+        $hasLiveWinPool = $hasRelatedProcess -or (Test-WinPoolIssuedHostAlive $database)
         $operations = @([WinPoolBuildSqliteProbe]::ProbeUnfinishedRealOperations($database, $hasLiveWinPool))
         if ($operations.Count -gt 0) {
             $details = ($operations | ForEach-Object { "OperationId=$($_.OperationId), state=$($_.StateName)" }) -join '; '

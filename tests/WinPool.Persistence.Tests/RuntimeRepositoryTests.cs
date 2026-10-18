@@ -322,7 +322,7 @@ public sealed class RuntimeRepositoryTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            Store.DrainConnectionPool();
             if (System.IO.Directory.Exists(Directory))
             {
                 System.IO.Directory.Delete(Directory, recursive: true);

@@ -3,11 +3,9 @@
 Repairs a Low mandatory integrity label that stops built WinPool programs from starting.
 
 .DESCRIPTION
-Windows gives a new process the lower of its parent's and its image file's integrity
-level. When a workspace sandbox leaves an inheritable Low label on the project root,
-every executable built below that root starts at Low integrity, cannot write Medium
-locations such as %LOCALAPPDATA%, and is treated as untrusted content by the shell,
-which then shows "unknown publisher" and SmartScreen prompts instead of the program.
+An inheritable Low label can prevent the built program from writing Medium
+locations such as %LOCALAPPDATA%. This is separate from executable signing and
+SmartScreen reputation; repairing a label does not sign the executable.
 
 This script reports the label on the project root that contains Program\WinPool and on
 the WinPool App and Agent executables, and resets the whole tree to Medium when any of
@@ -47,10 +45,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($Path)) {
-    $Path = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
-    if (-not (Test-Path -LiteralPath (Join-Path $Path 'Program\WinPool'))) {
-        throw "Could not derive the project root from '$PSScriptRoot'. Pass -Path explicitly."
-    }
+    $Path = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 }
 $Path = [IO.Path]::GetFullPath($Path)
 if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
@@ -164,15 +159,19 @@ function Complete([int]$code) {
 
 $targets = [Collections.Generic.List[string]]::new()
 $targets.Add($Path)
-foreach ($relative in @('Program\WinPool\artifacts\Release\WinPool.App.exe',
-                        'Program\WinPool\artifacts\Release\WinPool.Agent.exe')) {
-    $candidate = Join-Path $Path $relative
+$runtime = if (Test-Path -LiteralPath (Join-Path $Path 'WinPool.slnx')) { Join-Path $Path 'artifacts\Release' }
+    elseif (Test-Path -LiteralPath (Join-Path $Path 'Program\WinPool\WinPool.slnx')) { Join-Path $Path 'Program\WinPool\artifacts\Release' }
+    elseif (Test-Path -LiteralPath (Join-Path $Path 'WinPool.App.exe')) { $Path }
+    else { throw "The target is not a WinPool checkout, research layout, or runtime: $Path" }
+foreach ($relative in @('WinPool.App.exe','WinPool.Agent.exe')) {
+    $candidate = Join-Path $runtime $relative
     if (Test-Path -LiteralPath $candidate -PathType Leaf) { $targets.Add($candidate) }
 }
 
 $labels = [ordered]@{}
 foreach ($target in $targets) {
     $labels[$target] = [WinPoolIntegrityLabel]::Read($target)
+    if ($labels[$target] -like 'error:*') { throw "Cannot read integrity label on '$target': $($labels[$target])" }
 }
 
 Add-Note "Integrity labels under '$Path':"
@@ -220,10 +219,12 @@ $exitCode = $LASTEXITCODE
 $stopwatch.Stop()
 $raw | Select-Object -Last 3 | ForEach-Object { Add-Note "icacls: $_" }
 Add-Note ("icacls exited {0} after {1:N1}s" -f $exitCode, $stopwatch.Elapsed.TotalSeconds)
+if ($exitCode -ne 0) { Add-Note "Integrity repair failed on '$Path'."; Complete 1 }
 
 $after = [ordered]@{}
 foreach ($target in $targets) {
     $after[$target] = [WinPoolIntegrityLabel]::Read($target)
+    if ($after[$target] -like 'error:*') { Add-Note "Cannot verify integrity label on '$target': $($after[$target])"; Complete 1 }
 }
 foreach ($target in $targets) {
     Add-Note ('  {0,-18} {1}' -f $after[$target], $target)

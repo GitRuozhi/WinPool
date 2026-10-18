@@ -24,6 +24,8 @@ public partial class EditorPageBase : Page
             ViewModel.RealOperationActivityChanged += SyncRealOperationActivity;
             ViewModel.RealOperationRecovered -= HandleRecoveredRealOperation;
             ViewModel.RealOperationRecovered += HandleRecoveredRealOperation;
+            ViewModel.SimulationDraftDiscarded -= HandleSimulationDraftDiscarded;
+            ViewModel.SimulationDraftDiscarded += HandleSimulationDraftDiscarded;
             SyncRealOperationActivity();
         };
         Unloaded += (_, _) =>
@@ -32,6 +34,7 @@ public partial class EditorPageBase : Page
             {
                 ViewModel.RealOperationActivityChanged -= SyncRealOperationActivity;
                 ViewModel.RealOperationRecovered -= HandleRecoveredRealOperation;
+                ViewModel.SimulationDraftDiscarded -= HandleSimulationDraftDiscarded;
             }
         };
     }
@@ -42,6 +45,11 @@ public partial class EditorPageBase : Page
         ViewModel.RealOperationPhase);
 
     protected virtual void OnRealOperationActivityChanged(bool isBusy, bool showOverlay, string phase) { }
+    protected virtual void OnSimulationDraftDiscarded() { }
+    private void HandleSimulationDraftDiscarded(string documentId)
+    {
+        if (ViewModel.ActiveDocument.Id == documentId) OnSimulationDraftDiscarded();
+    }
     protected virtual bool OnRecoveredRealOperation(AgentRealOperationResponse status, bool inventoryRefreshed) => true;
 
     private bool HandleRecoveredRealOperation(AgentRealOperationResponse status, bool inventoryRefreshed)
@@ -450,7 +458,7 @@ public partial class EditorPageBase : Page
             var hasWritten = current.Steps.Any(step => step.State is RealOperationStepState.CallIssued
                 or RealOperationStepState.WaitingForProvider or RealOperationStepState.Verifying
                 or RealOperationStepState.Verified or RealOperationStepState.OutcomeUnknown);
-            ReportRealActivity(Text("正在执行 / 核对", "Executing / verifying"));
+            ReportRealActivity(ViewModel.DescribeRealOperationActivity(current));
             if (current.State is RealOperationState.Accepted or RealOperationState.Running)
                 continue;
             var succeeded = current.State == RealOperationState.Succeeded && !current.RequiresReconciliation;

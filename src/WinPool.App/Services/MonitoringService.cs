@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
@@ -39,7 +37,7 @@ public sealed class MonitoringService : IDisposable
     private static readonly TimeSpan WindowLength = TimeSpan.FromSeconds(60);
 
     private readonly object _sync = new();
-    private readonly IAgentConnection? _agentConnection;
+    private readonly IAgentConnection _agentConnection;
     private readonly CancellationTokenSource _eventCancellation = new();
     private readonly Task _eventTask;
     private AgentInstanceId? _agentInstanceId;
@@ -48,6 +46,11 @@ public sealed class MonitoringService : IDisposable
     private long _transportGaps;
     private readonly HashSet<string> _seriesAwaitingGap = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<MonitorSamplePoint>> _windows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _seriesRevisions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (long Revision, MonitorSamplePoint[] Points)> _displayWindows = new(StringComparer.OrdinalIgnoreCase);
+    private long _windowRevision;
+    private long _latestRevision = -1;
+    private IReadOnlyDictionary<string, MonitorSamplePoint> _latest = new Dictionary<string, MonitorSamplePoint>();
     private readonly Dictionary<string, StorageObjectId> _seriesTargets = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<StorageObjectId, string> _targetNames = new();
 
@@ -61,9 +64,6 @@ public sealed class MonitoringService : IDisposable
         lock (_sync) return _seriesTargets.TryGetValue(series, out var id) && _targetNames.TryGetValue(id, out var name) ? name : series;
     }
     private CancellationTokenSource? _loopCts;
-    private DiskPerformanceSampler? _sampler;
-    private StreamWriter? _csvWriter;
-    private DateTimeOffset _lastFlush = DateTimeOffset.MinValue;
     private bool _disposed;
     private SessionId? _remoteSessionId;
     private MonitoringSession? _remoteSession;
@@ -78,23 +78,16 @@ public sealed class MonitoringService : IDisposable
     private readonly MonitorIssueStateTracker _issueStates = new();
     private MonitorRuntimeDiagnostics _agentDiagnostics = new(0, 0);
     private int _restartGeneration;
-    private readonly Stopwatch _localSessionElapsed = new();
 
-    public MonitoringService(IAgentConnection? agentConnection = null)
+    public MonitoringService(IAgentConnection agentConnection)
     {
-        _agentConnection = agentConnection;
-        // A local sampler owns its initial state. An Agent-backed page has
-        // no such fact until its first snapshot succeeds, so it must not
-        // render an unconnected/new Agent as a confirmed stopped monitor.
-        IsRemoteStateKnown = agentConnection is null;
-        _eventTask = agentConnection is null ? Task.CompletedTask : WatchRemoteEventsAsync(_eventCancellation.Token);
+        _agentConnection = agentConnection ?? throw new ArgumentNullException(nameof(agentConnection));
+        _eventTask = WatchRemoteEventsAsync(_eventCancellation.Token);
     }
-
     public event Action? Changed;
 
-    public bool UsesAgent => _agentConnection is not null;
 
-    public bool HasStartupRecoveryFailure => UsesAgent && IsRemoteStateKnown
+    public bool HasStartupRecoveryFailure => IsRemoteStateKnown
         && GetRuntimeDiagnostics().SamplingFailure?.StartsWith(
             "agent.monitoring.restore_failed:", StringComparison.Ordinal) == true;
 
@@ -117,15 +110,6 @@ public sealed class MonitoringService : IDisposable
 
     public double SampleRateHz { get; private set; } = 5;
 
-    public string? SessionFilePath { get; private set; }
-
-    public static int? ParseDiskNumber(string instanceName)
-    {
-        var end = instanceName.IndexOf(' ');
-        var digits = end < 0 ? instanceName : instanceName[..end];
-        return int.TryParse(digits, out var number) ? number : null;
-    }
-
     public async Task<bool> StartAsync(
         double rateHz,
         CancellationToken cancellationToken = default)
@@ -136,7 +120,6 @@ public sealed class MonitoringService : IDisposable
             return true;
         }
 
-        if (_agentConnection is not null)
         {
             LastError = "agent.monitor-starting";
             using var startupTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -174,16 +157,6 @@ public sealed class MonitoringService : IDisposable
                 return false;
             }
         }
-
-        _sampler ??= new DiskPerformanceSampler();
-        LastError = null;
-        StartSessionFile();
-        _localSessionElapsed.Restart();
-        IsRunning = true;
-        _loopCts = new CancellationTokenSource();
-        var token = _loopCts.Token;
-            _ = Task.Run(() => RunLoopAsync(token));
-        return true;
     }
 
     public void Start(double rateHz) => _ = StartAsync(rateHz);
@@ -203,7 +176,7 @@ public sealed class MonitoringService : IDisposable
         }
 
         SampleRateHz = rateHz;
-        if (_agentConnection is not null && IsRunning)
+        if (IsRunning)
         {
             await RestartRemoteAsync(rateHz);
         }
@@ -217,7 +190,6 @@ public sealed class MonitoringService : IDisposable
         }
 
         _loopCts?.Cancel();
-        if (_agentConnection is not null)
         {
             if (_remoteSessionId is { } sessionId)
             {
@@ -306,7 +278,7 @@ public sealed class MonitoringService : IDisposable
             IsRunning = false;
             lock (_sync)
             {
-                _windows.Clear();
+                ResetWindowsLocked();
                 _seriesTargets.Clear();
                 _targetNames.Clear();
                 _remoteLastTimestamps.Clear();
@@ -314,38 +286,24 @@ public sealed class MonitoringService : IDisposable
             return;
         }
 
-        IsRunning = false;
-        _localSessionElapsed.Stop();
-
-        try
-        {
-            if (_csvWriter is not null)
-            {
-                await _csvWriter.FlushAsync();
-            }
-        }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-        {
-        }
-
-        lock (_sync)
-        {
-            _csvWriter?.Dispose();
-            _csvWriter = null;
-            _windows.Clear();
-            _seriesTargets.Clear();
-            _targetNames.Clear();
-        }
     }
 
-    public IReadOnlyDictionary<string, MonitorSamplePoint[]> GetWindows()
+    public long WindowRevision { get { lock (_sync) return _windowRevision; } }
+
+    public IReadOnlyDictionary<string, MonitorSamplePoint[]> GetWindows(IEnumerable<string> visibleSeries)
     {
         lock (_sync)
         {
-            return _windows.ToDictionary(
-                x => x.Key,
-                x => x.Value.ToArray(),
-                StringComparer.OrdinalIgnoreCase);
+            var selected = new Dictionary<string, MonitorSamplePoint[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in visibleSeries)
+            {
+                if (!_windows.TryGetValue(name, out var points)) continue;
+                var revision = _seriesRevisions.GetValueOrDefault(name);
+                if (!_displayWindows.TryGetValue(name, out var cached) || cached.Revision != revision)
+                    _displayWindows[name] = cached = (revision, points.ToArray());
+                selected[name] = cached.Points;
+            }
+            return selected;
         }
     }
 
@@ -353,20 +311,29 @@ public sealed class MonitoringService : IDisposable
     {
         lock (_sync)
         {
-            return _windows
+            if (_latestRevision == _windowRevision) return _latest;
+            _latest = _windows
                 .Where(x => x.Value.Count > 0)
                 .ToDictionary(
                     x => x.Key,
                     x => x.Value[^1],
                     StringComparer.OrdinalIgnoreCase);
+            _latestRevision = _windowRevision;
+            return _latest;
         }
+    }
+
+    private void ResetWindowsLocked()
+    {
+        _windows.Clear(); _seriesRevisions.Clear(); _displayWindows.Clear();
+        _windowRevision++;
     }
 
     public IReadOnlyList<StorageHealthEvent> GetRecentStorageHealthEvents()
     {
         lock (_sync)
         {
-            return _recentStorageHealthEvents.ToArray();
+            return _recentStorageHealthEvents;
         }
     }
 
@@ -387,14 +354,6 @@ public sealed class MonitoringService : IDisposable
     /// </summary>
     public MonitorRuntimeDiagnostics GetRuntimeDiagnostics()
     {
-        if (_agentConnection is null)
-        {
-            return new MonitorRuntimeDiagnostics(
-                DroppedSamples: 0,
-                BufferedSamples: 0,
-                SessionElapsedMilliseconds: Math.Max(0, _localSessionElapsed.ElapsedMilliseconds));
-        }
-
         lock (_sync)
         {
             return _agentDiagnostics;
@@ -418,30 +377,7 @@ public sealed class MonitoringService : IDisposable
         return _issueStates.Update(observedIssues, stateIsAuthoritative);
     }
 
-    public async Task FlushAsync()
-    {
-        if (_agentConnection is not null)
-        {
-            await RefreshRemoteStateAsync(CancellationToken.None);
-            return;
-        }
-
-        try
-        {
-            StreamWriter? writer;
-            lock (_sync)
-            {
-                writer = _csvWriter;
-            }
-            if (writer is not null)
-            {
-                await writer.FlushAsync();
-            }
-        }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-        {
-        }
-    }
+    public Task FlushAsync() => RefreshRemoteStateAsync(CancellationToken.None);
 
     public async Task<bool> ExportCsvAsync(
         string destinationPath,
@@ -449,7 +385,6 @@ public sealed class MonitoringService : IDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
-        if (_agentConnection is not null)
         {
             SessionId? exportSession;
             lock (_sync) { exportSession = _lastExportSessionId; }
@@ -473,35 +408,6 @@ public sealed class MonitoringService : IDisposable
             return result.Value is ExportArtifactResponse { RowCount: > 0 };
         }
 
-        if (SessionFilePath is null || !File.Exists(SessionFilePath))
-        {
-            return false;
-        }
-
-        File.Copy(SessionFilePath, destinationPath, overwrite);
-        return true;
-    }
-
-    private async Task RunLoopAsync(CancellationToken token)
-    {
-        try
-        {
-            await RunLoopCoreAsync(token);
-        }
-        catch (Exception ex)
-        {
-            try
-            {
-                DiagnosticLog.AppendFailure(
-                    StorageDataLocations.CurrentRoot,
-                    "monitor.jsonl",
-                    "MonitorLoop",
-                    ex);
-            }
-            catch
-            {
-            }
-        }
     }
 
     public async Task DetachAsync()
@@ -519,11 +425,6 @@ public sealed class MonitoringService : IDisposable
     /// </summary>
     public async Task RefreshRemoteStateAsync(CancellationToken cancellationToken = default)
     {
-        if (_agentConnection is null)
-        {
-            return;
-        }
-
         try
         {
             await RefreshRemoteSnapshotAsync(cancellationToken);
@@ -734,7 +635,8 @@ public sealed class MonitoringService : IDisposable
                             IsRemoteStateKnown = false;
                             lock (_sync)
                             {
-                                _transportGaps++;
+                                _windowRevision++;
+                _transportGaps++;
                                 _agentDiagnostics = _agentDiagnostics with { TransportGapCount = _transportGaps };
                             }
                             break;
@@ -787,7 +689,7 @@ public sealed class MonitoringService : IDisposable
                 return;
             if (replaceWindow)
             {
-                _windows.Clear();
+                ResetWindowsLocked();
                 _seriesTargets.Clear();
                 _remoteLastTimestamps.Clear();
                 _lastSequence = 0;
@@ -820,7 +722,7 @@ public sealed class MonitoringService : IDisposable
             needsWindow = (!IsRemoteStateKnown || agentChanged || sessionChanged) && session is not null;
             if (agentChanged || sessionChanged)
             {
-                _windows.Clear();
+                ResetWindowsLocked();
                 _seriesTargets.Clear();
                 _targetNames.Clear();
                 _remoteLastTimestamps.Clear();
@@ -875,6 +777,7 @@ public sealed class MonitoringService : IDisposable
             var gap = batch.HasGap || (_lastSequence > 0 && batch.FirstSequence > _lastSequence + 1);
             if (gap)
             {
+                _windowRevision++;
                 _transportGaps++;
                 _agentDiagnostics = _agentDiagnostics with { TransportGapCount = _transportGaps };
                 _seriesAwaitingGap.UnionWith(_windows.Keys);
@@ -933,7 +836,10 @@ public sealed class MonitoringService : IDisposable
                 { GapBefore = _seriesAwaitingGap.Remove(instance)
                     || (points.Count > 0 && sample.SampledAtUtc - points[^1].Timestamp
                         > TimeSpan.FromSeconds(1.5 / Math.Clamp(SampleRateHz, 0.2, 20))) });
-            points.RemoveAll(point => point.Timestamp < cutoff);
+            var expired = 0;
+            while (expired < points.Count && points[expired].Timestamp < cutoff) expired++;
+            if (expired > 0) points.RemoveRange(0, expired);
+            _seriesRevisions[instance] = ++_windowRevision;
         }
 
         if (latestSamples.Count > 0)
@@ -967,106 +873,6 @@ public sealed class MonitoringService : IDisposable
         _diagnostics.RecordCommunicationSuccess();
     }
 
-    private async Task RunLoopCoreAsync(CancellationToken token)
-    {
-        while (!token.IsCancellationRequested)
-        {
-            var interval = TimeSpan.FromSeconds(1 / Math.Clamp(SampleRateHz, 0.2, 20));
-            try
-            {
-                await Task.Delay(interval, token);
-            }
-            catch (TaskCanceledException)
-            {
-                break;
-            }
-
-            IReadOnlyList<DiskPerformanceSample> samples;
-            try
-            {
-                samples = _sampler?.Sample() ?? [];
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-            {
-                RecordSamplingFailure($"local.{ex.GetType().Name}");
-                continue;
-            }
-
-            var now = DateTimeOffset.Now;
-            lock (_sync)
-            {
-                RecordSamplingSuccessLocked(now);
-            }
-            var rows = new StringBuilder();
-            lock (_sync)
-            {
-                foreach (var sample in samples)
-                {
-                    if (!_windows.TryGetValue(sample.InstanceName, out var points))
-                    {
-                        points = [];
-                        _windows[sample.InstanceName] = points;
-                    }
-
-                    points.Add(new MonitorSamplePoint(
-                        now,
-                        sample.ActivityPercent,
-                        sample.ReadBytesPerSecond,
-                        sample.WriteBytesPerSecond));
-                    var cutoff = now - WindowLength;
-                    var removeCount = points.Count(x => x.Timestamp < cutoff);
-                    if (removeCount > 0)
-                    {
-                        points.RemoveRange(0, removeCount);
-                    }
-
-                    rows.Append(now.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append(',')
-                        .Append(sample.InstanceName.Replace(',', ' ')).Append(',')
-                        .Append(sample.ActivityPercent.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
-                        .Append(sample.ReadBytesPerSecond.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
-                        .Append(sample.WriteBytesPerSecond.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
-                }
-
-                try
-                {
-                    _csvWriter?.Write(rows.ToString());
-                }
-                catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-                {
-                }
-            }
-
-            if (now - _lastFlush > TimeSpan.FromSeconds(2))
-            {
-                _lastFlush = now;
-                await FlushAsync();
-            }
-        }
-    }
-
-    private void StartSessionFile()
-    {
-        try
-        {
-            var directory = Path.Combine(StorageDataLocations.CurrentRoot, "Monitoring");
-            Directory.CreateDirectory(directory);
-            SessionFilePath = Path.Combine(directory, $"{DateTime.Now:yyyyMMdd_HHmmss}.csv");
-            var stream = new FileStream(
-                SessionFilePath,
-                FileMode.Create,
-                FileAccess.Write,
-                FileShare.Read);
-            _csvWriter = new StreamWriter(stream, new UTF8Encoding(true));
-            _csvWriter.WriteLine("Timestamp,Disk,ActivityPercent,ReadBytesPerSecond,WriteBytesPerSecond");
-            _lastFlush = DateTimeOffset.MinValue;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _csvWriter = null;
-            SessionFilePath = null;
-        }
-    }
-
     public void Dispose()
     {
         if (_disposed)
@@ -1078,16 +884,5 @@ public sealed class MonitoringService : IDisposable
         _eventCancellation.Cancel();
         _loopCts?.Cancel();
         _issueStates.Dispose();
-        if (_agentConnection is not null)
-        {
-            return;
-        }
-        lock (_sync)
-        {
-            _csvWriter?.Dispose();
-            _csvWriter = null;
-        }
-        _sampler?.Dispose();
-        _sampler = null;
     }
 }

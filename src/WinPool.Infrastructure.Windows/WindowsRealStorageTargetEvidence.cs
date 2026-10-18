@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinPool.Domain;
 using WinPool.Execution;
+using WinPool.Application;
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -35,7 +36,11 @@ public sealed record WindowsStorageCommandTarget(
     bool MaximumCapacityAttempt = false,
     IReadOnlyList<WindowsStoragePhysicalMemberTarget>? PhysicalMembers = null,
     IReadOnlyList<WindowsStorageTierTarget>? TierInputs = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StorageLayoutParameters? Layout = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StorageLayoutParameters? Layout = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PowerShellHostCall? HostCall { get; init; }
+}
 
 public sealed record WindowsStoragePhysicalMemberTarget(string StableId, string UniqueId, string ObjectId, string SerialNumber);
 public sealed record WindowsStorageTierTarget(string TemplateStableId, string UniqueId, string ObjectId, string MediaType, long SizeBytes,
@@ -63,7 +68,12 @@ public sealed record WindowsStorageCommandResult(
     IReadOnlyList<WindowsVolumeSafetyEvidence>? VolumeSafetyEvidence = null,
     IReadOnlyList<WindowsNativeMsrSafetyEvidence>? OfflinePartitionAttributes = null,
     WindowsPoolMemberRoleEvidence? PoolMemberRoleEvidence = null,
-    WindowsStorageProviderFailure? ProviderFailure = null);
+    WindowsStorageProviderFailure? ProviderFailure = null)
+{
+    /// <summary>The exact fixed host request returned its final frame; this does not verify the storage postcondition.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PowerShellHostCall? CompletedHostCall { get; init; }
+}
 
 /// <summary>Storage method status is distinct from MI native status or HRESULT. Never infer capacity from translated text.</summary>
 public sealed record WindowsStorageProviderFailure(uint? StorageReturnCode, string CodeSource,
@@ -91,6 +101,13 @@ public sealed record WindowsTieredCreationInput(
 
 public interface IWindowsRealStorageCommandAdapter
 {
+    Task<WindowsPowerShellWriteLease?> ReserveWriteAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<WindowsPowerShellWriteLease?>(null);
+
+    Task<WindowsStorageCommandResult> ExecuteAsync(RealStorageCommand command, WindowsStorageCommandTarget target,
+        WindowsPowerShellWriteLease? lease, CancellationToken cancellationToken) =>
+        ExecuteAsync(command, target, cancellationToken);
+
     Task<WindowsStorageCommandResult> ExecuteAsync(
         RealStorageCommand command,
         WindowsStorageCommandTarget target,

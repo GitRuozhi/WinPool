@@ -13,7 +13,6 @@ internal sealed class AgentInventoryCoordinator
 {
     private readonly IHardwareInventoryProvider manageProvider;
     private readonly IPhysicalDiskDeviceResolver deviceResolver;
-    private readonly InventorySnapshotRepository snapshots;
     private readonly LocalInventoryDocumentRepository localDocument;
     private readonly AgentLocalSystemIdentity localIdentity;
     private readonly ConcurrentDictionary<int, string> physicalDeviceIds = new();
@@ -23,14 +22,12 @@ internal sealed class AgentInventoryCoordinator
 
     public AgentInventoryCoordinator(
         IHardwareInventoryProvider manageProvider,
-        InventorySnapshotRepository snapshots,
         LocalInventoryDocumentRepository localDocument,
         AgentLocalSystemIdentity localIdentity,
         IPhysicalDiskDeviceResolver deviceResolver,
         Action<AgentEvent>? publish = null)
     {
         this.manageProvider = manageProvider ?? throw new ArgumentNullException(nameof(manageProvider));
-        this.snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
         this.localDocument = localDocument ?? throw new ArgumentNullException(nameof(localDocument));
         this.localIdentity = localIdentity ?? throw new ArgumentNullException(nameof(localIdentity));
         this.deviceResolver = deviceResolver ?? throw new ArgumentNullException(nameof(deviceResolver));
@@ -40,12 +37,47 @@ internal sealed class AgentInventoryCoordinator
     public async Task CaptureStartupAsync(CancellationToken cancellationToken)
     {
         if (Interlocked.Exchange(ref startupStarted, 1) != 0) return;
+        StorageSystemDocument? startupBatch = null;
+        if (manageProvider is AgentInventoryCollector collector)
+        {
+            try
+            {
+                startupBatch = await collector.CollectStartupAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                Trace.TraceError("agent.inventory.startup_batch_failed: {0}", exception);
+                publish(new AgentInventoryFailedEvent(CollectionPurpose.Hardware, "agent.inventory.startup_failed",
+                    DateTimeOffset.UtcNow, IsAutomatic: true, Detail: FormatFailureDetail("inventory.startup", exception)));
+                publish(new AgentInventoryFailedEvent(CollectionPurpose.Storage, "agent.inventory.startup_failed",
+                    DateTimeOffset.UtcNow, IsAutomatic: true, Detail: FormatFailureDetail("inventory.startup", exception)));
+            }
+        }
+        if (startupBatch is not null)
+        {
+            var result = await CaptureManageCoreAsync(new(CorrelationId.New(), CollectionPurpose.Storage),
+                cancellationToken, true, null, startupBatch).ConfigureAwait(false);
+            if (result.IsSuccess)
+            {
+                // Both pages receive the same persisted observation/body hash.
+                // The event reader coalesces their one required body transfer.
+                var saved = (await localDocument.LoadAsync(cancellationToken).ConfigureAwait(false))!.Document;
+                publish(new AgentInventoryStartedEvent(CollectionPurpose.Hardware, DateTimeOffset.UtcNow, true));
+                publish(new AgentInventoryUpdatedEvent(CollectionPurpose.Hardware,
+                    new(saved.DocumentId, saved.Sha256, saved.CapturedAtUtc), DateTimeOffset.UtcNow, true));
+            }
+            return;
+        }
         foreach (var purpose in new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware })
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                await CaptureManageAsync(new CaptureAgentManageInventoryRequest(CorrelationId.New(), purpose), cancellationToken, isAutomatic: true);
+                if (startupBatch is not null)
+                    await CaptureManageCoreAsync(new(CorrelationId.New(), purpose), cancellationToken, true, null, startupBatch);
+                else if (manageProvider is not AgentInventoryCollector)
+                    await CaptureManageAsync(new CaptureAgentManageInventoryRequest(CorrelationId.New(), purpose), cancellationToken, isAutomatic: true);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception)
@@ -189,24 +221,13 @@ internal sealed class AgentInventoryCoordinator
             failureStage = "inventory.device_ids.cache";
             CachePhysicalDeviceIds(document);
             StorageOperationTiming.Record("inventory.merge", capturedAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
-            var projectionAt = Stopwatch.GetTimestamp();
-            failureStage = "inventory.snapshot.project";
-            var projected = InventorySnapshotProjection.Project(
-                canonicalSystemId,
-                document.Snapshot);
-            StorageOperationTiming.Record("inventory.project", projectionAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
             var persistenceAt = Stopwatch.GetTimestamp();
-            failureStage = "inventory.snapshot.save";
-            var saved = await snapshots.SaveAsync(
-                projected,
-                PersistedSystemKind.Local,
-                Environment.MachineName,
-                cancellationToken,
-                LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName));
+            var snapshotId = Guid.NewGuid();
             failureStage = "inventory.local_document.encode";
             var payload = LocalInventoryDocumentCodec.Encode(document);
             failureStage = "inventory.local_document.save";
-            await localDocument.SaveAsync(saved.SnapshotId, payload, cancellationToken);
+            await localDocument.SaveAsync(snapshotId, payload, canonicalSystemId, Environment.MachineName,
+                LocalSystemIdentityResolver.CreateAuthorityBinding(Environment.MachineName), cancellationToken);
             StorageOperationTiming.Record("inventory.persist", persistenceAt, scope?.OperationId, scope?.StepId, scope?.Key ?? request.Purpose.ToString());
             Trace.WriteLine(JsonSerializer.Serialize(new { Event = "inventory.coordinator", Purpose = scope is null ? request.Purpose.ToString() : "ScopedStorage",
                 OperationId = scope?.OperationId.Value, StepId = scope?.StepId, Scope = scope?.Key, Generation = generation,
@@ -214,13 +235,13 @@ internal sealed class AgentInventoryCoordinator
                 CaptureMilliseconds = Stopwatch.GetElapsedTime(captureAt, capturedAt).TotalMilliseconds,
                 MergeProjectionPersistenceMilliseconds = Stopwatch.GetElapsedTime(capturedAt).TotalMilliseconds,
                 Complete = !incomplete }));
-            publish(new AgentInventoryUpdatedEvent(request.Purpose, payload, DateTimeOffset.UtcNow, isAutomatic));
+            publish(new AgentInventoryUpdatedEvent(request.Purpose, new LocalInventoryDocumentReference(payload.DocumentId, payload.Sha256, payload.CapturedAtUtc), DateTimeOffset.UtcNow, isAutomatic));
             if (incomplete)
-                return new(ApplicationStatus.PartiallyCompleted, new ManageInventoryCaptureResponse(saved.SnapshotId, payload.DocumentId, payload.Sha256, generation),
+                return new(ApplicationStatus.PartiallyCompleted, new ManageInventoryCaptureResponse(snapshotId, payload.DocumentId, payload.Sha256, generation),
                     [new ApplicationMessage("agent.inventory.scope_incomplete", "agent.inventory.scope_incomplete",
                         "The target closure was not completely refreshed; prior facts remain retained.", ApplicationMessageSeverity.Warning, [])], request.CorrelationId);
             return Succeeded(
-                new ManageInventoryCaptureResponse(saved.SnapshotId, payload.DocumentId, payload.Sha256, generation),
+                new ManageInventoryCaptureResponse(snapshotId, payload.DocumentId, payload.Sha256, generation),
                 request.CorrelationId,
                 identity.HasFragmentedHistory);
         }

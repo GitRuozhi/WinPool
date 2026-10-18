@@ -58,6 +58,8 @@ public sealed partial class WindowsRealStorageBackend
         {
             return Failed("real.maximum.fresh_preflight_failed", new { Error = exception.ToString(), candidate.Ordinal, candidate.SearchTargetKey });
         }
+        await using var writeLease = await adapter.ReserveWriteAsync(cancellationToken).ConfigureAwait(false);
+        call = call with { Target = call.Target with { HostCall = writeLease?.HostCall } };
         var attempt = new MaximumCapacityAttempt(candidate.Ordinal, candidate.SearchTargetKey, candidate.Phase,
             candidate.CandidateBytes, candidate.LastSuccessfulBytes, JsonSerializer.Serialize(call.Target),
             call.Before.Closure.Fingerprint, call.Before.Closure.PhysicalMemberFingerprint,
@@ -75,7 +77,9 @@ public sealed partial class WindowsRealStorageBackend
         if (!await journal.MarkCallIssuedAsync(candidate.Ordinal, CancellationToken.None).ConfigureAwait(false))
             return Failed("real.maximum.call_boundary_cas_failed", attempt);
         WindowsStorageCommandResult provider;
-        try { provider = await adapter.ExecuteAsync(call.Command, call.Target, CancellationToken.None).ConfigureAwait(false); }
+        try { provider = await StorageOperationTiming.MeasureAsync("real.provider", () => adapter.ExecuteAsync(
+                call.Command, call.Target, writeLease, CancellationToken.None), plan.OperationId, step.Id,
+                "maximum-attempt:" + candidate.Ordinal).ConfigureAwait(false); }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             var detail = JsonSerializer.Serialize(new { OriginalException = exception.ToString(), Attempt = attempt });
@@ -83,6 +87,7 @@ public sealed partial class WindowsRealStorageBackend
                 candidate.LastSuccessfulBytes, "real.maximum.adapter_exception", detail), CancellationToken.None).ConfigureAwait(false);
             return new(null, "real.maximum.adapter_exception", detail);
         }
+        finally { if (writeLease is not null) await writeLease.DisposeAsync().ConfigureAwait(false); }
         MaximumAttemptReceipt receipt;
         try { receipt = await ObserveMaximumAttemptAsync(plan, candidate, call, provider, CancellationToken.None).ConfigureAwait(false); }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -202,6 +207,10 @@ public sealed partial class WindowsRealStorageBackend
         if (provider.Code != "provider.returned" && !capacity)
             return Receipt("real.maximum.provider_uncertain_or_noncapacity_failure");
         var deadline = timeProvider.GetUtcNow().Add(PostCallWindow);
+        using var observation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        observation.CancelAfter(PostCallWindow);
+        cancellationToken = observation.Token;
+        var probe = 0;
         MaximumAttemptState? lastFresh = null;
         string? lastFailedCheck = null;
         string? lastCaptureException = null;
@@ -241,10 +250,11 @@ public sealed partial class WindowsRealStorageBackend
                     return Receipt("real.maximum.attempt_verified", current, mapping: mapping);
                 }
             }
+            catch (OperationCanceledException) when (observation.IsCancellationRequested) { break; }
             catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
             { lastCaptureException = exception.GetType().FullName + ": " + exception.Message; }
             if (timeProvider.GetUtcNow() >= deadline) break;
-            await Task.Delay(PostCallPoll, timeProvider, cancellationToken).ConfigureAwait(false);
+            if (!await DelayObservationProbeAsync(probe++, deadline, cancellationToken).ConfigureAwait(false)) break;
         } while (true);
         return Receipt("real.maximum.postcondition_unverified", lastFresh,
             diagnostic: JsonSerializer.Serialize(new { LastFailedCheck = lastFailedCheck, LastCaptureException = lastCaptureException }));

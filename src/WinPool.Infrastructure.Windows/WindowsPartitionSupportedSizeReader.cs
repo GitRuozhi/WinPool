@@ -1,5 +1,5 @@
-using System.Globalization;
-using System.Management;
+using System.Text.Json;
+
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -18,12 +18,9 @@ public interface IPartitionSupportedSizeReader
 /// </summary>
 public sealed class WindowsPartitionSupportedSizeReader : IPartitionSupportedSizeReader
 {
-    public Task<PartitionSupportedSize> ReadAsync(
-        WindowsStorageCommandTarget target,
-        CancellationToken cancellationToken) =>
-        Task.Run(() => Read(target), cancellationToken);
-
-    private static PartitionSupportedSize Read(WindowsStorageCommandTarget target)
+    private readonly WindowsPowerShellHost host;
+    public WindowsPartitionSupportedSizeReader(WindowsPowerShellHost? host = null) => this.host = host ?? WindowsPowerShellHost.Shared;
+    public async Task<PartitionSupportedSize> ReadAsync(WindowsStorageCommandTarget target, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(target);
         if (target.Kind != WinPool.Domain.StorageObjectKind.Partition
@@ -36,38 +33,11 @@ public sealed class WindowsPartitionSupportedSizeReader : IPartitionSupportedSiz
             throw new InvalidDataException("An exact partition target is required for supported-size lookup.");
         }
 
-        var query = string.Format(CultureInfo.InvariantCulture,
-            "SELECT * FROM MSFT_Partition WHERE DiskNumber = {0} AND PartitionNumber = {1}",
-            diskNumber, partitionNumber);
-        using var searcher = new ManagementObjectSearcher(
-            @"\\.\ROOT\Microsoft\Windows\Storage", query);
-        searcher.Options.Timeout = TimeSpan.FromSeconds(30);
-        using var results = searcher.Get();
-        var matches = results.Cast<ManagementObject>()
-            .Where(item => Guid.TryParse(item["Guid"]?.ToString(), out var observed)
-                && observed == guid
-                && Convert.ToInt64(item["Offset"], CultureInfo.InvariantCulture) == offset
-                && Convert.ToInt64(item["Size"], CultureInfo.InvariantCulture) == currentSize)
-            .ToArray();
-        if (matches.Length != 1)
-        {
-            throw new InvalidDataException("The partition changed or has an ambiguous provider identity.");
-        }
-
-        using var partition = matches[0];
-        using var output = partition.InvokeMethod("GetSupportedSize", null, null);
-        if (output is null
-            || Convert.ToUInt32(output["ReturnValue"], CultureInfo.InvariantCulture) != 0)
-        {
-            throw new InvalidDataException("The storage provider did not return a supported partition range.");
-        }
-        var minimum = Convert.ToUInt64(output["SizeMin"], CultureInfo.InvariantCulture);
-        var maximum = Convert.ToUInt64(output["SizeMax"], CultureInfo.InvariantCulture);
-        if (minimum > long.MaxValue || maximum > long.MaxValue
-            || minimum == 0 || maximum < minimum)
-        {
+        var json = await host.QueryAsync(WindowsPowerShellQuery.PartitionSize, new { Target = target }, cancellationToken).ConfigureAwait(false);
+        var result = JsonSerializer.Deserialize<PartitionSupportedSize>(json, WindowsPowerShellHost.JsonOptions)
+            ?? throw new InvalidDataException("The partition provider returned no range.");
+        if (result.MinimumBytes <= 0 || result.MaximumBytes < result.MinimumBytes)
             throw new InvalidDataException("The provider returned an invalid partition size range.");
-        }
-        return new((long)minimum, (long)maximum);
+        return result;
     }
 }

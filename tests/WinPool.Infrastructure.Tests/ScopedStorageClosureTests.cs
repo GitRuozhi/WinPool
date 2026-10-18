@@ -10,6 +10,49 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class ScopedStorageClosureTests
 {
     [Fact]
+    public async Task NarrowPoolClosureDoesNotClaimUnqueriedPartitionAndVolumeClassesWereEmpty()
+    {
+        var json = await RunFixedClosureAsync("ConcretePoolOnly", narrowed: true);
+        using var result = JsonDocument.Parse(json);
+        Assert.False(result.RootElement.GetProperty("ClosureFailed").GetBoolean());
+        var queried = result.RootElement.GetProperty("ScopeQueriedClasses").EnumerateArray().Select(item => item.GetString()).ToArray();
+        Assert.DoesNotContain("MSFT_Partition", queried);
+        Assert.DoesNotContain("MSFT_Volume", queried);
+        var scope = Scope() with { EvidenceProfile = WindowsRealStorageReadProfile.Required };
+        var document = await new WindowsHardwareInventoryProvider(new ResultRunner(json)).CollectScopedAsync(scope, default);
+        Assert.True(document.SourceFacts!.ScopedCollection!.Complete);
+        Assert.DoesNotContain(document.SourceFacts.Sources, source => source.ClassName is "MSFT_Partition" or "MSFT_Volume");
+        Assert.All(document.SourceFacts.Sources, source => Assert.NotNull(source.Coverage!.FieldNames));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnreachablePriorChildrenNeedExactIdentityAbsenceAndAFoundOrphanMakesClosureIncomplete(bool orphan)
+    {
+        var json = await RunFixedClosureAsync("ConcretePoolOnly", narrowed: true, priorChildren: true, orphan: orphan);
+        using var result = JsonDocument.Parse(json);
+        Assert.Equal(orphan, result.RootElement.GetProperty("ClosureFailed").GetBoolean());
+        var identities = result.RootElement.GetProperty("IdentityQueries").EnumerateArray().Select(item => item.GetString()).ToArray();
+        Assert.Contains("MSFT_Partition|Guid = 'old-partition-guid'", identities);
+        if (!orphan) Assert.Contains("MSFT_Volume|UniqueId = 'old-volume-uid'", identities);
+        if (orphan) Assert.Contains(result.RootElement.GetProperty("SourceQueryFailures").EnumerateArray(), item =>
+            item.GetProperty("ReasonCode").GetString()!.Contains("outside-current-component", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AQueriedDiskClassStillNeedsAbsenceProofForAMissingOldDiskIdentity(bool orphan)
+    {
+        var json = await RunFixedClosureAsync("ConcretePoolOnly", narrowed: true, orphan: orphan, priorDisk: true);
+        using var result = JsonDocument.Parse(json);
+        Assert.Equal(orphan, result.RootElement.GetProperty("ClosureFailed").GetBoolean());
+        Assert.Contains("MSFT_Disk|UniqueId = 'old-disk-uid'", result.RootElement.GetProperty("IdentityQueries")
+            .EnumerateArray().Select(item => item.GetString()));
+    }
+
+    [Fact]
     public async Task AttachedTierUsesItsExactVirtualDiskPoolWhileTemplateKeepsItsDirectPoolParent()
     {
         var json = await RunFixedClosureAsync("TierAttached");
@@ -120,12 +163,13 @@ public sealed class ScopedStorageClosureTests
             [new(target, "MSFT_PhysicalDisk", "UniqueId", "physical-uid")]);
     }
 
-    private static async Task<string> RunFixedClosureAsync(string graph)
+    private static async Task<string> RunFixedClosureAsync(string graph, bool narrowed = false, bool priorChildren = false, bool orphan = false, bool priorDisk = false)
     {
         // Execute the production fixed closure with a closed synthetic CIM graph. Both CIM
         // entry points are shadowed; any undeclared query throws, and no storage cmdlet runs.
         var script = "$ProgressPreference='SilentlyContinue'; [Console]::InputEncoding=[Text.Encoding]::UTF8; [Console]::OutputEncoding=[Text.Encoding]::UTF8;\n"
-            + MockGraph + "\n" + EmbeddedStorageInventoryScript.ScopeClosure + "\nInitialize-WinPoolScope\n" + "\n" + CaptureResult;
+            + MockGraph + "\n$WinPoolEvidenceFields = $fixture.EvidenceFields\n$WinPoolComponentLocators = $fixture.ComponentLocators\n"
+            + EmbeddedStorageInventoryScript.ScopeClosure + "\nInitialize-WinPoolScope\n" + "\n" + CaptureResult;
         var start = new ProcessStartInfo(WindowsPowerShellRunner.ExecutablePath)
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
@@ -136,11 +180,17 @@ public sealed class ScopedStorageClosureTests
         start.ArgumentList.Add("-NoProfile");
         start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-EncodedCommand");
-        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(script));
+        start.ArgumentList.Add(PowerShellFixtureScriptCodec.EncodeFixedCompressedScript(script));
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteAsync(JsonSerializer.Serialize(new { Graph = graph }));
+        List<object>? before = priorChildren || priorDisk ? [] : null;
+        if (priorChildren) before!.AddRange([new { ClassName = "MSFT_Partition", IdentityProperty = "Guid", IdentityValue = "old-partition-guid" },
+            new { ClassName = "MSFT_Volume", IdentityProperty = "UniqueId", IdentityValue = "old-volume-uid" }]);
+        if (priorDisk) before!.Add(new { ClassName = "MSFT_Disk", IdentityProperty = "UniqueId", IdentityValue = "old-disk-uid" });
+        await process.StandardInput.WriteAsync(JsonSerializer.Serialize(new { Graph = graph, Narrowed = narrowed, Orphan = orphan,
+            EvidenceFields = narrowed ? WindowsRealStorageReadProfile.ForId(WindowsRealStorageReadProfile.Required)!.Fields : null,
+            ComponentLocators = before }));
         process.StandardInput.Close();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         try { await process.WaitForExitAsync(timeout.Token); }
@@ -163,8 +213,9 @@ $ErrorActionPreference = 'Stop'
 $fixture = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $sourceQueryFailures = [System.Collections.Generic.List[object]]::new()
 $AssociationQueries = [System.Collections.Generic.List[string]]::new()
+$IdentityQueries = [System.Collections.Generic.List[string]]::new()
 function New-MockCim([string]$class, [string]$uid, [string]$oid, [bool]$primordial = $false) {
-    return [pscustomobject]@{ UniqueId=$uid; ObjectId=$oid; IsPrimordial=$primordial;
+    return [pscustomobject]@{ UniqueId=$uid; ObjectId=$oid; IsPrimordial=$primordial; Guid=$(if ($class -eq 'MSFT_Partition') { $uid } else { $null });
         CimClass=[pscustomobject]@{ CimClassName=$class };
         CimSystemProperties=[pscustomobject]@{ Namespace='root/Microsoft/Windows/Storage'; ServerName=[Environment]::MachineName } }
 }
@@ -183,7 +234,17 @@ $ActualTier = New-MockCim 'MSFT_StorageTier' 'actual-tier-uid' 'actual-tier-obje
 $OtherPool = New-MockCim 'MSFT_StoragePool' 'other-pool-uid' 'other-pool-object'
 $WinPoolScopeLocators = @([pscustomobject]@{ ClassName='MSFT_PhysicalDisk'; IdentityProperty='UniqueId'; IdentityValue='physical-uid' })
 function Get-CimInstance {
-    [CmdletBinding()] param($Namespace, $ClassName, $Filter)
+    [CmdletBinding()] param($Namespace, $ClassName, $Filter, $Property)
+    [void]$IdentityQueries.Add(([string]$ClassName + '|' + [string]$Filter))
+    if ($ClassName -eq 'MSFT_Partition' -and $Filter -eq "Guid = 'old-partition-guid'") {
+        if ($fixture.Orphan) { return New-MockCim 'MSFT_Partition' 'old-partition-guid' 'old-partition-object' }
+        return @()
+    }
+    if ($ClassName -eq 'MSFT_Volume' -and $Filter -eq "UniqueId = 'old-volume-uid'") { return @() }
+    if ($ClassName -eq 'MSFT_Disk' -and $Filter -eq "UniqueId = 'old-disk-uid'") {
+        if ($fixture.Orphan) { return New-MockCim 'MSFT_Disk' 'old-disk-uid' 'old-disk-object' }
+        return @()
+    }
     if ($Namespace -ne 'root/Microsoft/Windows/Storage' -or $Filter -ne "UniqueId = 'physical-uid'") { throw 'unexpected-mock-identity-query' }
     if ($ClassName -eq 'MSFT_PhysicalDisk') { return $Physical }
     if ($ClassName -eq 'MSFT_Disk') { if ($fixture.Graph -like 'Concrete*' -or $fixture.Graph -like 'Tier*') { return @() }; return $Disk }
@@ -281,13 +342,16 @@ $observations = @(foreach ($item in $WinPoolScopeObjects.Values) {
             MemberPhysicalDiskKeys=@($members | ForEach-Object { 'uid:' + [string]$_.UniqueId }) }
     });
     SourceObservations=$observations;
-    SourceQuerySuccesses=@($WinPoolScopeClasses | ForEach-Object { [ordered]@{ ClassName=$_; Namespace=$WinPoolScopeNamespace } });
+    SourceQuerySuccesses=@($(if ($fixture.Narrowed) { $WinPoolScopeQueried.Keys } else { $WinPoolScopeClasses }) | ForEach-Object { [ordered]@{ ClassName=$_; Namespace=$WinPoolScopeNamespace } });
+    ScopeQueriedClasses=@($WinPoolScopeQueried.Keys);
+    ScopeClosureComplete=(-not $WinPoolScopeState.Failed);
     SourceQueryFailures=@($sourceQueryFailures.ToArray());
     ClosureFailed=$WinPoolScopeState.Failed;
     ClosureObjects=@($WinPoolScopeObjects.Values | ForEach-Object {
         [ordered]@{ ClassName=[string]$_.CimClass.CimClassName; UniqueId=[string]$_.UniqueId; ObjectId=[string]$_.ObjectId }
     });
-    AssociationQueries=@($AssociationQueries.ToArray())
+    AssociationQueries=@($AssociationQueries.ToArray());
+    IdentityQueries=@($IdentityQueries.ToArray())
 } | ConvertTo-Json -Depth 12 -Compress
 """;
 }

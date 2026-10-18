@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
-using System.ComponentModel;
-using System.Management;
-using System.Runtime.InteropServices;
+
+
+
 using System.Text;
 using System.Text.Json;
-using Microsoft.Win32.SafeHandles;
+
 using WinPool.Application;
 using WinPool.Domain;
 
@@ -157,23 +157,25 @@ internal static class WindowsNativeMsrAttributesReader
     internal static WindowsNativeMsrAttributes Read(WindowsNativeMsrIdentity expected, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        RequireCurrentIdentity(expected, token);
-        // DesiredAccess=0: metadata queries only; the handle cannot write the disk.
-        using var handle = CreateFileW(expected.DiskPath, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
-        if (handle.IsInvalid)
-            throw new InvalidDataException("Cannot open the exact MSR disk for read-only attributes.",
-                new Win32Exception(Marshal.GetLastWin32Error()));
-        if (expected.VirtualDiskUniqueId is null) RequireNativeSerial(handle, expected.SerialNumber);
-        var first = ParseLayout(Control(handle, GetLayout, null), expected);
+        var json = WindowsPowerShellHost.Shared.QueryAsync(WindowsPowerShellQuery.NativeMsrAttributes,
+            new { expected.DiskPath, expected.DiskUniqueId, expected.DiskObjectId, expected.DiskGuid, expected.PhysicalUniqueId,
+                expected.PhysicalObjectId, expected.SerialNumber, expected.PartitionGuid, expected.PartitionType, expected.Offset,
+                expected.Length, expected.PartitionNumber, expected.VirtualDiskUniqueId, expected.VirtualDiskObjectId,
+                expected.PoolUniqueId, expected.PoolObjectId, expected.AccessPaths, expected.ExpectedDiskOffline,
+                PhysicalMembers = expected.PhysicalMembers ?? [new("", expected.PhysicalUniqueId, expected.PhysicalObjectId, expected.SerialNumber)] }, token)
+            .GetAwaiter().GetResult();
         token.ThrowIfCancellationRequested();
-        if (expected.VirtualDiskUniqueId is null) RequireNativeSerial(handle, expected.SerialNumber);
-        var last = ParseLayout(Control(handle, GetLayout, null), expected);
-        RequireCurrentIdentity(expected, token);
-        if (first != last)
-            throw new InvalidDataException("The selected MSR attributes changed during read-only verification.");
+        using var document = JsonDocument.Parse(json); var root = document.RootElement;
+        if (expected.VirtualDiskUniqueId is null)
+        {
+            RequireNativeSerial(Convert.FromBase64String(root.GetProperty("SerialFirst").GetString()!), expected.SerialNumber);
+            RequireNativeSerial(Convert.FromBase64String(root.GetProperty("SerialLast").GetString()!), expected.SerialNumber);
+        }
+        var first = ParseLayout(Convert.FromBase64String(root.GetProperty("First").GetString()!), expected);
+        var last = ParseLayout(Convert.FromBase64String(root.GetProperty("Last").GetString()!), expected);
+        if (first != last) throw new InvalidDataException("The selected MSR attributes changed during read-only verification.");
         return last;
     }
-
     internal static WindowsNativeMsrAttributes ParseLayout(byte[] bytes, WindowsNativeMsrIdentity expected)
     {
         const int header = 48, stride = 144;
@@ -217,130 +219,11 @@ internal static class WindowsNativeMsrAttributesReader
         return found ?? throw new InvalidDataException("The exact selected MSR is absent from the native GPT layout.");
     }
 
-    private static void RequireCurrentIdentity(WindowsNativeMsrIdentity expected, CancellationToken token)
-    {
-        RequireUnique("MSFT_Disk", item => Same(item["Path"]?.ToString(), expected.DiskPath), item =>
-        {
-            var exact = Same(item["UniqueId"]?.ToString(), expected.DiskUniqueId)
-            && Same(item["ObjectId"]?.ToString(), expected.DiskObjectId)
-            && (expected.VirtualDiskUniqueId is not null || Same(item["SerialNumber"]?.ToString(), expected.SerialNumber))
-            && item["IsReadOnly"] is false && item["IsOffline"] is bool offline && offline == expected.ExpectedDiskOffline
-            && item["IsBoot"] is false && item["IsSystem"] is false && item["IsClustered"] is false
-            && Guid.TryParse(item["Guid"]?.ToString(), out var guid) && guid == expected.DiskGuid;
-            if (exact && expected.VirtualDiskUniqueId is not null)
-                RequireVirtualBacking(item, expected, token);
-            return exact;
-        }, token);
-        foreach (var physical in expected.PhysicalMembers ?? [new("", expected.PhysicalUniqueId, expected.PhysicalObjectId, expected.SerialNumber)])
-            RequireUnique("MSFT_PhysicalDisk", item => Same(item["UniqueId"]?.ToString(), physical.UniqueId), item =>
-                Same(item["ObjectId"]?.ToString(), physical.ObjectId)
-                && Same(item["SerialNumber"]?.ToString(), physical.SerialNumber), token);
-        RequireUnique("MSFT_Partition", item => Same(item["DiskId"]?.ToString(), expected.DiskPath)
-            && Guid.TryParse(item["Guid"]?.ToString(), out var guid) && guid == expected.PartitionGuid, item =>
-            Guid.TryParse(item["GptType"]?.ToString(), out var type) && type == expected.PartitionType
-            && item["Offset"] is not null && Convert.ToInt64(item["Offset"]) == expected.Offset
-            && item["Size"] is not null && Convert.ToInt64(item["Size"]) == expected.Length
-            && item["PartitionNumber"] is not null && Convert.ToInt32(item["PartitionNumber"]) == expected.PartitionNumber
-            && item["IsBoot"] is false && item["IsSystem"] is false
-            && (expected.ExpectedDiskOffline ? item["IsOffline"] is null or false or true : item["IsOffline"] is false)
-            && (item["IsReadOnly"] is null or false) && (item["IsShadowCopy"] is null or false)
-            && IsUnassignedDriveLetter(item["DriveLetter"])
-            && (expected.ExpectedDiskOffline || expected.PartitionType == MsrRole
-                ? item["AccessPaths"] is null || item["AccessPaths"] is string[] { Length: 0 }
-                : item["AccessPaths"] is string[] paths
-                    && paths.SequenceEqual(expected.AccessPaths, StringComparer.OrdinalIgnoreCase)), token);
-    }
-
     internal static bool IsUnassignedDriveLetter(object? value) => value is null
         || value is char character && character == '\0'
         || value is string text && text.Length == 0;
-
-    private static void RequireVirtualBacking(ManagementObject disk,
-        WindowsNativeMsrIdentity expected, CancellationToken token)
+    private static void RequireNativeSerial(byte[] descriptor, string expected)
     {
-        // These are official Storage Management Provider association classes.
-        // Each relationship is checked before and after reading the same native handle.
-        RequireSingleRelated(disk, "MSFT_VirtualDisk", "MSFT_VirtualDiskToDisk", "VirtualDisk", "Disk", vd =>
-        {
-            if (!Same(vd["UniqueId"]?.ToString(), expected.VirtualDiskUniqueId!)
-                || !Same(vd["ObjectId"]?.ToString(), expected.VirtualDiskObjectId!))
-                throw new InvalidDataException("The exact native MSR virtual disk identity changed.");
-            RequireSingleRelated(vd, "MSFT_StoragePool", "MSFT_StoragePoolToVirtualDisk", "StoragePool", "VirtualDisk", pool =>
-            {
-                if (pool["IsPrimordial"] is not false
-                    || !Same(pool["UniqueId"]?.ToString(), expected.PoolUniqueId!)
-                    || !Same(pool["ObjectId"]?.ToString(), expected.PoolObjectId!))
-                    throw new InvalidDataException("The exact native MSR virtual disk pool changed.");
-                RequireRelatedPhysicalMembers(pool, expected, token);
-            }, token);
-        }, token);
-    }
-
-    private static void RequireRelatedPhysicalMembers(ManagementObject pool, WindowsNativeMsrIdentity expected, CancellationToken token)
-    {
-        var approved = expected.PhysicalMembers ?? [new("", expected.PhysicalUniqueId, expected.PhysicalObjectId, expected.SerialNumber)];
-        using var related = pool.GetRelated("MSFT_PhysicalDisk", "MSFT_StoragePoolToPhysicalDisk", null, null,
-            "PhysicalDisk", "StoragePool", false, new System.Management.EnumerationOptions { Timeout = TimeSpan.FromSeconds(10) });
-        var current = related.Cast<ManagementObject>().ToArray();
-        try
-        {
-            token.ThrowIfCancellationRequested();
-            if (current.Length != approved.Count || approved.Select(item => item.UniqueId).Distinct(StringComparer.Ordinal).Count() != approved.Count)
-                throw new InvalidDataException("The exact native MSR virtual disk pool member count changed.");
-            foreach (var physical in approved)
-            {
-                var matches = current.Where(item => Same(item["UniqueId"]?.ToString(), physical.UniqueId)).ToArray();
-                if (matches.Length != 1 || !Same(matches[0]["ObjectId"]?.ToString(), physical.ObjectId)
-                    || !Same(matches[0]["SerialNumber"]?.ToString(), physical.SerialNumber))
-                    throw new InvalidDataException("An exact native MSR virtual disk physical member changed.");
-            }
-        }
-        finally { foreach (var item in current) item.Dispose(); }
-    }
-
-    private static void RequireSingleRelated(ManagementObject source, string resultClass,
-        string associationClass, string resultRole, string sourceRole,
-        Action<ManagementObject> verify, CancellationToken token)
-    {
-        using var related = source.GetRelated(resultClass, associationClass, null, null,
-            resultRole, sourceRole, false, new System.Management.EnumerationOptions { Timeout = TimeSpan.FromSeconds(10) });
-        var candidates = related.Cast<ManagementObject>().ToArray();
-        try
-        {
-            token.ThrowIfCancellationRequested();
-            if (candidates.Length != 1)
-                throw new InvalidDataException("The native MSR provider relationship is unavailable or not unique: " + associationClass);
-            verify(candidates[0]);
-        }
-        finally
-        {
-            foreach (var candidate in candidates) candidate.Dispose();
-        }
-    }
-
-    private static void RequireUnique(string className, Func<ManagementObject, bool> select,
-        Func<ManagementObject, bool> verify, CancellationToken token)
-    {
-        using var searcher = new ManagementObjectSearcher(@"root\Microsoft\Windows\Storage", "SELECT * FROM " + className);
-        searcher.Options.Timeout = TimeSpan.FromSeconds(10);
-        using var results = searcher.Get();
-        var matches = 0;
-        foreach (ManagementObject item in results)
-        {
-            using (item)
-            {
-                token.ThrowIfCancellationRequested();
-                if (!select(item)) continue;
-                matches++;
-                if (!verify(item)) throw new InvalidDataException("The current native MSR disk identity changed: " + className);
-            }
-        }
-        if (matches != 1) throw new InvalidDataException("The current native MSR disk identity is not unique: " + className);
-    }
-
-    private static void RequireNativeSerial(SafeFileHandle handle, string expected)
-    {
-        var descriptor = Control(handle, QueryStorageProperty, new byte[12]);
         if (descriptor.Length < 36) throw new InvalidDataException("The native disk descriptor is incomplete.");
         var size = U32(descriptor, 4);
         var offset = U32(descriptor, 24);
@@ -349,23 +232,6 @@ internal static class WindowsNativeMsrAttributesReader
         var end = Array.IndexOf(descriptor, (byte)0, (int)offset, (int)(size - offset));
         if (end < 0 || !Same(Encoding.ASCII.GetString(descriptor, (int)offset, end - (int)offset), expected))
             throw new InvalidDataException("The opened native disk does not have the exact physical serial.");
-    }
-
-    private static byte[] Control(SafeFileHandle handle, uint code, byte[]? input)
-    {
-        for (var size = 65536; size <= 1048576; size *= 2)
-        {
-            var output = new byte[size];
-            if (DeviceIoControl(handle, code, input, input?.Length ?? 0, output, output.Length, out var returned, IntPtr.Zero))
-            {
-                if (returned > output.Length) throw new InvalidDataException("The native read returned an invalid length.");
-                return output.AsSpan(0, (int)returned).ToArray();
-            }
-            var error = Marshal.GetLastWin32Error();
-            if (error is not (122 or 234))
-                throw new InvalidDataException("The read-only native disk query failed.", new Win32Exception(error));
-        }
-        throw new InvalidDataException("The native disk query exceeds the read bound.");
     }
 
     private static string Text(WinPoolSourceObject item, string name) =>
@@ -382,11 +248,4 @@ internal static class WindowsNativeMsrAttributesReader
     private static uint U32(byte[] bytes, int offset) => BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4));
     private static long I64(byte[] bytes, int offset) => BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offset, 8));
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, ExactSpelling = true)]
-    private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode,
-        IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DeviceIoControl(SafeFileHandle device, uint controlCode, byte[]? inputBuffer,
-        int inputBufferSize, byte[] outputBuffer, int outputBufferSize, out uint bytesReturned, IntPtr overlapped);
 }

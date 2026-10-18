@@ -19,7 +19,8 @@ public static class RealOperationPlanFactory
         string physicalMemberFingerprint,
         string supportEvidence,
         DateTimeOffset createdAt,
-        DateTimeOffset expiresAt)
+        DateTimeOffset expiresAt,
+        string? evidenceProfile = null)
     {
         ArgumentNullException.ThrowIfNull(proposal);
         ArgumentNullException.ThrowIfNull(environment);
@@ -65,7 +66,7 @@ public static class RealOperationPlanFactory
                     CreatePoolCommand { Members: { } members } pool => pool with { Members = members.ToArray() },
                     _ => step.Command
                 }
-            }).ToArray());
+            }).ToArray()) { EvidenceProfile = evidenceProfile };
         plan = plan with { RealOperation = real };
         return plan with { PlanHash = OperationPlanHasher.Compute(plan) };
     }
@@ -242,6 +243,16 @@ public static class RealOperationValidator
             plan.Parameters is null || plan.Parameters.Count != 0 ||
             plan.PlannerAlgorithm != RealOperationPlanFactory.Algorithm ||
             real.AdapterVersion != RealOperationPlanFactory.AdapterVersion ||
+            real.EvidenceProfile is not (null or "command-required-v1" or "command-required-resize-v1" or "command-metadata-v1" or "command-os-v1" or "command-os-resize-v1") ||
+            real.EvidenceProfile == "command-metadata-v1" && real.Steps.Any(step => step.Command is not
+                (RenamePoolCommand or RenameVirtualDiskCommand or RenameVolumeCommand)) ||
+            real.EvidenceProfile == "command-required-v1" && real.Steps.Any(step => step.Command is ResizePartitionCommand) ||
+            real.EvidenceProfile is "command-os-v1" or "command-os-resize-v1" && real.Steps.Any(step => step.Command is not
+                (SetDiskOnlineCommand or InitializeGptCommand or ClearDiskCommand or CreatePartitionCommand or DeletePartitionCommand
+                    or ResizePartitionCommand or FormatVolumeCommand or SetDriveLetterCommand or RenameVolumeCommand)) ||
+            real.EvidenceProfile == "command-os-v1" && real.Steps.Any(step => step.Command is ResizePartitionCommand) ||
+            real.EvidenceProfile is not null && real.Steps.Any(step => step.Command is CreateVirtualDiskCommand { UseMaximumSize: true }
+                or CreateTieredVirtualDiskCommand { UseMaximumSize: true }) ||
             string.IsNullOrWhiteSpace(real.MachineBinding) ||
             string.IsNullOrWhiteSpace(real.SessionBinding) ||
             string.IsNullOrWhiteSpace(real.TargetFingerprint) ||

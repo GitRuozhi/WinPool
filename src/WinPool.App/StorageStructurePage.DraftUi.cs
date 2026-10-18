@@ -31,6 +31,10 @@ public sealed partial class StorageStructurePage
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _simulationPreviewPageActive = false;
+        _simulationPreviewDelay?.Cancel();
+        _simulationPreviewKey = null;
+        _simulationPreviewRunning = false;
         if (_activeNavigationKey is { } key && _formBuilt)
             _navigationDrafts[key] = new(EditingSession, _selectedPoolId, _selectedPoolDiskId,
                 _selectedPoolVdiskId, _selectedPoolTierId, CaptureFormInputs(),

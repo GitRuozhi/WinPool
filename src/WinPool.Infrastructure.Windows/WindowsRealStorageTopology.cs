@@ -26,7 +26,8 @@ public sealed class WindowsRealStorageTopology
     public WindowsRealStorageTopology(
         StorageSystemDocument document,
         string machineBinding,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? evidenceProfile = null)
     {
         ArgumentNullException.ThrowIfNull(document);
         if (document.Kind != StorageSystemKind.Local
@@ -46,8 +47,9 @@ public sealed class WindowsRealStorageTopology
             throw new InvalidDataException("Real preflight requires fresh, local, unmerged Windows facts.");
         }
 
+        EvidenceProfile = WindowsRealStorageReadProfile.ForId(evidenceProfile);
         facts.Validate();
-        foreach (var className in RequiredStorageClasses)
+        foreach (var className in RequiredStorageClasses.Where(className => EvidenceProfile is null || RequiresClass(facts, className)))
             RequireSource(facts, className);
 
         Document = document;
@@ -78,8 +80,21 @@ public sealed class WindowsRealStorageTopology
     public WinPoolFacts Facts { get; }
     public StorageSnapshot Snapshot { get; }
     public string MachineBinding { get; }
+    internal WindowsRealStorageReadProfile? EvidenceProfile { get; }
     public string InventoryVersion => Facts.InventoryVersion;
     public SystemId SystemId => Facts.SystemId;
+    private readonly Dictionary<string, Task<WindowsTierCapability>> subsystemCapabilities = new(StringComparer.Ordinal);
+
+    internal Task<WindowsTierCapability> ReadSubsystemCapabilityAsync(string subsystemId,
+        Func<Task<WindowsTierCapability>> read)
+    {
+        lock (subsystemCapabilities)
+        {
+            if (!subsystemCapabilities.TryGetValue(subsystemId, out var result))
+                subsystemCapabilities.Add(subsystemId, result = read());
+            return result;
+        }
+    }
 
     public WinPoolSourceObject RequireObject(StorageObjectId target)
     {
@@ -190,6 +205,7 @@ public sealed class WindowsRealStorageTopology
                          StringComparer.Ordinal.Equals(issue.ObjectId, item.Id)
                          && issue.State != FieldReadState.Returned))
             {
+                if (EvidenceProfile is { } profile && !profile.RequiresProjectedField(item.ObjectType, issue.FieldName)) continue;
                 if (item.ObjectType == FactObjectType.PhysicalDisk
                     && issue.FieldName is "InterfaceType" or "ProvisioningType" or "PnpDeviceId") continue;
                 if (item.ObjectType == FactObjectType.PhysicalDisk
@@ -350,6 +366,7 @@ public sealed class WindowsRealStorageTopology
                          StringComparer.Ordinal.Equals(issue.ObjectId, item.Id)
                          && issue.State != FieldReadState.Returned))
             {
+                if (EvidenceProfile is { } profile && !profile.RequiresProjectedField(item.ObjectType, issue.FieldName)) continue;
                 if (item.ObjectType == FactObjectType.PhysicalDisk
                     && issue.FieldName is "InterfaceType" or "ProvisioningType" or "PnpDeviceId") continue;
                 if (item.ObjectType == FactObjectType.PhysicalDisk
@@ -543,7 +560,8 @@ public sealed class WindowsRealStorageTopology
                 throw new InvalidDataException("The physical member has a protected Windows role.");
         }
         foreach (var name in new[] { "MSFT_StorageSubSystem", "MSFT_PhysicalDisk", "MSFT_StoragePool",
-                     "MSFT_VirtualDisk", "MSFT_StorageTier", "MSFT_Disk", "MSFT_Partition", "MSFT_Volume" }) RequireSource(Facts, name);
+                     "MSFT_VirtualDisk", "MSFT_StorageTier", "MSFT_Disk", "MSFT_Partition", "MSFT_Volume" })
+            if (EvidenceProfile is null || RequiresClass(Facts, name)) RequireSource(Facts, name);
         if (pool.ObjectType != FactObjectType.StoragePool || !pool.HasReliableIdentity || !HasIdentity(pool)
             || !IsReturnedBoolean(pool, "IsPrimordial", false))
             throw new InvalidDataException("Unknown physical roles need one exact current concrete pool membership.");
@@ -635,7 +653,7 @@ public sealed class WindowsRealStorageTopology
         IReadOnlyList<WinPoolSourceObject> connected,
         HashSet<string> visited) => CanonicalComponent(MachineBinding, connected,
             Facts.Relationships.Where(relation => visited.Contains(relation.FromId) && visited.Contains(relation.ToId)),
-            returnedNullAsJsonNull: true, powerShellStrings: true);
+            returnedNullAsJsonNull: true, powerShellStrings: true, profile: EvidenceProfile);
 
     private static readonly JsonSerializerOptions PowerShellStringEncoding = new()
     {
@@ -646,10 +664,12 @@ public sealed class WindowsRealStorageTopology
         IReadOnlyList<WinPoolSourceObject> connected,
         IEnumerable<WinPoolFactRelationship> relationships,
         bool returnedNullAsJsonNull = false, bool powerShellStrings = false,
-        bool normalizePhysicalAllocationCounter = true)
+        bool normalizePhysicalAllocationCounter = true,
+        WindowsRealStorageReadProfile? profile = null)
     {
         var builder = new StringBuilder();
         builder.Append("real-component-v2\n").Append(machineBinding).Append('\n');
+        if (profile is not null) builder.Append("profile|").Append(profile.Id).Append('\n');
         var visited = connected.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var item in connected.OrderBy(item => item.Id, StringComparer.Ordinal))
         {
@@ -657,6 +677,7 @@ public sealed class WindowsRealStorageTopology
                 .Append(item.Id).Append('|').Append(item.SourceIdentity).Append('\n');
             foreach (var field in item.Fields.OrderBy(field => field.Name, StringComparer.Ordinal))
             {
+                if (profile is not null && !profile.IncludesField(ClassName(item.ObjectType), field.Name)) continue;
                 // File writes can change free-space counters without changing
                 // identity, protection, geometry, layout, or mount ownership.
                 if (field.Name.Equals("SizeRemaining", StringComparison.OrdinalIgnoreCase))
@@ -709,6 +730,21 @@ public sealed class WindowsRealStorageTopology
                 $"Real preflight lacks a complete {className} query.");
         }
     }
+
+    private static string ClassName(FactObjectType type) => type switch
+    {
+        FactObjectType.PhysicalDisk => "MSFT_PhysicalDisk", FactObjectType.StoragePool => "MSFT_StoragePool",
+        FactObjectType.StorageTier => "MSFT_StorageTier", FactObjectType.VirtualDisk => "MSFT_VirtualDisk",
+        FactObjectType.Disk => "MSFT_Disk", FactObjectType.Partition => "MSFT_Partition", FactObjectType.Volume => "MSFT_Volume",
+        _ => ""
+    };
+
+    private static bool RequiresClass(WinPoolFacts facts, string className) => className switch
+    {
+        "MSFT_Partition" => facts.Objects.Any(item => item.ObjectType == FactObjectType.Disk),
+        "MSFT_Volume" => facts.Objects.Any(item => item.ObjectType == FactObjectType.Partition),
+        _ => true
+    };
 
     private bool IsUnallocatedTemplateCapacity(WinPoolSourceObject item, StorageFieldIssue issue)
     {
@@ -907,6 +943,9 @@ public sealed record RealExactPhysicalMemberSetClosure(
 public interface IWindowsRealStorageFactSource
 {
     bool SupportsScopedCapture => false;
+    Task<StorageSystemDocument> CaptureForPreparationAsync(IReadOnlyList<StorageObjectId> targets,
+        CancellationToken cancellationToken) => CaptureFreshAsync(cancellationToken);
+    StorageInventoryScope? ResolveScope(OperationId operationId, string stepId, IReadOnlyList<StorageObjectId> targets) => null;
     Task<StorageSystemDocument> CaptureFreshAsync(CancellationToken cancellationToken);
     Task<StorageSystemDocument> CaptureFreshAsync(StorageInventoryScope scope, CancellationToken cancellationToken) =>
         Task.FromException<StorageSystemDocument>(new NotSupportedException("The real fact source does not support exact scoped collection."));
@@ -935,6 +974,23 @@ public sealed class WindowsRealStorageTopologyReader
     private readonly IRealMachineIdentityProvider machineIdentity;
     private readonly TimeProvider timeProvider;
 
+    public StorageInventoryScope? ResolveScope(OperationId operationId, string stepId, IReadOnlyList<StorageObjectId> targets) =>
+        source.ResolveScope(operationId, stepId, targets);
+
+    public async Task<WindowsRealStorageTopology> CaptureForPreparationAsync(IReadOnlyList<StorageObjectId> targets,
+        CancellationToken cancellationToken, string? evidenceProfile = null)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        cancellationToken = deadline.Token;
+        var binding = await machineIdentity.ReadBindingAsync(cancellationToken).ConfigureAwait(false);
+        var document = await source.CaptureForPreparationAsync(targets, cancellationToken).ConfigureAwait(false);
+        if (document.SourceFacts is not { } facts || timeProvider.GetUtcNow() - facts.InventoryCapturedAt > TimeSpan.FromMinutes(2)
+            || !WindowsRealStorageReadProfile.Covers(facts.ScopedCollection?.Scope.EvidenceProfile, evidenceProfile))
+            document = await source.CaptureFreshAsync(cancellationToken).ConfigureAwait(false);
+        return new(document, binding, timeProvider.GetUtcNow(), evidenceProfile);
+    }
+
     public WindowsRealStorageTopologyReader(
         IWindowsRealStorageFactSource? source = null,
         IRealMachineIdentityProvider? machineIdentity = null,
@@ -945,18 +1001,24 @@ public sealed class WindowsRealStorageTopologyReader
         this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public async Task<WindowsRealStorageTopology> CaptureAsync(CancellationToken cancellationToken)
+    public async Task<WindowsRealStorageTopology> CaptureAsync(CancellationToken cancellationToken, string? evidenceProfile = null)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        cancellationToken = deadline.Token;
         var binding = await machineIdentity.ReadBindingAsync(cancellationToken)
             .ConfigureAwait(false);
         var document = await source.CaptureFreshAsync(cancellationToken)
             .ConfigureAwait(false);
         return new WindowsRealStorageTopology(
-            document, binding, timeProvider.GetUtcNow());
+            document, binding, timeProvider.GetUtcNow(), evidenceProfile);
     }
 
     public async Task<WindowsRealStorageTopology> CaptureScopedAsync(StorageInventoryScope scope, CancellationToken cancellationToken)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        cancellationToken = deadline.Token;
         ArgumentNullException.ThrowIfNull(scope);
         scope.Validate();
         var binding = await machineIdentity.ReadBindingAsync(cancellationToken).ConfigureAwait(false);
@@ -964,8 +1026,9 @@ public sealed class WindowsRealStorageTopologyReader
         if (document.SystemId != scope.SystemId || document.SourceFacts is not { IsMerged: false, ScopedCollection: { Complete: true } collected }
             || collected.Scope.SystemId != scope.SystemId || collected.Scope.OperationId != scope.OperationId
             || collected.Scope.StepId != scope.StepId || collected.Scope.Generation != scope.Generation
+            || !WindowsRealStorageReadProfile.Covers(collected.Scope.EvidenceProfile, scope.EvidenceProfile)
             || !collected.Scope.Targets.SequenceEqual(scope.Targets))
             throw new InvalidDataException("Real scoped preflight requires fresh complete evidence for the requested operation and targets.");
-        return new WindowsRealStorageTopology(document, binding, timeProvider.GetUtcNow());
+        return new WindowsRealStorageTopology(document, binding, timeProvider.GetUtcNow(), scope.EvidenceProfile);
     }
 }

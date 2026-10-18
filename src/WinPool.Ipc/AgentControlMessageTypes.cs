@@ -2,6 +2,7 @@ namespace WinPool.Ipc;
 
 public static class AgentControlMessageTypes
 {
+    public const string AcknowledgeShutdownPreparation = "agent.shutdown.prepare.ack";
     public const string ReconcileRealOperation = "agent.request.reconcile_real_operation";
     public const string LoadRealOperationEvidence = "agent.request.load_real_operation_evidence";
     public const string PrepareRealStructureJob = "agent.request.prepare_real_structure_job";

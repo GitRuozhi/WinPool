@@ -21,8 +21,7 @@ public sealed class RealStructureResultSynchronizationTests
         f.Register();
         var operation = f.Frozen with { State = initialState, RequiresReconciliation = initialState == RealOperationState.OutcomeUnknown };
         long revision = 1;
-        AgentRealOperationStatusResponse Status() => new(operation.Plan.OperationId, revision, operation.State,
-            operation.Steps, operation.Code, operation.RequiresReconciliation);
+        AgentRealOperationStatusResponse Status() => LightStatus(operation, revision);
         var connection = new RecordingConnection(request => Success(request switch
         {
             QueryAgentRealOperationRequest => Status(),
@@ -30,6 +29,7 @@ public sealed class RealStructureResultSynchronizationTests
             LoadAgentRealOperationEvidenceRequest => new AgentRealOperationEvidenceResponse(operation, 0, null),
             _ => throw new InvalidOperationException("Recovery must not submit another write.")
         }, request));
+        RealOperationStatusCache.For(connection).Remember(f.Frozen);
         await RealOperationRecovery.RefreshAsync(connection, f.Submission, ObserveUnfinished, CancellationToken.None);
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var refreshing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -69,7 +69,7 @@ public sealed class RealStructureResultSynchronizationTests
         Assert.Equal(1, notifications);
         Assert.Equal(0, connection.ActiveWatchers);
         Assert.Equal(1, connection.WatchCalls);
-        Assert.Equal(2, connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>().Count());
+        Assert.Empty(connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>());
         Assert.All(connection.Requests, request => Assert.True(request is QueryAgentRealOperationRequest
             or ListAgentRecoverableRealOperationsRequest or LoadAgentRealOperationEvidenceRequest));
 
@@ -116,8 +116,7 @@ public sealed class RealStructureResultSynchronizationTests
         long revision = 10;
         var queries = 0;
         var reseeded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        AgentRealOperationStatusResponse Status() => new(operation.Plan.OperationId, revision, operation.State,
-            operation.Steps, operation.Code, operation.RequiresReconciliation);
+        AgentRealOperationStatusResponse Status() => LightStatus(operation, revision);
         var connection = new RecordingConnection(request =>
         {
             AgentResponse response;
@@ -131,6 +130,7 @@ public sealed class RealStructureResultSynchronizationTests
             else throw new InvalidOperationException();
             return Success(response, request);
         });
+        RealOperationStatusCache.For(connection).Remember(f.Frozen);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await using var watcher = RealOperationRecovery.WatchAsync(connection, f.Submission, timeout.Token).GetAsyncEnumerator();
         Assert.True(await watcher.MoveNextAsync());
@@ -157,7 +157,7 @@ public sealed class RealStructureResultSynchronizationTests
         Assert.False(f.Submission.IsBlocked);
         Assert.False(f.Session.OutcomeUnknown);
         Assert.Equal(2, queries);
-        Assert.Equal(2, connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>().Count());
+        Assert.Empty(connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>());
         Assert.Equal(0, connection.ActiveWatchers);
     }
 
@@ -176,6 +176,7 @@ public sealed class RealStructureResultSynchronizationTests
             LoadAgentRealOperationEvidenceRequest => new AgentRealOperationEvidenceResponse(unknown, 0, null),
             _ => throw new InvalidOperationException()
         }, request));
+        RealOperationStatusCache.For(connection).Remember(f.Frozen);
         using var cancellation = new CancellationTokenSource();
         await using var watcher = RealOperationRecovery.WatchAsync(connection, f.Submission, cancellation.Token).GetAsyncEnumerator();
         Assert.True(await watcher.MoveNextAsync());
@@ -818,6 +819,15 @@ public sealed class RealStructureResultSynchronizationTests
             Results.Register(Session, Frozen, Proposal, Mapping);
         }
     }
+
+    private static AgentRealOperationStatusResponse LightStatus(AgentRealOperationResponse operation, long revision) =>
+        new(operation.Plan.OperationId, revision, operation.State, operation.Steps.Select(step => step with
+        {
+            TargetEvidence = null, ResultEvidence = null,
+            ResultIdentity = step.State == RealOperationStepState.Verified
+                ? new("vd:verified", "os:verified") : null
+        }).ToArray(), operation.Code, operation.RequiresReconciliation, operation.ReconciliationDiagnostic,
+            operation.Plan.SystemId, operation.Plan.PlanHash, operation.Plan.Targets);
 
     private sealed class RecordingConnection(Func<AgentRequest, ApplicationResult<AgentResponse>> reply) : IAgentConnection
     {

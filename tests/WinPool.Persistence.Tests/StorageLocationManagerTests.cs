@@ -148,6 +148,7 @@ public sealed class StorageLocationManagerTests
     {
         using var locations = TemporaryLocations.Create();
         locations.WriteStandard("winpool.db", "database");
+        WinPoolSqliteStore.DrainConnectionPool(Path.Combine(locations.StandardRoot, StorageLocationManager.DatabaseFileName));
         File.WriteAllText(Path.Combine(
             locations.StandardRoot, StorageLocationManager.DatabaseFileName),
             "corrupt core database");
@@ -754,8 +755,10 @@ public sealed class StorageLocationManagerTests
         locations.WriteStandard("old-target.txt", "old standard");
         Directory.CreateDirectory(locations.PortableRoot);
         File.WriteAllText(Path.Combine(locations.PortableRoot, "latest.txt"), "latest portable");
-        await new WinPoolSqliteStore(Path.Combine(
-            locations.PortableRoot, StorageLocationManager.DatabaseFileName)).InitializeAsync();
+        var portableStore = new WinPoolSqliteStore(Path.Combine(
+            locations.PortableRoot, StorageLocationManager.DatabaseFileName));
+        await portableStore.InitializeAsync();
+        portableStore.DrainConnectionPool();
         var coordinator = new RecordingCoordinator();
         var manager = locations.CreateManager(coordinator, new FailingCommitter(coordinator));
         var plan = Assert.IsType<StorageLocationSwitchPlan>(
@@ -1191,7 +1194,7 @@ public sealed class StorageLocationManagerTests
             CorrelationId.New(),
             CancellationToken.None);
 
-        Assert.True(portableResult.IsSuccess);
+        Assert.True(portableResult.IsSuccess, string.Join("; ", portableResult.Messages.Select(message => message.Code)));
         Assert.Equal(StorageLocationMode.Portable, portableResult.Value!.Mode);
         Assert.Equal(
             ["quiesce", "resume"],
@@ -1581,9 +1584,14 @@ public sealed class StorageLocationManagerTests
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(path =>
                 Path.GetRelativePath(root, path).Replace('\\', '/')
-                + "=" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                    File.ReadAllBytes(path))))
+                + "=" + HashSharedFile(path))
             .ToArray();
+
+    private static string HashSharedFile(string path)
+    {
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(input));
+    }
 
     private static string ReadCoreMarker(string path)
     {
@@ -1851,6 +1859,7 @@ public sealed class StorageLocationManagerTests
 
         public void Dispose()
         {
+            TestDatabasePools.DrainDirectory(BaseDirectory);
             if (!Directory.Exists(BaseDirectory))
             {
                 return;

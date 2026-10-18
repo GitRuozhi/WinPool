@@ -1,5 +1,5 @@
 using System.Globalization;
-using System.Management;
+
 using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
@@ -51,63 +51,35 @@ public interface IWindowsRealStorageCapabilityReader
 
 public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapabilityReader
 {
-    private const string StorageNamespace = @"root\Microsoft\Windows\Storage";
+    private readonly WindowsPowerShellHost host;
+    public WindowsRealStorageCapabilityReader(WindowsPowerShellHost? host = null) => this.host = host ?? WindowsPowerShellHost.Shared;
     private static readonly string[] TierBooleanFields =
     [
         "SupportsStoragePoolCreation", "SupportsStorageTierCreation", "SupportsStorageTieredVirtualDiskCreation",
         "SupportsStorageTierDeletion", "SupportsStorageTierFriendlyNameModification"
     ];
 
-    public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
-        WindowsRealStorageTopology topology, StorageObjectId volume,
-        CancellationToken cancellationToken) => Task.Run(() =>
-            ReadVolumeFormat(topology, volume, "ReFS", cancellationToken), cancellationToken);
-
-    public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
-        WindowsRealStorageTopology topology, StorageObjectId volume, string fileSystem,
-        CancellationToken cancellationToken) => Task.Run(() =>
-            ReadVolumeFormat(topology, volume, fileSystem, cancellationToken), cancellationToken);
-
-    public Task<WindowsTierCapability> ReadTierAsync(
-        WindowsRealStorageTopology topology, StorageObjectId physicalDisk,
-        CancellationToken cancellationToken) => Task.Run(() =>
-            ReadTier(topology, physicalDisk, cancellationToken), cancellationToken);
-
-    public Task<VirtualDiskCreationSize> ReadTierCreationSizeAsync(
-        WindowsRealStorageTopology topology, StorageObjectId tier,
-        CancellationToken cancellationToken) => Task.Run(() =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (tier.Kind != StorageObjectKind.StorageTier)
-                throw new InvalidDataException("An exact existing tier template is required.");
-            var source = topology.RequireObject(tier);
-            var projected = topology.Snapshot.StorageTiers.Single(item => item.StableId == source.Id);
-            var pool = topology.Snapshot.StoragePools.Single(item => item.StableId == projected.PoolStableId && !item.IsPrimordial);
-            _ = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, pool.StableId),
-                pool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray());
-            if (projected.VirtualDiskStableId is not null)
-                throw new NotSupportedException("Tier size lookup is for an unused creation template, not existing-object expansion.");
-            using var searcher = Search("SELECT * FROM MSFT_StorageTier");
-            using var results = searcher.Get();
-            var candidates = results.Cast<ManagementObject>().ToArray();
-            try
-            {
-                var exact = RequireExact(candidates, RequiredText(source, "UniqueId"), RequiredText(source, "ObjectId"));
-                using var input = exact.GetMethodParameters("GetSupportedSize");
-                input["ResiliencySettingName"] = projected.ResiliencySettingName;
-                using var output = exact.InvokeMethod("GetSupportedSize", input,
-                    new InvokeMethodOptions { Timeout = TimeSpan.FromSeconds(10) });
-                if (output is null)
-                    throw new NotSupportedException("The exact HDD tier template did not return a supported Simple creation range.");
-                return ParseTierCreationSize(output["ReturnValue"], output["SupportedSizes"],
-                    output["TierSizeMin"], output["TierSizeMax"], output["TierSizeDivisor"]);
-            }
-            finally
-            {
-                foreach (var candidate in candidates) candidate.Dispose();
-            }
-        }, cancellationToken);
-
+    public Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(WindowsRealStorageTopology topology,
+        StorageObjectId volume, CancellationToken cancellationToken) => ReadVolumeFormatAsync(topology, volume, "ReFS", cancellationToken);
+    public async Task<VirtualDiskCreationSize> ReadTierCreationSizeAsync(WindowsRealStorageTopology topology,
+        StorageObjectId tier, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (tier.Kind != StorageObjectKind.StorageTier) throw new InvalidDataException("An exact existing tier template is required.");
+        var source = topology.RequireObject(tier);
+        var projected = topology.Snapshot.StorageTiers.Single(item => item.StableId == source.Id);
+        var pool = topology.Snapshot.StoragePools.Single(item => item.StableId == projected.PoolStableId && !item.IsPrimordial);
+        _ = topology.RequireExactPhysicalMemberSet(new(topology.SystemId, StorageObjectKind.StoragePool, pool.StableId),
+            pool.MemberPhysicalDiskIds.Select(id => new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, id)).ToArray());
+        if (projected.VirtualDiskStableId is not null) throw new NotSupportedException("Tier size lookup requires an unused creation template.");
+        var json = await host.QueryAsync(WindowsPowerShellQuery.TierSize,
+            new { UniqueId = RequiredText(source, "UniqueId"), ObjectId = RequiredText(source, "ObjectId"), projected.ResiliencySettingName }, cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(json); var range = document.RootElement;
+        static object? Number(JsonElement range, string name) => range.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetUInt64() : null;
+        var returned = range.GetProperty("ReturnValue").GetUInt32();
+        var sizes = range.GetProperty("SupportedSizes").EnumerateArray().Select(value => value.GetUInt64()).ToArray();
+        return ParseTierCreationSize(returned, sizes, Number(range,"TierSizeMin"), Number(range,"TierSizeMax"), Number(range,"TierSizeDivisor"));
+    }
     internal static VirtualDiskCreationSize ParseTierCreationSize(object? returnValue,
         object? supportedSizes, object? minimumValue, object? maximumValue, object? divisorValue)
     {
@@ -143,7 +115,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
     private static long TierSizeValue(object value) => value is ulong number && number <= long.MaxValue
         ? (long)number : throw new InvalidDataException("The tier template returned an invalid or overflowing UInt64 size.");
 
-    private static WindowsVolumeFormatCapability ReadVolumeFormat(
+    public async Task<WindowsVolumeFormatCapability> ReadVolumeFormatAsync(
         WindowsRealStorageTopology topology, StorageObjectId volume, string fileSystem,
         CancellationToken cancellationToken)
     {
@@ -172,38 +144,14 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
             uniqueId = RequiredText(source, "UniqueId");
             objectId = RequiredText(source, "ObjectId");
 
-            using var searcher = Search("SELECT * FROM MSFT_Volume");
-            using var results = searcher.Get();
-            var candidates = results.Cast<ManagementObject>().ToArray();
-            try
-            {
-                var exact = RequireExact(candidates, uniqueId, objectId);
-                using var parents = exact.GetRelated("MSFT_Partition");
-                var parentCandidates = parents.Cast<ManagementObject>().ToArray();
-                try
-                {
-                    if (parentCandidates.Length != 1
-                        || !Guid.TryParse(parentCandidates[0]["Guid"]?.ToString(), out var currentGuid)
-                        || currentGuid != expectedGuid
-                        || Convert.ToInt64(parentCandidates[0]["DiskNumber"], CultureInfo.InvariantCulture) != partition.DiskNumber
-                        || Convert.ToInt64(parentCandidates[0]["Offset"], CultureInfo.InvariantCulture) != partition.Offset
-                        || Convert.ToInt64(parentCandidates[0]["Size"], CultureInfo.InvariantCulture) != partition.Size)
-                        throw new InvalidDataException("The live volume-parent association or geometry changed.");
-                }
-                finally
-                {
-                    foreach (var parent in parentCandidates) parent.Dispose();
-                }
-                var fileSystems = ReadMethod(exact, "GetSupportedFileSystems", cancellationToken);
-                var clusterSizes = ReadMethod(exact, "GetSupportedClusterSizes", cancellationToken, fileSystem);
-                return new("queried", source.Id, partitionId, physicalId, uniqueId,
-                    objectId, DateTimeOffset.UtcNow, fingerprint, fileSystems, clusterSizes, null)
-                    { RequestedFileSystem = fileSystem };
-            }
-            finally
-            {
-                foreach (var candidate in candidates) candidate.Dispose();
-            }
+            var json = await host.QueryAsync(WindowsPowerShellQuery.VolumeFormat,
+                new { UniqueId = uniqueId, ObjectId = objectId, PartitionGuid = partition.Guid, partition.DiskNumber,
+                    partition.Offset, partition.Size, FileSystem = fileSystem }, cancellationToken).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(json);
+            var fileSystems = document.RootElement.GetProperty("FileSystems").Deserialize<WindowsCapabilityMethodResult>(WindowsPowerShellHost.JsonOptions);
+            var clusterSizes = document.RootElement.GetProperty("ClusterSizes").Deserialize<WindowsCapabilityMethodResult>(WindowsPowerShellHost.JsonOptions);
+            return new("queried", source.Id, partitionId, physicalId, uniqueId, objectId, DateTimeOffset.UtcNow,
+                fingerprint, fileSystems, clusterSizes, null) { RequestedFileSystem = fileSystem };
         }
         catch (Exception exception) when (exception is not OperationCanceledException
             and not OutOfMemoryException)
@@ -214,7 +162,7 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
         }
     }
 
-    private static WindowsTierCapability ReadTier(
+    public async Task<WindowsTierCapability> ReadTierAsync(
         WindowsRealStorageTopology topology, StorageObjectId physicalDisk,
         CancellationToken cancellationToken)
     {
@@ -256,23 +204,12 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
                 throw new InvalidDataException("The exact subsystem source query is incomplete.");
             uniqueId = RequiredText(source, "UniqueId");
             objectId = RequiredText(source, "ObjectId");
-            using var searcher = Search("SELECT * FROM MSFT_StorageSubSystem");
-            using var results = searcher.Get();
-            var candidates = results.Cast<ManagementObject>().ToArray();
-            try
-            {
-                var exact = RequireExact(candidates, uniqueId, objectId);
-                var fields = TierBooleanFields.Select(name => ReadField(exact, name,
-                        FactValueType.Boolean, source.Id)).ToList();
-                fields.Add(ReadField(exact, "PhysicalDisksPerStoragePoolMin",
-                    FactValueType.UInt64, source.Id));
-                return new("queried", physicalDisk.ProviderKey, subsystemId,
-                    uniqueId, objectId, DateTimeOffset.UtcNow, associations, fields, null);
-            }
-            finally
-            {
-                foreach (var candidate in candidates) candidate.Dispose();
-            }
+            var json = await host.QueryAsync(WindowsPowerShellQuery.TierCapability,
+                new { UniqueId = uniqueId, ObjectId = objectId }, cancellationToken).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(json);
+            var fields = document.RootElement.GetProperty("Fields").EnumerateArray().Select(field => ReadField(field, source.Id)).ToArray();
+            return new("queried", physicalDisk.ProviderKey, subsystemId, uniqueId, objectId,
+                DateTimeOffset.UtcNow, associations, fields, null);
         }
         catch (Exception exception) when (exception is not OperationCanceledException
             and not OutOfMemoryException)
@@ -282,78 +219,20 @@ public sealed class WindowsRealStorageCapabilityReader : IWindowsRealStorageCapa
         }
     }
 
-    private static WindowsCapabilityMethodResult ReadMethod(
-        ManagementObject volume, string name, CancellationToken cancellationToken, string fileSystem = "ReFS")
+    private static WinPoolSourceField ReadField(JsonElement field, string sourceRef)
     {
-        var raw = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        uint? returnValue = null;
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            using var input = name == "GetSupportedClusterSizes"
-                ? volume.GetMethodParameters(name) : null;
-            if (input is not null) input["FileSystem"] = fileSystem;
-            using var output = volume.InvokeMethod(name, input,
-                new InvokeMethodOptions { Timeout = TimeSpan.FromSeconds(10) });
-            if (output is null)
-                throw new InvalidDataException("The provider returned no method result.");
-            foreach (PropertyData property in output.Properties)
-                raw[property.Name] = JsonSerializer.SerializeToElement(property.Value);
-            if (output["ReturnValue"] is not null)
-                returnValue = Convert.ToUInt32(output["ReturnValue"], CultureInfo.InvariantCulture);
-            return new(returnValue == 0 ? "returned" : "provider_error",
-                returnValue, raw, returnValue is null ? "ReturnValue was not returned." : null);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException
-            and not OutOfMemoryException)
-        {
-            return new("unknown", returnValue, raw, Error(exception));
-        }
+        var name = field.GetProperty("Name").GetString()!;
+        var type = name == "PhysicalDisksPerStoragePoolMin" ? FactValueType.UInt64 : FactValueType.Boolean;
+        if (!field.GetProperty("Present").GetBoolean())
+            return WinPoolSourceField.Missing(name, type, sourceRef, FieldReadState.Unavailable, "Provider property is absent.");
+        var value = field.GetProperty("Value");
+        if (value.ValueKind == JsonValueKind.Null) return WinPoolSourceField.Returned<object?>(name, null, type, sourceRef);
+        if (type == FactValueType.Boolean && value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            return WinPoolSourceField.Returned(name, value.GetBoolean(), type, sourceRef);
+        if (type == FactValueType.UInt64 && value.TryGetUInt64(out var number))
+            return WinPoolSourceField.Returned(name, number, type, sourceRef);
+        return WinPoolSourceField.Missing(name, type, sourceRef, FieldReadState.Failed, "Provider property has an unexpected value type.");
     }
-
-    private static WinPoolSourceField ReadField(ManagementObject source,
-        string name, FactValueType type, string sourceRef)
-    {
-        try
-        {
-            var property = source.Properties.Cast<PropertyData>().SingleOrDefault(item => item.Name == name);
-            if (property is null)
-                return WinPoolSourceField.Missing(name, type, sourceRef,
-                    FieldReadState.Unavailable, "Provider property is absent.");
-            if (property.Value is null)
-                return WinPoolSourceField.Returned<object?>(name, null, type, sourceRef);
-            if (type == FactValueType.Boolean && property.Value is bool boolean)
-                return WinPoolSourceField.Returned(name, boolean, type, sourceRef);
-            if (type == FactValueType.UInt64 && property.Value is ushort or uint or ulong)
-                return WinPoolSourceField.Returned(name,
-                    Convert.ToUInt64(property.Value, CultureInfo.InvariantCulture), type, sourceRef);
-            return WinPoolSourceField.Missing(name, type, sourceRef,
-                FieldReadState.Failed, "Provider property has an unexpected value type.");
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            return WinPoolSourceField.Missing(name, type, sourceRef,
-                FieldReadState.Failed, Error(exception));
-        }
-    }
-
-    private static ManagementObjectSearcher Search(string fixedQuery)
-    {
-        var searcher = new ManagementObjectSearcher(StorageNamespace, fixedQuery);
-        searcher.Options.Timeout = TimeSpan.FromSeconds(10);
-        return searcher;
-    }
-
-    private static ManagementObject RequireExact(IEnumerable<ManagementObject> candidates,
-        string uniqueId, string objectId)
-    {
-        var matches = candidates.Where(item =>
-            StringComparer.Ordinal.Equals(item["UniqueId"]?.ToString(), uniqueId)
-            && StringComparer.Ordinal.Equals(item["ObjectId"]?.ToString(), objectId)).ToArray();
-        return matches.Length == 1 ? matches[0]
-            : throw new InvalidDataException("The provider object is absent or ambiguous for its exact UniqueId/ObjectId.");
-    }
-
     private static string RequiredText(WinPoolSourceObject source, string name) =>
         source.Field(name) is { ReadState: FieldReadState.Returned,
             Value: { ValueKind: JsonValueKind.String } value }

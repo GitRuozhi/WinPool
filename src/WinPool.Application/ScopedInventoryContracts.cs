@@ -12,6 +12,10 @@ public sealed record StorageInventoryScope(SystemId SystemId, OperationId Operat
     IReadOnlyList<StorageObjectId> Targets, IReadOnlyList<string> BeforeObjectIds,
     IReadOnlyList<StorageInventoryLocator> BeforeLocators, long Generation = 0)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? EvidenceProfile { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<StorageInventoryLocator>? BeforeComponentLocators { get; init; }
     public string Key => OperationId.Value.ToString("N") + ":" + (StepId ?? "result");
 
     public void Validate()
@@ -28,12 +32,24 @@ public sealed record StorageInventoryScope(SystemId SystemId, OperationId Operat
                 || locator.IdentityProperty is not ("UniqueId" or "ObjectId" or "Guid")
                 || string.IsNullOrWhiteSpace(locator.IdentityValue))
                 throw new InvalidDataException("The inventory scope contains an invalid provider locator.");
+        if (EvidenceProfile is not (null or "command-required-v1" or "command-required-resize-v1" or "command-metadata-v1" or "command-os-v1" or "command-os-resize-v1"))
+            throw new InvalidDataException("The inventory evidence profile is unsupported.");
+        if (BeforeComponentLocators is { } component)
+            foreach (var locator in component)
+                if (locator.Target.System != SystemId || !BeforeObjectIds.Contains(locator.Target.ProviderKey)
+                    || StorageInventoryScopeFactory.ClassFor(locator.Target.Kind) != locator.ClassName
+                    || locator.IdentityProperty is not ("UniqueId" or "ObjectId" or "Guid") || string.IsNullOrWhiteSpace(locator.IdentityValue))
+                    throw new InvalidDataException("A component absence locator must belong to the exact before domain.");
     }
 }
 
 /// <summary>Coverage is a deletion domain, not a claim that the rest of the machine was refreshed.</summary>
 public sealed record InventorySourceCoverage(string ScopeKey, ImmutableArray<string> ObjectIds,
-    bool Complete, long Generation = 0);
+    bool Complete, long Generation = 0)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public ImmutableArray<string>? FieldNames { get; init; }
+}
 
 public sealed record ScopedInventoryCollection(StorageInventoryScope Scope, DateTimeOffset StartedAt,
     DateTimeOffset CompletedAt, bool Complete, string? ReasonCode = null);
@@ -89,10 +105,25 @@ public static class StorageInventoryScopeFactory
         foreach (var edge in facts.Relationships.Where(x => x.Kind == "disk-supplement" && visited.Contains(x.FromId)))
             visited.Add(edge.ToId);
         var scope = new StorageInventoryScope(facts.SystemId, operationId, stepId, targets,
-            visited.Order(StringComparer.Ordinal).ToArray(), locators, generation);
+            visited.Order(StringComparer.Ordinal).ToArray(), locators, generation)
+        {
+            BeforeComponentLocators = visited.Where(id => objects.TryGetValue(id, out var item) && Classes.ContainsKey(item.ObjectType)
+                    && item.HasReliableIdentity && (item.ObjectType == FactObjectType.Partition ? new[] { "Guid", "ObjectId" } : new[] { "UniqueId", "ObjectId" })
+                        .Any(name => item.Field(name) is { ReadState: FieldReadState.Returned, Value: { ValueKind: JsonValueKind.String } value }
+                            && !string.IsNullOrWhiteSpace(value.GetString())))
+                .Select(id => Resolve(facts, new StorageObjectId(facts.SystemId, KindFor(objects[id].ObjectType), id))).ToArray()
+        };
         scope.Validate();
         return scope;
     }
+
+    private static StorageObjectKind KindFor(FactObjectType type) => type switch
+    {
+        FactObjectType.PhysicalDisk => StorageObjectKind.PhysicalDisk, FactObjectType.StoragePool => StorageObjectKind.StoragePool,
+        FactObjectType.StorageTier => StorageObjectKind.StorageTier, FactObjectType.VirtualDisk => StorageObjectKind.VirtualDisk,
+        FactObjectType.Disk => StorageObjectKind.OsDisk, FactObjectType.Partition => StorageObjectKind.Partition,
+        FactObjectType.Volume => StorageObjectKind.Volume, _ => throw new InvalidDataException("A component locator requires a storage object.")
+    };
 
     public static StorageInventoryLocator Resolve(WinPoolFacts facts, StorageObjectId target)
     {

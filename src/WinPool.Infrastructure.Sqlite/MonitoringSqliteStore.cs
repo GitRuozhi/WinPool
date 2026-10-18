@@ -36,6 +36,7 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
             {
                 // Only the exact former schema may migrate. Unknown or damaged databases remain untouched.
                 await VerifyCurrentSchemaAsync(cancellationToken, LegacySchemaDefinition);
+                await InitializeJournalAsync(cancellationToken);
                 await using var migrationConnection = await OpenConnectionAsync(cancellationToken);
                 await using var migration = (SqliteTransaction)await migrationConnection.BeginTransactionAsync(cancellationToken);
                 await using var upgrade = migrationConnection.CreateCommand();
@@ -64,9 +65,11 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
             }
 
             await VerifyCurrentSchemaAsync(cancellationToken);
+            await InitializeJournalAsync(cancellationToken);
             return;
         }
 
+        await InitializeJournalAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -83,20 +86,35 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
         await transaction.CommitAsync(cancellationToken);
     }
 
+    private async Task InitializeJournalAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode=WAL;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<SqliteConnection> OpenConnectionAsync(
         CancellationToken cancellationToken = default)
     {
         var connection = new SqliteConnection(connectionString);
+        try
+        {
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             PRAGMA foreign_keys=ON;
-            PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
             PRAGMA busy_timeout=5000;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
     }
 
     /// <summary>
@@ -165,6 +183,14 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
     {
         using var poolIdentity = new SqliteConnection(connectionString);
         SqliteConnection.ClearPool(poolIdentity);
+    }
+
+    internal async Task VerifyForMigrationAsync(CancellationToken cancellationToken)
+    {
+        var inspection = await InspectExistingAsync(cancellationToken);
+        if (!inspection.HasUserTables || inspection.SchemaVersion != CurrentSchemaVersion)
+            throw new CurrentMonitoringSchemaCorruptException("schema_version");
+        await VerifyCurrentSchemaAsync(cancellationToken);
     }
 
     private async Task<ExistingInspection> InspectExistingAsync(
@@ -270,68 +296,13 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared,
-            Pooling = false,
+            Pooling = true,
             ForeignKeys = true,
             DefaultTimeout = 5
         }.ToString();
 
-    private async Task<ReadOnlyDatabase> OpenReadOnlyDatabaseAsync(
-        CancellationToken cancellationToken)
-    {
-        var walPath = DatabasePath + "-wal";
-        string? copiedDirectory = null;
-        var dataSource = DatabasePath;
-        if (File.Exists(walPath))
-        {
-            // immutable=1 would ignore committed schema data still residing in
-            // a WAL after an unclean exit. A normal read-only SQLite open sees
-            // it, but can create a shared-memory sidecar beside an unknown
-            // format. Inspect a private byte-for-byte copy instead, leaving the
-            // source database and its WAL entirely untouched.
-            copiedDirectory = Path.Combine(
-                Path.GetTempPath(),
-                $"WinPool-monitoring-inspect-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(copiedDirectory);
-            dataSource = Path.Combine(copiedDirectory, Path.GetFileName(DatabasePath));
-            File.Copy(DatabasePath, dataSource);
-            File.Copy(walPath, dataSource + "-wal");
-            var sourceSharedMemory = DatabasePath + "-shm";
-            if (File.Exists(sourceSharedMemory))
-            {
-                File.Copy(sourceSharedMemory, dataSource + "-shm");
-            }
-        }
-
-        // Without a WAL, immutable=1 prevents even a read-only schema probe
-        // from creating a sidecar next to a legacy or corrupted source file.
-        var connection = new SqliteConnection(
-            new SqliteConnectionStringBuilder
-            {
-                DataSource = copiedDirectory is null
-                    ? $"file:{DatabasePath.Replace('\\', '/')}?immutable=1"
-                    : dataSource,
-                Mode = SqliteOpenMode.ReadOnly,
-                Cache = SqliteCacheMode.Private,
-                Pooling = false,
-                ForeignKeys = true,
-                DefaultTimeout = 5
-            }.ToString());
-        try
-        {
-            await connection.OpenAsync(cancellationToken);
-            return new ReadOnlyDatabase(connection, copiedDirectory);
-        }
-        catch
-        {
-            await connection.DisposeAsync();
-            if (copiedDirectory is not null)
-            {
-                Directory.Delete(copiedDirectory, recursive: true);
-            }
-
-            throw;
-        }
-    }
+    private Task<SqliteReadOnlyInspection> OpenReadOnlyDatabaseAsync(CancellationToken cancellationToken) =>
+        SqliteReadOnlyInspection.OpenAsync(DatabasePath, cancellationToken);
 
     private static async Task<SchemaContract> ReadContractAsync(
         SqliteConnection connection,
@@ -584,22 +555,6 @@ public sealed class MonitoringSqliteStore : ISqliteDatabaseStore
         string.Concat(definition.Where(character => !char.IsWhiteSpace(character)));
 
     private sealed record ExistingInspection(bool HasUserTables, int? SchemaVersion);
-
-    private sealed class ReadOnlyDatabase(
-        SqliteConnection connection,
-        string? copiedDirectory) : IAsyncDisposable
-    {
-        public SqliteConnection Connection { get; } = connection;
-
-        public async ValueTask DisposeAsync()
-        {
-            await Connection.DisposeAsync();
-            if (copiedDirectory is not null && Directory.Exists(copiedDirectory))
-            {
-                Directory.Delete(copiedDirectory, recursive: true);
-            }
-        }
-    }
 
     private sealed record SchemaContract(IReadOnlyDictionary<string, TableContract> Tables);
 

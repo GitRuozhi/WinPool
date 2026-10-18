@@ -18,4 +18,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\WinPool.Infrastructure.Sqlite\WinPool.Infrastructure.Sqlite.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures\schema19.sql" />
+    <EmbeddedResource Include="Fixtures\schema20.sql" />
+  </ItemGroup>
 </Project>

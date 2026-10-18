@@ -8,10 +8,9 @@ namespace WinPool.Persistence.Tests;
 
 public sealed class BuildOperationGuardTests
 {
-    [Fact]
+    [WindowsPowerShellFact]
     public async Task ActiveRootFollowsExternalPointerInBothDirections()
     {
-        if (!OperatingSystem.IsWindows()) return;
         await using var fixture = new Fixture();
         var standard = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
         var portable = await fixture.CreateDatabaseAsync(fixture.PortableRoot);
@@ -32,10 +31,9 @@ public sealed class BuildOperationGuardTests
         Assert.NotEqual(0, await fixture.ProbeAsync());
     }
 
-    [Fact]
+    [WindowsPowerShellFact]
     public async Task MissingCorruptAndAmbiguousRootsRefuseButPristineRootPasses()
     {
-        if (!OperatingSystem.IsWindows()) return;
         await using var fixture = new Fixture();
         Assert.Equal(0, await fixture.ProbeAsync());
         var store = await fixture.CreateDatabaseAsync(fixture.PortableRoot);
@@ -53,20 +51,20 @@ public sealed class BuildOperationGuardTests
         _ = store;
     }
 
-    [Theory]
+    [WindowsPowerShellTheory]
     [InlineData(PersistedOperationState.Prepared)]
     [InlineData(PersistedOperationState.Accepted)]
     [InlineData(PersistedOperationState.Running)]
     public async Task RefusalIdentifiesOperationAndStateWithoutChangingDatabase(
         PersistedOperationState state)
     {
-        if (!OperatingSystem.IsWindows()) return;
         await using var fixture = new Fixture();
         var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
         var operationId = await fixture.PrepareAsync(store);
         await fixture.ExecuteSqlAsync(store,
             "UPDATE operation_plans SET state = $state;", ("$state", (object)(int)state));
-        var before = await File.ReadAllBytesAsync(store.DatabasePath);
+        store.DrainConnectionPool();
+        var before = await ReadSharedBytesAsync(store.DatabasePath);
 
         Assert.NotEqual(0, await fixture.ProbeAsync());
 
@@ -74,50 +72,84 @@ public sealed class BuildOperationGuardTests
         Assert.Contains($"state={state}", fixture.LastProbeError);
         Assert.Contains("existing runtime tree", fixture.LastProbeError);
         Assert.Contains("query by OperationId for read-only reconciliation", fixture.LastProbeError);
-        Assert.Equal(before, await File.ReadAllBytesAsync(store.DatabasePath));
+        Assert.Equal(before, await ReadSharedBytesAsync(store.DatabasePath));
     }
 
-    [Fact]
+    [WindowsPowerShellFact]
     public async Task StoppedUnknownResultAllowsRepairWithoutChangingDatabaseOrWriteBarrier()
     {
-        if (!OperatingSystem.IsWindows()) return;
         await using var fixture = new Fixture();
         var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
         var operationId = await fixture.PrepareAsync(store);
         await fixture.ExecuteSqlAsync(store,
             "UPDATE operation_plans SET state = $state;", ("$state", (object)(int)PersistedOperationState.OutcomeUnknown));
-        var before = await File.ReadAllBytesAsync(store.DatabasePath);
+        store.DrainConnectionPool();
+        var before = await ReadSharedBytesAsync(store.DatabasePath);
 
         Assert.Equal(0, await fixture.ProbeAsync());
 
         var reader = new OperationPlanRepository(store);
         Assert.True(await reader.HasRealWriteBarrierAsync());
         Assert.Equal(PersistedOperationState.OutcomeUnknown, (await reader.GetAsync(operationId))!.State);
-        Assert.Equal(before, await File.ReadAllBytesAsync(store.DatabasePath));
+        Assert.Equal(before, await ReadSharedBytesAsync(store.DatabasePath));
     }
 
-    [Theory]
+    [WindowsPowerShellTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UnknownIssuedHostBlocksRepairOnlyForItsExactLiveIncarnation(bool matchingStart)
+    {
+        await using var fixture = new Fixture();
+        var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
+        await fixture.PrepareAsync(store);
+        var executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell", "v1.0", "powershell.exe");
+        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Threading.Thread]::Sleep(30000)" })
+            start.ArgumentList.Add(argument);
+        using var host = Process.Start(start)!;
+        try
+        {
+            var actualStart = new DateTimeOffset(host.StartTime.ToUniversalTime());
+            var witness = new WinPool.Application.PowerShellHostCall(Guid.NewGuid(), host.Id,
+                matchingStart ? actualStart : actualStart.AddSeconds(-1), Guid.NewGuid());
+            var target = System.Text.Json.JsonSerializer.Serialize(new { HostCall = witness });
+            await fixture.ExecuteSqlAsync(store,
+                "UPDATE operation_steps SET target_json=$target; UPDATE operation_plans SET state=$state;",
+                ("$target", target), ("$state", (int)PersistedOperationState.OutcomeUnknown));
+            Assert.Equal(matchingStart, await fixture.ProbeAsync() != 0);
+        }
+        finally
+        {
+            if (!host.HasExited) host.Kill();
+            await host.WaitForExitAsync();
+        }
+        Assert.Equal(0, await fixture.ProbeAsync());
+        Assert.True(await new OperationPlanRepository(store).HasRealWriteBarrierAsync());
+    }
+
+    [WindowsPowerShellTheory]
     [InlineData(17)]
     [InlineData(18)]
     [InlineData(19)]
     [InlineData(20)]
+    [InlineData(21)]
     public async Task SupportedSchemasWithoutRealOperationsPassWithoutUpgrade(int version)
     {
-        if (!OperatingSystem.IsWindows()) return;
         await using var fixture = new Fixture();
         var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
         await fixture.ExecuteSqlAsync(store,
             "UPDATE schema_info SET schema_version = $version WHERE singleton = 1;", ("$version", (object)version));
-        var before = await File.ReadAllBytesAsync(store.DatabasePath);
+        store.DrainConnectionPool();
+        var before = await ReadSharedBytesAsync(store.DatabasePath);
 
         Assert.Equal(0, await fixture.ProbeAsync());
-        Assert.Equal(before, await File.ReadAllBytesAsync(store.DatabasePath));
+        Assert.Equal(before, await ReadSharedBytesAsync(store.DatabasePath));
     }
 
-    [Fact]
+    [WindowsPowerShellFact]
     public async Task MalformedIdentifierStillBlocksWithBoundedDiagnostic()
     {
-        if (!OperatingSystem.IsWindows()) return;
         await using var fixture = new Fixture();
         var store = await fixture.CreateDatabaseAsync(fixture.StandardRoot);
         await fixture.PrepareAsync(store);
@@ -134,8 +166,18 @@ public sealed class BuildOperationGuardTests
         Assert.True(fixture.LastProbeError.Length < 2048);
     }
 
+    private static async Task<byte[]> ReadSharedBytesAsync(string path)
+    {
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
+        using var contents = new MemoryStream();
+        await input.CopyToAsync(contents);
+        return contents.ToArray();
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
+        private readonly List<WinPoolSqliteStore> stores = [];
         private readonly string root = Path.Combine(Path.GetTempPath(),
             "WinPool.Build.Guard.Tests", Guid.NewGuid().ToString("N"));
         public string StandardRoot => Path.Combine(root, "Local", "WinPool");
@@ -148,6 +190,7 @@ public sealed class BuildOperationGuardTests
         {
             var store = new WinPoolSqliteStore(Path.Combine(dataRoot, "winpool.db"));
             await store.InitializeAsync();
+            stores.Add(store);
             return store;
         }
 
@@ -238,9 +281,24 @@ public sealed class BuildOperationGuardTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            foreach (var store in stores) store.DrainConnectionPool();
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
             return ValueTask.CompletedTask;
         }
     }
+}
+
+internal static class WindowsPowerShellAvailability
+{
+    public static string? SkipReason => !OperatingSystem.IsWindows() ? "The build guard requires Windows." :
+        (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator)
+            .Any(directory => File.Exists(Path.Combine(directory, "pwsh.exe"))) ? null : "The build guard requires developer PowerShell (pwsh.exe).";
+}
+public sealed class WindowsPowerShellFactAttribute : FactAttribute
+{
+    public WindowsPowerShellFactAttribute() => Skip = WindowsPowerShellAvailability.SkipReason;
+}
+public sealed class WindowsPowerShellTheoryAttribute : TheoryAttribute
+{
+    public WindowsPowerShellTheoryAttribute() => Skip = WindowsPowerShellAvailability.SkipReason;
 }

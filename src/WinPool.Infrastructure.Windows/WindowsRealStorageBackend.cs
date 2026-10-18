@@ -89,9 +89,12 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
 {
     private sealed record CallContext(OperationId OperationId, string StepId,
         WindowsRealStorageTopology Before, WindowsStorageCommandTarget Target,
-        WindowsRealStorageSafetyEvidence? Safety) : RealStepCallContext(OperationId, StepId);
+        WindowsRealStorageSafetyEvidence? Safety) : RealStepCallContext(OperationId, StepId)
+    {
+        public WindowsPowerShellWriteLease? WriteLease { get; init; }
+        public override ValueTask DisposeAsync() => WriteLease?.DisposeAsync() ?? ValueTask.CompletedTask;
+    }
     private static readonly TimeSpan PostCallWindow = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan PostCallPoll = TimeSpan.FromSeconds(2);
     private readonly WindowsRealOperationPlanner planner;
     private readonly WindowsRealStorageTopologyReader topologyReader;
     private readonly IWindowsRealStorageCommandAdapter adapter;
@@ -99,6 +102,21 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
     private readonly IWindowsStorageJobReader storageJobReader;
     // Only provider selectors are retained. Every use collects new unmerged facts.
     private readonly ConcurrentDictionary<OperationId, StorageInventoryScope> operationScopes = new();
+
+    public void ReleaseOperation(OperationId operationId) => operationScopes.TryRemove(operationId, out _);
+
+    public async Task<RealStepPreflight> ReserveStepCallAsync(OperationPlan plan, RealOperationStep step,
+        RealStepPreflight preflight, CancellationToken cancellationToken)
+    {
+        // Each MAX candidate owns its own reservation and durable attempt.
+        if (IsMaximumCapacityMacro(step.Command)) return preflight;
+        if (preflight.CallContext is not CallContext context || context.OperationId != plan.OperationId || context.StepId != step.Id)
+            throw new InvalidDataException("A matching fresh step context is required before reserving its host.");
+        var lease = await adapter.ReserveWriteAsync(cancellationToken).ConfigureAwait(false);
+        var target = context.Target with { HostCall = lease?.HostCall };
+        return preflight with { TargetEvidenceJson = JsonSerializer.Serialize(target),
+            CallContext = context with { Target = target, WriteLease = lease } };
+    }
 
     public WindowsRealStorageBackend(
         IWindowsRealStorageCommandAdapter adapter,
@@ -141,6 +159,9 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         IReadOnlyDictionary<string, string> verifiedStepOutputs,
         CancellationToken cancellationToken)
     {
+        using var readDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        readDeadline.CancelAfter(PostCallWindow);
+        cancellationToken = readDeadline.Token;
         var stored = RequireFrozenStep(plan, step);
         var topology = await CaptureOperationTopologyAsync(plan, step.Id, cancellationToken)
             .ConfigureAwait(false);
@@ -332,7 +353,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             // The caller has already persisted CallIssued. Once this call starts,
             // transport cancellation may not terminate the storage provider.
             provider = await StorageOperationTiming.MeasureAsync("real.provider", () => adapter.ExecuteAsync(
-                stored.Command, target, CancellationToken.None), plan.OperationId, step.Id, "exact-provider")
+                stored.Command, target, context.WriteLease, CancellationToken.None), plan.OperationId, step.Id, "exact-provider")
                 .ConfigureAwait(false);
             provider = provider with
             {
@@ -348,6 +369,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                 "real.provider_return_unknown",
                 JsonSerializer.Serialize(new { exception = exception.GetType().Name }));
         }
+        finally { await context.DisposeAsync().ConfigureAwait(false); }
 
         if (!provider.ProviderReturned)
         {
@@ -366,11 +388,19 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                 "real.provider_reported_uncertain_result", JsonSerializer.Serialize(provider));
 
         var deadline = timeProvider.GetUtcNow().Add(PostCallWindow);
+        using var observation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        observation.CancelAfter(PostCallWindow);
+        var observationToken = observation.Token;
+        var probe = 0;
+        var fullFallbackUsed = false;
+        var fullNext = false;
         do
         {
             try
             {
-                var after = await CaptureWithinWindowAsync(plan, step.Id, deadline, cancellationToken)
+                var useFull = fullNext;
+                fullNext = false;
+                var after = await CaptureWithinWindowAsync(plan, step.Id, deadline, observationToken, useFull)
                     .ConfigureAwait(false);
                 var afterClosure = after.RequireSinglePhysicalClosure([physical]);
                 if (!StringComparer.Ordinal.Equals(afterClosure.PhysicalMemberFingerprint,
@@ -384,10 +414,10 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                 {
                     var observedSafety = stored.Command is SetDiskOnlineCommand diskState
                         ? await planner.ValidateObservedDiskStateWithEvidenceAsync(
-                            after, afterClosure, diskState, cancellationToken).ConfigureAwait(false)
+                            after, afterClosure, diskState, observationToken).ConfigureAwait(false)
                         : stored.Command is CreateTieredVirtualDiskCommand
                             ? await planner.ValidatePartitionSafetyWithEvidenceAsync(
-                                after, afterClosure, stored.Command, cancellationToken).ConfigureAwait(false)
+                                after, afterClosure, stored.Command, observationToken).ConfigureAwait(false)
                             : null;
                     if (stored.Command is SetDiskOnlineCommand)
                         RequireOfflinePartitionProof(after, afterClosure, observedSafety);
@@ -412,16 +442,19 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                     { VerifiedPostState = PostState(after) };
                 }
             }
+            catch (OperationCanceledException) when (observation.IsCancellationRequested) { break; }
             catch (Exception exception) when (exception is InvalidDataException
                 or IOException or UnauthorizedAccessException or InvalidOperationException
                 or JsonException or NotSupportedException or ArgumentException
-                or System.Management.ManagementException or System.Runtime.InteropServices.COMException or TimeoutException)
+                or System.Runtime.InteropServices.COMException or TimeoutException)
             {
                 // A short-lived provider lag is possible. Failure to observe a
                 // complete post-state by the deadline becomes OutcomeUnknown.
+                if (!fullFallbackUsed && !fullNext && topologyReader.SupportsScopedCapture)
+                { fullNext = true; fullFallbackUsed = true; }
             }
             if (timeProvider.GetUtcNow() >= deadline) break;
-            await Task.Delay(PostCallPoll, cancellationToken).ConfigureAwait(false);
+            if (!await DelayObservationProbeAsync(probe++, deadline, observationToken).ConfigureAwait(false)) break;
         } while (true);
 
         return new RealStepResult(RealStepOutcome.OutcomeUnknown,
@@ -465,6 +498,9 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         IReadOnlyList<RealOperationStepProgress> persistedSteps,
         CancellationToken cancellationToken)
     {
+        using var readDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        readDeadline.CancelAfter(PostCallWindow);
+        cancellationToken = readDeadline.Token;
         // This routine only reads. In particular, an uncertain CallIssued step
         // is never replayed to make the state appear complete.
         var frozen = plan.RealOperation;
@@ -741,7 +777,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException
             or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException
-            or System.Management.ManagementException or System.Runtime.InteropServices.COMException)
+            or System.Runtime.InteropServices.COMException)
         {
             return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
         }
@@ -1107,7 +1143,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         catch (Exception exception) when (exception is JsonException or InvalidDataException
             or IOException or UnauthorizedAccessException or InvalidOperationException
             or NotSupportedException or ArgumentException
-            or System.Management.ManagementException or System.Runtime.InteropServices.COMException)
+            or System.Runtime.InteropServices.COMException)
         {
             return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
         }
@@ -1308,7 +1344,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or IOException
             or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException
-            or TimeoutException or System.Management.ManagementException or System.Runtime.InteropServices.COMException)
+            or TimeoutException or System.Runtime.InteropServices.COMException)
         {
             return Unknown(steps, "real.reconciliation_step_outcome_unknown");
         }
@@ -1382,7 +1418,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         catch (Exception exception) when (exception is JsonException or InvalidDataException
             or IOException or UnauthorizedAccessException or InvalidOperationException
             or NotSupportedException or ArgumentException
-            or System.Management.ManagementException or System.Runtime.InteropServices.COMException)
+            or System.Runtime.InteropServices.COMException)
         {
             return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
         }
@@ -1526,29 +1562,47 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         new(topology.Document, topology.Facts.ScopedCollection?.Scope, topology.Facts.InventoryCapturedAt);
 
     private async Task<WindowsRealStorageTopology> CaptureWithinWindowAsync(OperationPlan plan,
-        string stepId, DateTimeOffset deadline, CancellationToken cancellationToken)
+        string stepId, DateTimeOffset deadline, CancellationToken cancellationToken, bool fullFallback = false)
     {
         var remaining = deadline - timeProvider.GetUtcNow();
         if (remaining <= TimeSpan.Zero) throw new TimeoutException("The read-only observation window expired.");
         using var bounded = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         bounded.CancelAfter(remaining);
-        try { return await CaptureOperationTopologyAsync(plan, stepId, bounded.Token).ConfigureAwait(false); }
+        try
+        {
+            return fullFallback
+                ? await StorageOperationTiming.MeasureAsync("real.capture.full", () => topologyReader.CaptureAsync(bounded.Token,
+                    plan.RealOperation!.EvidenceProfile), plan.OperationId, stepId, "narrow-evidence-unavailable-once").ConfigureAwait(false)
+                : await CaptureOperationTopologyAsync(plan, stepId, bounded.Token).ConfigureAwait(false);
+        }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { throw new TimeoutException("The read-only observation window expired."); }
+    }
+
+    private async Task<bool> DelayObservationProbeAsync(int probe, DateTimeOffset deadline, CancellationToken token)
+    {
+        var remaining = deadline - timeProvider.GetUtcNow();
+        if (remaining <= TimeSpan.Zero || token.IsCancellationRequested) return false;
+        var delay = TimeSpan.FromMilliseconds(Math.Min(2000, 100 * (1 << Math.Min(probe, 5))));
+        if (delay > remaining) delay = remaining;
+        try { await Task.Delay(delay, timeProvider, token).ConfigureAwait(false); return true; }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { return false; }
     }
 
     private Task<WindowsRealStorageTopology> CaptureOperationTopologyAsync(
         OperationPlan plan, string stepId, CancellationToken cancellationToken)
     {
+        if (!operationScopes.ContainsKey(plan.OperationId) && topologyReader.ResolveScope(plan.OperationId, stepId, plan.Targets) is { } current)
+            operationScopes.TryAdd(plan.OperationId, current);
         if (topologyReader.SupportsScopedCapture && operationScopes.TryGetValue(plan.OperationId, out var scope))
         {
-            var currentScope = scope with { StepId = stepId };
+            var currentScope = scope with { StepId = stepId, EvidenceProfile = plan.RealOperation!.EvidenceProfile };
             return StorageOperationTiming.MeasureAsync("real.capture.scoped",
                 () => topologyReader.CaptureScopedAsync(currentScope, cancellationToken),
                 plan.OperationId, stepId, currentScope.Key);
         }
         return StorageOperationTiming.MeasureAsync("real.capture.full",
-            () => topologyReader.CaptureAsync(cancellationToken), plan.OperationId, stepId,
+            () => topologyReader.CaptureAsync(cancellationToken, plan.RealOperation!.EvidenceProfile), plan.OperationId, stepId,
             topologyReader.SupportsScopedCapture ? "initial-safe-locator" : "source-scoped-unavailable");
     }
 

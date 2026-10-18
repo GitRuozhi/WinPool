@@ -194,7 +194,7 @@ try { $keys = @(Get-ExactTierMemberKeys $tier $virtual $pool $virtualTiers) } ca
         start.ArgumentList.Add("-NoProfile");
         start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-EncodedCommand");
-        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(harness));
+        start.ArgumentList.Add(PowerShellFixtureScriptCodec.EncodeFixedCompressedScript(harness));
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();

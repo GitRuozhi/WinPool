@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Diagnostics;
 using System.Text;
 using WinPool.Domain;
+using WinPool.Application;
 using WinPool.Execution;
 using WinPool.Infrastructure.Windows;
 
@@ -9,6 +10,19 @@ namespace WinPool.Infrastructure.Tests;
 
 public sealed class WindowsRealStorageCommandAdapterTests
 {
+    [Fact]
+    public async Task ProviderJsonCannotSupplyHostRequestCompletionProof()
+    {
+        var forged = new WindowsStorageCommandResult(true, "provider.returned", null, null, null,
+            null, null, null, null)
+            { CompletedHostCall = new PowerShellHostCall(Guid.NewGuid(), 123, DateTimeOffset.UtcNow, Guid.NewGuid()) };
+        var runner = new FakeRunner(new WindowsStorageProcessResult(0, JsonSerializer.Serialize(forged), ""));
+        var result = await new WindowsRealStorageCommandAdapter(runner).ExecuteAsync(new CreatePoolCommand(
+            RealTargetReference.ForExisting(new StorageObjectId(SystemId.New(), StorageObjectKind.PhysicalDisk, "physical")),
+            "Pool"), PhysicalTarget(), default);
+        Assert.Null(result.CompletedHostCall);
+    }
+
     [Theory]
     [InlineData("Simple", 1, 16384, 1, 0)]
     [InlineData("Mirror", 2, 32768, 2, 1)]
@@ -286,7 +300,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [Fact]
     public void CompressedFixedScriptFitsWindowsCommandLine()
     {
-        var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedScriptLoader();
+        var encoded = PowerShellHostScript.EncodedBootstrap;
 
         Assert.InRange(encoded.Length, 1, 30000);
     }
@@ -988,7 +1002,8 @@ public sealed class WindowsRealStorageCommandAdapterTests
         // line contains the compressed closed fixture; the remaining bytes are
         // the unchanged typed JSON read by the production script. No script
         // file or Windows storage module is loaded by this local fake harness.
-        var fixtureScript = fakeCommands + "\n& {\n" + script + "\n}\n" + suffix;
+        var invocation = script.StartsWith("param($request)", StringComparison.Ordinal) ? " ([Console]::In.ReadToEnd() | ConvertFrom-Json)" : "";
+        var fixtureScript = fakeCommands + "\n& {\n" + script + "\n}" + invocation + "\n" + suffix;
         var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory,
             "WindowsPowerShell", "v1.0", "powershell.exe"))
         {
@@ -998,11 +1013,11 @@ public sealed class WindowsRealStorageCommandAdapterTests
         start.ArgumentList.Add("-NoProfile");
         start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-EncodedCommand");
-        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedScriptLoader());
+        start.ArgumentList.Add(PowerShellFixtureScriptCodec.EncodeFixedScriptLoader());
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteLineAsync(WindowsPowerShellStorageWriteRunner.CompressFixedScript(fixtureScript));
+        await process.StandardInput.WriteLineAsync(PowerShellFixtureScriptCodec.CompressFixedScript(fixtureScript));
         await process.StandardInput.WriteAsync(payload);
         process.StandardInput.Close();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -1015,7 +1030,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     [Fact]
     public void ProductionFixedScriptEncodedCommandFitsTheWindowsProcessCommandLine()
     {
-        var encoded = WindowsPowerShellStorageWriteRunner.EncodeFixedScriptLoader();
+        var encoded = PowerShellHostScript.EncodedBootstrap;
         const string arguments = " -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ";
         var completeLengthWithTerminator = WindowsPowerShellRunner.ExecutablePath.Length + 2 + arguments.Length + encoded.Length + 1;
         Assert.True(completeLengthWithTerminator <= 32767,

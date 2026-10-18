@@ -9,7 +9,7 @@ using WinPool.Infrastructure.Windows;
 
 namespace WinPool.Agent.Tests;
 
-public sealed class AgentRealOperationServiceTests
+public sealed partial class AgentRealOperationServiceTests
 {
     [Fact]
     public async Task StructurePreparationRejectsChangedOrdinaryVirtualDiskLayoutWithTheOriginalDraftDigest()
@@ -1222,7 +1222,7 @@ public sealed class AgentRealOperationServiceTests
         foreach (var failure in new Exception[]
         {
             new InvalidDataException("Synthetic exact partition identity changed."),
-            new System.Management.ManagementException("Synthetic supported-size provider failed."),
+            new IOException("Synthetic supported-size host query failed."),
             new TimeoutException("Synthetic supported-size query timed out.")
         })
         {
@@ -1929,7 +1929,7 @@ public sealed class AgentRealOperationServiceTests
     private static async Task<(AgentRealOperationService Service, OperationPlanRepository Plans,
         ExecutionEventRepository Events, TrustedRealSession Session, RealOperationIntentRequest Proposal,
         AgentWriteOwnerLease Lease)> CreateAcceptedLifecycleFixtureAsync(RecordingBackend backend,
-        TimeProvider clock, IOperationAuthority authority)
+        TimeProvider clock, IOperationAuthority authority, IProcessIncarnationVerifier? processVerifier = null)
     {
         var path = Path.Combine(Path.GetTempPath(), "WinPool.Agent.RealOperation.Tests", Guid.NewGuid().ToString("N"), "winpool.db");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -1939,7 +1939,7 @@ public sealed class AgentRealOperationServiceTests
         var plans = new OperationPlanRepository(store, lease);
         var events = new ExecutionEventRepository(store, lease);
         var service = new AgentRealOperationService(plans, events, backend, new FixedMachineIdentity(),
-            authority, clock, _ => true, () => true);
+            authority, clock, _ => true, () => true, processVerifier);
         await service.InitializeRecoveryAsync();
         var session = new TrustedRealSession(SessionId.New(), "product-session", Guid.NewGuid().ToString("D"),
             42, clock.GetUtcNow(), Path.GetFullPath("WinPool.App.exe"), true);
@@ -2057,6 +2057,7 @@ public sealed class AgentRealOperationServiceTests
 
     private sealed class RecordingBackend : IRealStorageBackend, IMaximumCapacitySearchBackend
     {
+        public PowerShellHostCall? HostCall { get; init; }
         public Func<OperationPlan, RealOperationStep, IMaximumCapacityAttemptJournal, Task<RealStepResult>>? MaximumSearch { get; init; }
         public int MaximumSearchCalls { get; private set; }
         public int MaximumRecoveryCalls { get; private set; }
@@ -2174,7 +2175,7 @@ public sealed class AgentRealOperationServiceTests
                 await ReleaseRunnerPreflight.Task.WaitAsync(cancellationToken);
             }
             return new RealStepPreflight(
-                "{\"disk\":\"physical-disk-unique-id\"}",
+                HostCall is null ? "{\"disk\":\"physical-disk-unique-id\"}" : JsonSerializer.Serialize(new { HostCall }),
                 plan.InventoryVersion, plan.RealOperation!.TargetFingerprint, plan.RealOperation.PhysicalMemberFingerprint);
         }
 

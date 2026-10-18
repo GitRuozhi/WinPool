@@ -3074,7 +3074,7 @@ public sealed partial class WindowsRealStorageBackendTests
 
         public Fixture(bool secondDisk = false, bool sharedOrdinaryPool = false, bool expirePostCallWindow = false,
             IWindowsRealStorageCapabilityReader? tierCapabilities = null, bool scopedCaptures = false,
-            IWindowsStorageJobReader? storageJobs = null, bool maximumCapacityClock = false)
+            IWindowsStorageJobReader? storageJobs = null, bool maximumCapacityClock = false, TimeProvider? backendClock = null)
         {
             this.secondDisk = secondDisk;
             this.sharedOrdinaryPool = sharedOrdinaryPool;
@@ -3092,8 +3092,8 @@ public sealed partial class WindowsRealStorageBackendTests
                 Reader, new ForbiddenPartitionSizeReader(), new AdministratorPrivilege(),
                 new FixedTimeProvider(Now), Safety, capabilities: tierCapabilities ?? new SyntheticPoolCapabilities());
             Backend = new WindowsRealStorageBackend(Adapter, planner, Reader,
-                postCallTime is not null ? postCallTime
-                    : maximumCapacityClock ? new ElapsedTimeProvider(Now) : new FixedTimeProvider(Now), storageJobs);
+                backendClock ?? (postCallTime is not null ? postCallTime
+                    : maximumCapacityClock ? new ElapsedTimeProvider(Now) : new FixedTimeProvider(Now)), storageJobs);
         }
 
         public SyntheticFactSource Source { get; }
@@ -3178,7 +3178,7 @@ public sealed partial class WindowsRealStorageBackendTests
                 false, Now);
             return RealOperationPlanFactory.Create(proposal, OperationId.New(), environment,
                 Session, plan.InventoryVersion, plan.RealOperation.TargetFingerprint,
-                plan.RealOperation.PhysicalMemberFingerprint, "synthetic source facts", Now, Now.AddMinutes(5));
+                plan.RealOperation.PhysicalMemberFingerprint, "synthetic source facts", Now, Now.AddMinutes(5), plan.RealOperation.EvidenceProfile);
         }
 
         public async Task<OperationPlan> PrepareAsync(bool twoSteps = false)
@@ -3441,6 +3441,7 @@ public sealed partial class WindowsRealStorageBackendTests
         public WindowsRealStorageSafetyEvidence? ObservedEvidence { get; set; }
         public Func<IReadOnlyList<WindowsPoolMemberRoleEvidence>, IReadOnlyList<WindowsPoolMemberRoleEvidence>>? MultiRolesTransform { get; set; }
         public Exception? ObservedFailure { get; set; }
+        public CancellationToken LastObservedToken { get; private set; }
         public WindowsRealStorageSafetyEvidence? CreatedFormatEvidence { get; set; }
         public Exception? CreatedFormatFailure { get; set; }
         public StorageObjectId? LastCreatedFormatTarget { get; private set; }
@@ -3490,6 +3491,7 @@ public sealed partial class WindowsRealStorageBackendTests
             SetDiskOnlineCommand command, CancellationToken cancellationToken)
         {
             ObservedCallCount++;
+            LastObservedToken = cancellationToken;
             if (ObservedFailure is not null) throw ObservedFailure;
             return ObservedEvidence is not null ? Task.FromResult<WindowsRealStorageSafetyEvidence?>(ObservedEvidence)
                 : ValidateWithEvidenceAsync(topology, closure, command, cancellationToken);

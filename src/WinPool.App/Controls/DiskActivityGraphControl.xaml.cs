@@ -25,18 +25,24 @@ public sealed partial class DiskActivityGraphControl : UserControl
     private const double LabelGutter = 96;
 
     private IReadOnlyList<DiskGraphSeries> _series = [];
+    private long _revision = -1, _displayRevision = -1;
+    private (long Revision, long Display, double Width, double Height, ElementTheme Theme)? _rendered;
+    private readonly List<Line> _gridLines = [];
+    private readonly Dictionary<(string Instance, int Segment), SegmentVisual> _visuals = new();
 
     public DiskActivityGraphControl()
     {
         InitializeComponent();
+        Loaded += (_, _) => Render();
+        ActualThemeChanged += (_, _) => Render();
     }
 
-    public void SetSeries(IReadOnlyList<DiskGraphSeries> series)
+    public void SetSeries(IReadOnlyList<DiskGraphSeries> series, long revision, long displayRevision)
     {
-        _series = series;
+        if (_revision == revision && _displayRevision == displayRevision) return;
+        _series = series; _revision = revision; _displayRevision = displayRevision;
         Render();
     }
-
     private void PlotCanvas_SizeChanged(object sender, SizeChangedEventArgs e) => Render();
 
     internal static string FormatRate(double bytesPerSecond) =>
@@ -60,17 +66,22 @@ public sealed partial class DiskActivityGraphControl : UserControl
     {
         var width = PlotCanvas.ActualWidth;
         var height = PlotCanvas.ActualHeight;
-        PlotCanvas.Children.Clear();
+
         var plotWidth = width - LabelGutter;
         if (plotWidth < 40 || height < 40)
         {
             return;
         }
 
+        if (!IsLoaded || Visibility != Visibility.Visible || !App.Window.AppWindow.IsVisible
+            || App.Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter { State: Microsoft.UI.Windowing.OverlappedPresenterState.Minimized }) return;
+        var key = (_revision, _displayRevision, width, height, ActualTheme);
+        if (_rendered == key) return;
+
         var now = DateTimeOffset.Now;
         var latestSample = _series
-            .SelectMany(series => series.Points)
-            .Select(point => (DateTimeOffset?)point.Timestamp)
+            .Where(series => series.Points.Count > 0)
+            .Select(series => (DateTimeOffset?)series.Points[^1].Timestamp)
             .DefaultIfEmpty(now)
             .Max()!.Value;
         var windowEnd = latestSample > now ? now : latestSample;
@@ -86,90 +97,90 @@ public sealed partial class DiskActivityGraphControl : UserControl
         SpeedMaxLabel.Text = FormatRate(speedMax);
 
         var gridBrush = ProbeGridline.Background;
-        for (var i = 1; i <= 3; i++)
+        while (_gridLines.Count < 3)
         {
-            var y = height * i / 4;
-            PlotCanvas.Children.Add(new Line
-            {
-                X1 = 0,
-                X2 = width,
-                Y1 = y,
-                Y2 = y,
-                Stroke = gridBrush,
-                StrokeThickness = 1
-            });
+            var line = new Line { StrokeThickness = 1 };
+            _gridLines.Add(line); PlotCanvas.Children.Add(line);
         }
-
-        var activityLabels = new List<(FrameworkElement Label, double Y)>();
-        var readLabels = new List<(FrameworkElement Label, double Y)>();
-        var writeLabels = new List<(FrameworkElement Label, double Y)>();
-
+        for (var index = 0; index < _gridLines.Count; index++)
+        {
+            var line = _gridLines[index]; line.X1 = 0; line.X2 = width;
+            line.Y1 = line.Y2 = height * (index + 1) / 4; line.Stroke = gridBrush;
+        }
+        var retained = new HashSet<(string Instance, int Segment)>();
         foreach (var series in _series)
         {
-            foreach (var segment in Segments(series.Points))
+            var segmentIndex = 0;
+            foreach (var (start, count) in Segments(series.Points))
             {
-                if (segment.Count < 2)
+                if (count < 2) continue;
+                var identity = (series.InstanceName, segmentIndex++); retained.Add(identity);
+                if (!_visuals.TryGetValue(identity, out var visual))
                 {
-                    continue;
+                    visual = new SegmentVisual(this, series.Color); _visuals.Add(identity, visual);
+                    foreach (var shape in visual.Elements) PlotCanvas.Children.Add(shape);
                 }
-
-                var brush = new SolidColorBrush(series.Color);
-                var fillBrush = new SolidColorBrush(Color.FromArgb(0x2E, series.Color.R, series.Color.G, series.Color.B));
-                var writePoints = BuildPoints(segment, windowStart, windowEnd, plotWidth, height, speedMax, x => x.WriteBytesPerSecond);
-                var readPoints = BuildPoints(segment, windowStart, windowEnd, plotWidth, height, speedMax, x => x.ReadBytesPerSecond);
-                var activityPoints = BuildPoints(segment, windowStart, windowEnd, plotWidth, height, 100.0, x => x.ActivityPercent);
-
-                var fill = new Polygon
-                {
-                    Fill = fillBrush,
-                    Points = ToPointCollection(writePoints)
-                };
-                fill.Points.Add(new Point(writePoints[^1].X, height));
-                fill.Points.Add(new Point(writePoints[0].X, height));
-                PlotCanvas.Children.Add(fill);
-
-                PlotCanvas.Children.Add(new Polyline
-                {
-                    Stroke = brush,
-                    StrokeThickness = 1.6,
-                    Points = ToPointCollection(writePoints)
-                });
-                PlotCanvas.Children.Add(new Polyline
-                {
-                    Stroke = brush,
-                    StrokeDashArray = new DoubleCollection { 4, 2.5 },
-                    StrokeThickness = 1.2,
-                    Points = ToPointCollection(readPoints)
-                });
-                PlotCanvas.Children.Add(new Polyline
-                {
-                    Stroke = brush,
-                    StrokeDashArray = new DoubleCollection { 0.4, 2.2 },
-                    StrokeDashCap = PenLineCap.Round,
-                    StrokeThickness = 1.2,
-                    Opacity = 0.85,
-                    Points = ToPointCollection(activityPoints)
-                });
-
-                if (!ReferenceEquals(segment[^1], series.Points[^1])) continue;
-                var last = segment[^1];
-                activityLabels.Add((CreateFlag(series.Color, $"{last.ActivityPercent:F0}%"), activityPoints[^1].Y));
-                readLabels.Add((CreateFlag(series.Color, $"R {FormatRate(last.ReadBytesPerSecond)}"), readPoints[^1].Y));
-                writeLabels.Add((CreateFlag(series.Color, $"W {FormatRate(last.WriteBytesPerSecond)}"), writePoints[^1].Y));
+                visual.SetColor(series.Color);
+                var write = BuildPoints(series.Points, start, count, windowStart, windowEnd, plotWidth, height, speedMax, point => point.WriteBytesPerSecond, visual.Write.Points);
+                var read = BuildPoints(series.Points, start, count, windowStart, windowEnd, plotWidth, height, speedMax, point => point.ReadBytesPerSecond, visual.Read.Points);
+                var activity = BuildPoints(series.Points, start, count, windowStart, windowEnd, plotWidth, height, 100, point => point.ActivityPercent, visual.Activity.Points);
+                var fill = visual.Fill.Points; fill.Clear(); foreach (var point in write) fill.Add(point);
+                fill.Add(new Point(write[^1].X, height)); fill.Add(new Point(write[0].X, height));
+                var latest = start + count == series.Points.Count;
+                var last = series.Points[start + count - 1];
+                UpdateFlag(visual.ActivityFlag, latest, $"{last.ActivityPercent:F0}%", activity[^1].Y, plotWidth, height);
+                UpdateFlag(visual.ReadFlag, latest, $"R {FormatRate(last.ReadBytesPerSecond)}", read[^1].Y, plotWidth, height);
+                UpdateFlag(visual.WriteFlag, latest, $"W {FormatRate(last.WriteBytesPerSecond)}", write[^1].Y, plotWidth, height);
             }
         }
-
-        foreach (var group in new[] { activityLabels, readLabels, writeLabels })
+        foreach (var identity in _visuals.Keys.Where(key => !retained.Contains(key)).ToArray())
         {
-            foreach (var (label, y) in group)
+            foreach (var shape in _visuals[identity].Elements) PlotCanvas.Children.Remove(shape);
+            _visuals.Remove(identity);
+        }
+        _rendered = key;
+    }
+
+    private static void UpdateFlag(Grid flag, bool visible, string text, double y, double plotWidth, double height)
+    {
+        flag.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (!visible) return;
+        ((TextBlock)flag.Children[1]).Text = text;
+        Canvas.SetLeft(flag, plotWidth + 2);
+        Canvas.SetTop(flag, Math.Clamp(y - 11, 0, Math.Max(0, height - 18)));
+    }
+
+    private sealed class SegmentVisual
+    {
+        public Polygon Fill { get; } = new() { Points = new PointCollection() };
+        public Polyline Write { get; } = new() { StrokeThickness = 1.6, Points = new PointCollection() };
+        public Polyline Read { get; } = new() { StrokeThickness = 1.2, Points = new PointCollection(), StrokeDashArray = new DoubleCollection { 4, 2.5 } };
+        public Polyline Activity { get; } = new() { StrokeThickness = 1.2, Points = new PointCollection(), StrokeDashArray = new DoubleCollection { 0.4, 2.2 }, StrokeDashCap = PenLineCap.Round, Opacity = 0.85 };
+        public Grid ActivityFlag { get; }
+        public Grid ReadFlag { get; }
+        public Grid WriteFlag { get; }
+        public FrameworkElement[] Elements { get; }
+        private readonly SolidColorBrush stroke = new();
+        private readonly SolidColorBrush fill = new();
+        private Color? color;
+        public SegmentVisual(DiskActivityGraphControl owner, Color color)
+        {
+            ActivityFlag = (Grid)owner.CreateFlag(color, ""); ReadFlag = (Grid)owner.CreateFlag(color, ""); WriteFlag = (Grid)owner.CreateFlag(color, "");
+            Elements = [Fill, Write, Read, Activity, ActivityFlag, ReadFlag, WriteFlag];
+            Fill.Fill = fill; Write.Stroke = Read.Stroke = Activity.Stroke = stroke; SetColor(color);
+        }
+        public void SetColor(Color next)
+        {
+            if (color == next) return;
+            color = next; stroke.Color = next; fill.Color = Color.FromArgb(0x2E, next.R, next.G, next.B);
+            foreach (var flag in new[] { ActivityFlag, ReadFlag, WriteFlag })
             {
-                PlotCanvas.Children.Add(label);
-                Canvas.SetLeft(label, plotWidth + 2);
-                Canvas.SetTop(label, Math.Clamp(y - 11, 0, Math.Max(0, height - 18)));
+                ((Polygon)flag.Children[0]).Fill = stroke;
+                ((TextBlock)flag.Children[1]).Foreground = new SolidColorBrush(RelativeLuminance(next) > 0.48
+                    ? Color.FromArgb(255, 0, 0, 0) : Color.FromArgb(255, 255, 255, 255));
             }
         }
     }
-
     private FrameworkElement CreateFlag(Color color, string text)
     {
         const double w = LabelGutter - 10;
@@ -217,18 +228,16 @@ public sealed partial class DiskActivityGraphControl : UserControl
              + (0.0722 * Linearize(color.B));
     }
 
-    private static IEnumerable<IReadOnlyList<MonitorSamplePoint>> Segments(IReadOnlyList<MonitorSamplePoint> points)
+    private static IEnumerable<(int Start, int Count)> Segments(IReadOnlyList<MonitorSamplePoint> points)
     {
         var start = 0;
         for (var index = 1; index < points.Count; index++)
         {
             if (!points[index].GapBefore) continue;
-            yield return points.Skip(start).Take(index - start).ToArray();
-            start = index;
+            yield return (start, index - start); start = index;
         }
-        if (start < points.Count) yield return points.Skip(start).ToArray();
+        if (start < points.Count) yield return (start, points.Count - start);
     }
-
     private static PointCollection ToPointCollection(List<Point> points)
     {
         var collection = new PointCollection();
@@ -239,20 +248,20 @@ public sealed partial class DiskActivityGraphControl : UserControl
         return collection;
     }
 
-    private static List<Point> BuildPoints(
-        IReadOnlyList<MonitorSamplePoint> points,
+    private static PointCollection BuildPoints(
+        IReadOnlyList<MonitorSamplePoint> points, int start, int count,
         DateTimeOffset windowStart,
         DateTimeOffset now,
         double width,
         double height,
         double scaleMax,
-        Func<MonitorSamplePoint, double> selector)
+        Func<MonitorSamplePoint, double> selector, PointCollection result)
     {
         var span = (now - windowStart).TotalSeconds;
         var maxPoints = Math.Max(2, (int)width);
-        var step = Math.Max(1, points.Count / maxPoints);
-        var result = new List<Point>(points.Count / step + 1);
-        for (var i = 0; i < points.Count; i += step)
+        var step = Math.Max(1, (count + maxPoints - 1) / maxPoints);
+        result.Clear();
+        for (var i = start; i < start + count; i += step)
         {
             var point = points[i];
             var seconds = (point.Timestamp - windowStart).TotalSeconds;
@@ -261,9 +270,9 @@ public sealed partial class DiskActivityGraphControl : UserControl
             result.Add(new Point(x, y));
         }
 
-        if (result.Count > 0 && points.Count > 0)
+        if (result.Count > 0 && count > 0)
         {
-            var last = points[^1];
+            var last = points[start + count - 1];
             var seconds = (last.Timestamp - windowStart).TotalSeconds;
             result[^1] = new Point(
                 Math.Clamp(seconds / span, 0, 1) * width,

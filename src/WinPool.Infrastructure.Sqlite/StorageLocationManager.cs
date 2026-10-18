@@ -769,7 +769,12 @@ public sealed class StorageLocationManager : IStorageLocationManager
                 throw new ReparsePointException();
             }
 
-            File.Copy(file.FullPath, destination, overwrite: true);
+            using (var source = new FileStream(file.FullPath, FileMode.Open, FileAccess.Read,
+                       FileShare.ReadWrite | FileShare.Delete, 128 * 1024, FileOptions.SequentialScan))
+            using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write,
+                       FileShare.None, 128 * 1024, FileOptions.SequentialScan))
+                source.CopyTo(output);
+            File.SetLastWriteTimeUtc(destination, new DateTime(file.LastWriteUtcTicks, DateTimeKind.Utc));
             var destinationInfo = new FileInfo(destination);
             if (destinationInfo.Length != file.Length
                 || !StringComparer.Ordinal.Equals(
@@ -790,7 +795,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
             path,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.Read,
+            FileShare.ReadWrite | FileShare.Delete,
             bufferSize: 128 * 1024,
             FileOptions.SequentialScan);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -864,7 +869,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
             var version = await SqliteSchemaVersionReader.ReadAsync(
                 connection, cancellationToken);
-            if (version?.Version is not (17 or 18 or WinPoolSqliteStore.CurrentSchemaVersion))
+            if (version?.Version is not (17 or 18 or 19 or 20 or WinPoolSqliteStore.CurrentSchemaVersion))
             {
                 return "storage.location.core_database_unreadable";
             }
@@ -982,7 +987,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
         // Monitoring data has its own strict, no-migration format contract.
         // The verifier is read-only for an existing file, so a root switch
         // cannot silently initialize or repair it.
-        await new MonitoringSqliteStore(path).InitializeAsync(cancellationToken);
+        await new MonitoringSqliteStore(path).VerifyForMigrationAsync(cancellationToken);
     }
 
     private static void EnsureSameManifest(

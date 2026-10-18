@@ -10,6 +10,35 @@ public sealed class ScopedFactRefreshTests
     private static readonly DateTimeOffset Start = new(2026, 10, 8, 1, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void NarrowFieldRefreshPreservesOnlyUnqueriedFieldsWithTheirOriginalSourceTime()
+    {
+        var baseline = Capture(0, ["a", "sibling"]);
+        baseline = baseline with { Objects = baseline.Objects.Select(item => item with { Fields =
+            [WinPoolSourceField.Returned("FriendlyName", "before", FactValueType.String, item.SourceRef),
+             WinPoolSourceField.Returned("Size", 4096L, FactValueType.UInt64, item.SourceRef),
+             WinPoolSourceField.Returned("HealthStatus", "Healthy", FactValueType.String, item.SourceRef)] }).ToImmutableArray() };
+        var incoming = Capture(2, ["a"], ["a"]);
+        incoming = incoming with
+        {
+            Sources = incoming.Sources.Select(source => source with { Coverage = source.Coverage! with
+                { FieldNames = ["FriendlyName", "HealthStatus"] } }).ToImmutableArray(),
+            Objects = incoming.Objects.Select(item => item with { Fields =
+                [WinPoolSourceField.Returned("FriendlyName", "after", FactValueType.String, item.SourceRef)] }).ToImmutableArray()
+        };
+        var merged = WinPoolFactsCodec.Decode(WinPoolFactsCodec.Encode(WinPoolFactRefresh.Merge(baseline, incoming)));
+        var target = merged.Objects.Single(item => item.Id == "a");
+        Assert.Equal("after", target.Field("FriendlyName")!.Value!.Value.GetString());
+        Assert.Equal(Start.AddSeconds(2), merged.Sources.Single(source => source.Id == target.Field("FriendlyName")!.SourceRef).CapturedAt);
+        Assert.Equal(4096L, target.Field("Size")!.Value!.Value.GetInt64());
+        Assert.Equal(Start, merged.Sources.Single(source => source.Id == target.Field("Size")!.SourceRef).CapturedAt);
+        Assert.Null(target.Field("HealthStatus")); // Queried-but-missing stays unknown; old data cannot fill it.
+        Assert.True(JsonElement.DeepEquals(JsonSerializer.SerializeToElement(baseline.Objects.Single(item => item.Id == "sibling")),
+            JsonSerializer.SerializeToElement(merged.Objects.Single(item => item.Id == "sibling"))));
+        Assert.True(merged.IsMerged);
+        merged.Validate();
+    }
+
+    [Fact]
     public void ScopedPoolDeletionRestoresObservedPrimordialMemberAndPreservesUnqueriedSiblings()
     {
         WinPoolFacts StorageCapture(int second, bool scoped)

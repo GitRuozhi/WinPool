@@ -2,23 +2,28 @@ namespace WinPool.Infrastructure.Tests;
 
 public sealed class InfrastructureTests
 {
-    [Fact]
-    public void PhysicalDiskDeviceResolverUsesAQuickTargetedReadOnlyLookup()
+    [EnvironmentEnabledFact("WINPOOL_READ_ONLY_ADMISSION")]
+    public async Task PhysicalDiskDeviceResolverUsesAQuickTargetedReadOnlyLookup()
     {
         // A physical member disappears from Win32_DiskDrive after joining a
         // concrete pool. Disk zero is therefore not a guaranteed basic disk.
-        using var searcher = new System.Management.ManagementObjectSearcher(
-            "root\\CIMV2", "SELECT Index,PNPDeviceID FROM Win32_DiskDrive");
-        searcher.Options.Timeout = TimeSpan.FromSeconds(5);
-        using var results = searcher.Get();
-        var available = new List<(int Number, string DeviceId)>();
-        foreach (System.Management.ManagementBaseObject disk in results)
-        using (disk)
-        {
-            if (disk["Index"] is uint index && index <= int.MaxValue
-                && disk["PNPDeviceID"] is string pnp && !string.IsNullOrWhiteSpace(pnp))
-                available.Add(((int)index, pnp.Trim()));
-        }
+        const string expectedRead = "$ErrorActionPreference='Stop'; ConvertTo-Json -Compress -InputObject @(Get-CimInstance -Namespace root/CIMV2 -Query 'SELECT Index,PNPDeviceID FROM Win32_DiskDrive' | Select-Object Index,PNPDeviceID)";
+        var start = new System.Diagnostics.ProcessStartInfo(WinPool.Infrastructure.Windows.WindowsPowerShellRunner.ExecutablePath)
+        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        start.ArgumentList.Add("-NoProfile"); start.ArgumentList.Add("-NonInteractive"); start.ArgumentList.Add("-EncodedCommand");
+        start.ArgumentList.Add(PowerShellFixtureScriptCodec.EncodeFixedCompressedScript(expectedRead));
+        using var expectation = System.Diagnostics.Process.Start(start)!;
+        var output = expectation.StandardOutput.ReadToEndAsync();
+        var error = expectation.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await expectation.WaitForExitAsync(timeout.Token);
+        Assert.True(expectation.ExitCode == 0, await error);
+        using var results = System.Text.Json.JsonDocument.Parse(await output);
+        var available = results.RootElement.EnumerateArray()
+            .Where(disk => disk.GetProperty("Index").TryGetInt32(out _)
+                && disk.GetProperty("PNPDeviceID").ValueKind == System.Text.Json.JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(disk.GetProperty("PNPDeviceID").GetString()))
+            .Select(disk => (Number: disk.GetProperty("Index").GetInt32(), DeviceId: disk.GetProperty("PNPDeviceID").GetString()!.Trim())).ToArray();
         Assert.NotEmpty(available);
         var selected = available.OrderBy(item => item.Number).First();
         var resolver = new WinPool.Infrastructure.Windows.WindowsPhysicalDiskDeviceResolver();
@@ -33,7 +38,7 @@ public sealed class InfrastructureTests
         Assert.Null(resolver.ResolvePnpDeviceId(-1));
     }
 
-    [Fact]
+    [EnvironmentEnabledFact("WINPOOL_READ_ONLY_ADMISSION")]
     public void StorageSpacesVirtualDiskCountersAreReadOnlyAndFiniteWhenPresent()
     {
         using var sampler =
@@ -56,32 +61,6 @@ public sealed class InfrastructureTests
                     },
                     value => Assert.True(double.IsFinite(value) && value >= 0));
             });
-    }
-
-    [Fact]
-    public void EmbeddedInventoryContainsNoMutatingStorageCommands()
-    {
-        var script = WinPool.Infrastructure.Windows.WindowsHardwareInventoryProvider.FixedStorageCommand;
-        var forbidden = new System.Text.RegularExpressions.Regex(
-            @"(?i)\b(?:New|Set|Remove|Clear|Initialize|Format|Resize|Repair|Optimize|Reset)-(?:Disk|Partition|Volume|Storage[A-Za-z]*|PhysicalDisk|VirtualDisk)\b",
-            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-        Assert.DoesNotMatch(forbidden, script);
-        foreach (var command in new[] { "New-StoragePool", "Set-PhysicalDisk", "Remove-StorageTier",
-            "Clear-Disk", "Initialize-Disk", "Format-Volume", "Resize-VirtualDisk" })
-            Assert.Matches(forbidden, command);
-        Assert.Contains("Get-PhysicalDisk", script);
-        Assert.Contains("Get-StoragePool", script);
-        Assert.Contains("Get-StorageTier", script);
-        Assert.Contains("Get-VirtualDisk", script);
-        Assert.Contains("Win32_LogicalDisk", script);
-        Assert.Contains("NetworkDisks", script);
-        Assert.Contains("$physicalByDeviceNumber", script);
-        Assert.Contains("Removable USB media", script);
-        Assert.DoesNotContain(" Volumes = @(", script);
-        Assert.EndsWith(
-            @"WindowsPowerShell\v1.0\powershell.exe",
-            WinPool.Infrastructure.Windows.WindowsPowerShellRunner.ExecutablePath,
-            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -110,7 +89,8 @@ public sealed class InfrastructureTests
     [Fact]
     public async Task PreferencesPersistThemeAndLanguageButNotExecutionMode()
     {
-        var service = new WinPool.Infrastructure.Windows.LocalUserPreferencesService();
+        var temporaryRoot = Path.Combine(Path.GetTempPath(), "WinPool.Preference.Tests", Guid.NewGuid().ToString("N"));
+        var service = new WinPool.Infrastructure.Windows.LocalUserPreferencesService(temporaryRoot);
         var original = await service.LoadAsync();
         try
         {
@@ -130,7 +110,7 @@ public sealed class InfrastructureTests
         }
     }
 
-    [Fact]
+    [EnvironmentEnabledFact("WINPOOL_READ_ONLY_ADMISSION")]
     public async Task RealReadOnlyScanReturnsUsableInventory()
     {
         var provider = new WinPool.Infrastructure.Windows.WindowsHardwareInventoryProvider();

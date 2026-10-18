@@ -245,7 +245,7 @@ public sealed class RealOperationUiFlowTests
             closed ? RealOperationState.Failed : RealOperationState.OutcomeUnknown,
             [], closed ? "real.reconciliation_observed_no_effect" : null, !closed);
         AgentRealOperationStatusResponse Status() => new(plan.OperationId, closed ? 2 : 1,
-            Full().State, [], Full().Code, !closed);
+            Full().State, [], Full().Code, !closed, SystemId: plan.SystemId, PlanHash: plan.PlanHash, Targets: plan.Targets);
         var connection = new RecordingConnection(request =>
         {
             AgentResponse response;
@@ -263,16 +263,16 @@ public sealed class RealOperationUiFlowTests
             };
             return ApplicationResult<AgentResponse>.Succeeded(response, request.CorrelationId);
         });
-        await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None);
-        await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None);
+        await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None, observeLight: status => state.Observe(status));
+        await RealOperationRecovery.RefreshAsync(connection, state, status => state.Observe(status), CancellationToken.None, observeLight: status => state.Observe(status));
         Assert.True(state.IsBlocked);
         Assert.False(closed);
         Assert.DoesNotContain(connection.Requests, request => request is ReconcileAgentRealOperationRequest);
 
-        await RealOperationRecovery.RecheckAsync(connection, state, status => state.Observe(status), CancellationToken.None);
+        await RealOperationRecovery.RecheckAsync(connection, state, status => state.Observe(status), CancellationToken.None, observeLight: status => state.Observe(status));
         Assert.False(state.IsBlocked);
         Assert.Single(connection.Requests.OfType<ReconcileAgentRealOperationRequest>());
-        Assert.Equal(2, connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>().Count());
+        Assert.Empty(connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>());
     }
     [Theory]
     [InlineData(true)]
@@ -336,22 +336,42 @@ public sealed class RealOperationUiFlowTests
             {
                 QueryAgentRealOperationRequest => closed,
                 ListAgentRecoverableRealOperationsRequest => new AgentRecoverableRealOperationsResponse([
-                    new(otherPlan.OperationId, 1, unfinished.State, unfinished.Steps, unfinished.Code, true)]),
+                    new(otherPlan.OperationId, 1, unfinished.State, unfinished.Steps, unfinished.Code, true, SystemId: otherPlan.SystemId, PlanHash: otherPlan.PlanHash, Targets: otherPlan.Targets)]),
                 LoadAgentRealOperationEvidenceRequest => new AgentRealOperationEvidenceResponse(unfinished, 0, null),
                 _ => throw new InvalidOperationException()
             },
             request.CorrelationId));
         var observations = new List<AgentRealOperationResponse>();
-        await RealOperationRecovery.RefreshAsync(connection, state, observations.Add, CancellationToken.None);
+        var lightObservations = new List<AgentRealOperationStatusResponse>();
+        await RealOperationRecovery.RefreshAsync(connection, state, observations.Add, CancellationToken.None, observeLight: lightObservations.Add);
 
-        Assert.Equal([plan.OperationId, otherPlan.OperationId], observations.Select(status => status.Plan.OperationId));
+        Assert.Equal([plan.OperationId, otherPlan.OperationId], observations.Select(status => status.Plan.OperationId).Concat(lightObservations.Select(status => status.OperationId)));
         Assert.True(state.IsBlocked);
         // Once the first operation's scoped refresh completes, the other
         // listed identity remains available to retain the global barrier.
         Assert.True(state.Observe(observations[0]));
-        Assert.True(state.Observe(observations[1]));
+        Assert.True(state.Observe(Assert.Single(lightObservations)));
         Assert.True(state.IsBlocked);
         Assert.Equal(otherPlan.OperationId, state.OperationId);
+    }
+
+    [Fact]
+    public async Task TerminalLightStatusDoesNotDependOnHistoryDownload()
+    {
+        var (_, plan) = CreatePlan();
+        var connection = new RecordingConnection(request => request is LoadAgentRealOperationEvidenceRequest
+            ? throw new IOException("large history unavailable") : throw new InvalidOperationException());
+        var cache = RealOperationStatusCache.For(connection);
+        cache.Remember(new(plan, RealOperationState.Prepared, [], null, false));
+        var terminal = new AgentRealOperationStatusResponse(plan.OperationId, 10, RealOperationState.Succeeded,
+            [], "verified", false, SystemId: plan.SystemId, PlanHash: plan.PlanHash, Targets: plan.Targets);
+        Assert.Equal(RealOperationState.Succeeded, (await cache.ResolveAsync(terminal, CancellationToken.None))!.State);
+        Assert.Empty(connection.Requests);
+        await Assert.ThrowsAsync<IOException>(() => cache.LoadEvidenceAsync(new(plan.OperationId, 0, 16, CorrelationId.New()), CancellationToken.None));
+        Assert.Equal(RealOperationState.Succeeded, (await cache.ResolveAsync(terminal with
+            { Revision = 9, State = RealOperationState.Running }, CancellationToken.None))!.State);
+        await Assert.ThrowsAsync<InvalidDataException>(() => cache.ResolveAsync(terminal with
+            { PlanHash = "another-frozen-plan", Revision = 11 }, CancellationToken.None));
     }
 
     [Fact]

@@ -622,11 +622,11 @@ public sealed partial class AgentRealOperationService
                 Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(grant.Token.TokenId))).ToLowerInvariant(),
                 timeProvider.GetUtcNow());
             // The parent already owns mutationGate. Internal stages never re-enter AcceptAsync.
-            await RunStepsAsync(plan);
+            var post = await RunStepsAsync(plan);
             await NotifyEditObserverAsync(plan.OperationId);
             var status = await StatusAsync((await plans.GetAsync(plan.OperationId))!, CorrelationId.New(), CancellationToken.None, includeEvidence: true);
             var response = (AgentRealOperationResponse)status.Value!;
-            if (verifiedPostStates.TryRemove(plan.OperationId, out var post))
+            if (post is not null)
                 current = await readPublishedInventory!(CancellationToken.None) ?? post.Document;
             if (!RealOperationSubmissionState.IsReconciledTerminal(response))
             {

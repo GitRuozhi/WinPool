@@ -92,7 +92,7 @@ public sealed partial class WindowsRealOperationPlanner
             ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, now);
         return RealOperationPlanFactory.Create(trusted, operationId, environment, session, closure.Fingerprint, closure.Fingerprint,
             closure.PhysicalMemberFingerprint, "Windows exact selected physical-member set; fresh requested layout and provider facts", now,
-            now.Add(InMemoryOperationAuthority.DefaultLifetime));
+            now.Add(InMemoryOperationAuthority.DefaultLifetime), topology.EvidenceProfile?.Id);
     }
 
     internal async Task<string> ValidateExactMemberStepAsync(WindowsRealStorageTopology topology, RealExactPhysicalMemberSetClosure closure,
@@ -298,26 +298,32 @@ public sealed partial class WindowsRealOperationPlanner
 
     private async Task<string> RequireExactMemberCapabilityAsync(WindowsRealStorageTopology topology, RealExactPhysicalMemberSetClosure closure, string field, CancellationToken ct)
     {
-        var proofs = new List<WindowsTierCapability>();
+        var first = new StorageObjectId(topology.SystemId, StorageObjectKind.PhysicalDisk, closure.Members[0].PhysicalDiskId);
+        var capability = await topology.ReadSubsystemCapabilityAsync(closure.SubsystemStableId,
+            () => capabilities.ReadTierAsync(topology, first, ct)).ConfigureAwait(false);
         foreach (var member in closure.Members)
         {
-            var capability = await capabilities.ReadTierAsync(topology, new(topology.SystemId, StorageObjectKind.PhysicalDisk, member.PhysicalDiskId), ct).ConfigureAwait(false);
             var subsystem = RequireCreationSubsystem(topology, topology.RequireObject(new(topology.SystemId, StorageObjectKind.PhysicalDisk, member.PhysicalDiskId)),
                 topology.Snapshot.PhysicalDisks.Single(item => item.StableId == member.PhysicalDiskId));
-            if (capability.Status != "queried" || capability.PhysicalDiskStableId != member.PhysicalDiskId
+            if (capability.Status != "queried" || capability.PhysicalDiskStableId != first.ProviderKey
                 || capability.ObservedAtUtc == default || capability.ObservedAtUtc > timeProvider.GetUtcNow().AddSeconds(10)
                 || timeProvider.GetUtcNow() - capability.ObservedAtUtc > TimeSpan.FromMinutes(2)
-                || !capability.Associations.Select(RelationshipKey).Order(StringComparer.Ordinal).SequenceEqual(
-                    subsystem.Associations.Select(RelationshipKey).Order(StringComparer.Ordinal), StringComparer.Ordinal)
+                || subsystem.StableId != closure.SubsystemStableId
+                || subsystem.UniqueId != closure.SubsystemUniqueId || subsystem.ObjectId != closure.SubsystemObjectId
                 || capability.SubsystemStableId != closure.SubsystemStableId
                 || capability.UniqueId != closure.SubsystemUniqueId || capability.ObjectId != closure.SubsystemObjectId
                 || capability.Fields.SingleOrDefault(item => item.Name == field) is not { ReadState: FieldReadState.Returned, Value: { ValueKind: JsonValueKind.True } }
                 || capability.Fields.SingleOrDefault(item => item.Name == "PhysicalDisksPerStoragePoolMin") is not { ReadState: FieldReadState.Returned, Value: { } minimum }
                 || !minimum.TryGetUInt64(out var count) || count == 0 || count > (ulong)closure.Members.Count)
                 throw new NotSupportedException("The exact subsystem does not verify the requested capability/member count: " + field);
-            proofs.Add(capability);
         }
-        return ";live-subsystem-capabilities:" + JsonSerializer.Serialize(proofs);
+        var firstSubsystem = RequireCreationSubsystem(topology, topology.RequireObject(first),
+            topology.Snapshot.PhysicalDisks.Single(item => item.StableId == first.ProviderKey));
+        if (!capability.Associations.Select(RelationshipKey).Order(StringComparer.Ordinal).SequenceEqual(
+                firstSubsystem.Associations.Select(RelationshipKey).Order(StringComparer.Ordinal), StringComparer.Ordinal))
+            throw new InvalidDataException("The subsystem capability witness does not belong to its current physical member.");
+        return ";live-subsystem-capabilities:" + JsonSerializer.Serialize(new { Capability = capability,
+            Members = closure.Members.Select(member => member.PhysicalDiskId).ToArray() });
     }
 
     private static void RequireExactPolicy(MaximumCapacityPolicy? policy, RealExactPhysicalMemberSetClosure closure)

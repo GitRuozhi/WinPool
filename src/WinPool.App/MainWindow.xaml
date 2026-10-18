@@ -183,6 +183,9 @@
 
         <Grid Grid.Row="1">
             <Frame x:Name="RootFrame" />
+            <Button x:Name="SimulationSaveStatusButton" Margin="12" HorizontalAlignment="Left"
+                    VerticalAlignment="Bottom" Canvas.ZIndex="90" Visibility="Collapsed"
+                    Click="SimulationSaveStatusButton_Click" />
 
             <StackPanel
                 x:Name="GlobalNotificationHost"

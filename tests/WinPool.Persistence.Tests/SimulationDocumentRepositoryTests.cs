@@ -116,6 +116,26 @@ public sealed class SimulationDocumentRepositoryTests
         Assert.Null(await repository.FindByCommitIdAsync("stale"));
     }
 
+    [Fact]
+    public async Task ConcurrentIdenticalCommitReturnsOneDurableReceipt()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "agent");
+        var firstOwner = new SimulationDocumentRepository(database.Store, lease);
+        var secondOwner = new SimulationDocumentRepository(database.Store, lease);
+        var initial = await firstOwner.SaveAsync(Payload("simulation:concurrent", "before", 1), null);
+        var candidate = Payload(initial.DocumentId, "after", 2);
+        var intent = Intent(initial.DocumentId, 1, "same-commit", "after");
+        var receipts = await Task.WhenAll(
+            Task.Run(() => firstOwner.CommitEditAsync(candidate, initial.Sha256, intent)),
+            Task.Run(() => secondOwner.CommitEditAsync(candidate, initial.Sha256, intent)));
+        Assert.Equal(receipts[0], receipts[1]);
+        Assert.Equal(2, (await firstOwner.LoadAsync(initial.DocumentId))!.Revision);
+        await Assert.ThrowsAsync<SimulationDocumentConflictException>(() => secondOwner.CommitEditAsync(
+            Payload(initial.DocumentId, "other", 2), initial.Sha256,
+            Intent(initial.DocumentId, 1, "same-commit", "other")));
+    }
+
     private static SimulationCommitIntent Intent(string id, long before, string commit, string name) =>
         new(id, before, commit, SimulationEditIntent.Freeze(
             [new SimulationEditRequest(SimulationEditKind.Rename, "physical:test", Name: name)],

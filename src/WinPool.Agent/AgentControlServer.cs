@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using WinPool.Application;
@@ -121,6 +122,7 @@ public sealed class AgentControlProtocolCodec
                     Deserialize<QueryAgentRealPartitionResizeRangeRequest>(envelope),
                 AgentControlMessageTypes.StopRealOperationFollowingSteps =>
                     Deserialize<StopAgentRealOperationFollowingStepsRequest>(envelope),
+                AgentControlMessageTypes.AcknowledgeShutdownPreparation => Deserialize<AcknowledgeAgentShutdownPreparationRequest>(envelope),
                 AgentControlMessageTypes.Shutdown =>
                     Deserialize<RequestAgentShutdownRequest>(envelope),
                 _ => null
@@ -444,6 +446,9 @@ public sealed class CurrentUserAgentControlServer
                 "ipc.handshake.agent_shutting_down");
         }
 
+        if (validation.IsAccepted && !coordinator.CanRegisterApp(new ProcessInstanceId(handshake.ProcessInstanceId), handshake.ProcessId))
+            validation = new(false, HandshakeRejection.InvalidProcess, "ipc.handshake.agent_preparing_shutdown");
+
         AgentManagedProcess? registration = null;
         if (validation.IsAccepted)
         {
@@ -531,17 +536,23 @@ public sealed class CurrentUserAgentControlServer
             }
             await PersistProcessAsync(activeRegistration, cancellationToken);
 
+            using var connectionLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using var responseWrite = new SemaphoreSlim(1, 1);
+            await using var bodies = new IpcPayloadTransfer(DocumentPayloadLimits.LargeParseGate, responseWrite);
+            using var ordinaryAdmission = new SemaphoreSlim(18, 18);
+            using var ordinaryRunning = new SemaphoreSlim(2, 2);
+            using var lightAdmission = new SemaphoreSlim(8, 8);
+            var tasks = new ConcurrentDictionary<Guid, Task>();
+            var durableHeartbeatAt = timeProvider.GetUtcNow();
+            try
+            {
             while (!cancellationToken.IsCancellationRequested)
             {
                 IpcEnvelope envelope;
                 try
                 {
-                    envelope = await IpcFrameCodec.ReadAsync(
+                    envelope = await bodies.ReadAsync(
                         stream, cancellationToken, requestTransferTimeout);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                    throw new RequestTransferTimeoutException();
                 }
                 catch (EndOfStreamException)
                 {
@@ -562,7 +573,6 @@ public sealed class CurrentUserAgentControlServer
                     throw new InvalidDataException(
                         "The client process incarnation changed during the control session.");
                 }
-                var decoded = codec.DecodeRequest(envelope);
                 coordinator.ProcessRegistry.TryRecordHeartbeat(
                     activeRegistration.ProcessInstanceId,
                     activeRegistration.ProcessId,
@@ -572,7 +582,13 @@ public sealed class CurrentUserAgentControlServer
                         out var heartbeatRegistration)
                     && heartbeatRegistration is not null)
                 {
-                    await PersistProcessAsync(heartbeatRegistration, cancellationToken);
+                    // Read-only calls renew in-memory liveness immediately; durable
+                    // heartbeats are coalesced rather than one database write per RPC.
+                    if (timeProvider.GetUtcNow() - durableHeartbeatAt >= TimeSpan.FromSeconds(10))
+                    {
+                        await PersistProcessAsync(heartbeatRegistration, cancellationToken);
+                        durableHeartbeatAt = timeProvider.GetUtcNow();
+                    }
                 }
                 var verifiedPeer = processIncarnationVerifier is not null
                     && clientWitness is not null
@@ -583,26 +599,89 @@ public sealed class CurrentUserAgentControlServer
                         activeRegistration.ProcessInstanceId,
                         agentSessionId)
                     : null;
-                var result = decoded.IsAccepted
-                    ? await coordinator.HandleAsync(
-                        decoded.Request!, verifiedPeer, cancellationToken)
-                    : codec.CreateDecodeRejection(decoded);
-                using var writeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                writeTimeout.CancelAfter(requestTransferTimeout);
-                try
+                var light = envelope.MessageType is AgentControlMessageTypes.GetSnapshot or AgentControlMessageTypes.QueryRealOperation
+                    or AgentControlMessageTypes.QueryRealStructureJob or AgentControlMessageTypes.StopRealOperationFollowingSteps
+                    or AgentControlMessageTypes.StopRealStructureJob or AgentControlMessageTypes.LookupSimulationCommit
+                    or AgentControlMessageTypes.Shutdown or AgentControlMessageTypes.AcknowledgeShutdownPreparation;
+                var admission = light ? lightAdmission : ordinaryAdmission;
+                if (!admission.Wait(0))
                 {
-                    await IpcFrameCodec.WriteAsync(stream,
-                        codec.EncodeResponse(result, timeProvider.GetUtcNow()), writeTimeout.Token);
+                    var busy = ApplicationResult<AgentResponse>.FromStatus(ApplicationStatus.Rejected, new CorrelationId(envelope.CorrelationId),
+                        new ApplicationMessage("agent.request.busy", "agent.request.busy", string.Empty, ApplicationMessageSeverity.Warning, []));
+                    await SendResponseAsync(busy, connectionLifetime.Token);
+                    continue;
                 }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                    throw new RequestTransferTimeoutException();
-                }
+                var key = Guid.NewGuid();
+                tasks[key] = Task.Run(DispatchAsync, CancellationToken.None);
+                _ = tasks[key].ContinueWith(_ => tasks.TryRemove(key, out var ignored),
+                    CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
-                if (coordinator.State == AgentLifecycleState.Stopped)
+                async Task DispatchAsync()
                 {
-                    return;
+                    var running = false;
+                    try
+                    {
+                        if (!light)
+                        {
+                            await ordinaryRunning.WaitAsync(connectionLifetime.Token);
+                            running = true;
+                        }
+                        ApplicationResult<AgentResponse> result;
+                        AgentRequest? dispatchedRequest = null;
+                        try
+                        {
+                            var decoded = envelope.MessageType is AgentControlMessageTypes.SaveSimulationDocument or AgentControlMessageTypes.CommitSimulationEdit
+                                ? await DocumentPayloadLimits.RunLargeAsync(() => codec.DecodeRequest(envelope), connectionLifetime.Token)
+                                : codec.DecodeRequest(envelope);
+                            dispatchedRequest = decoded.Request;
+                            result = decoded.IsAccepted
+                                ? await coordinator.HandleAsync(decoded.Request!, verifiedPeer, connectionLifetime.Token)
+                                : codec.CreateDecodeRejection(decoded);
+                        }
+                        catch (Exception exception) when (exception is not OperationCanceledException
+                            and not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+                        {
+                            Trace.TraceError("agent.request.handler_failed: {0}", exception);
+                            var mayHaveCommitted = dispatchedRequest is SaveAgentSimulationDocumentRequest or CommitAgentSimulationEditRequest
+                                or DeleteAgentSimulationDocumentRequest or AcceptAgentRealOperationRequest or AcceptAgentRealStructureJobRequest;
+                            result = ApplicationResult<AgentResponse>.FromStatus(mayHaveCommitted ? ApplicationStatus.OutcomeUnknown : ApplicationStatus.Failed,
+                                new CorrelationId(envelope.CorrelationId), new ApplicationMessage("agent.request.handler_failed", "agent.request.handler_failed",
+                                    string.Empty, ApplicationMessageSeverity.Error, []));
+                        }
+                        await SendResponseAsync(result, connectionLifetime.Token);
+                    }
+                    catch (IpcPayloadBusyException) { }
+                    catch (Exception exception) when (exception is IOException or OperationCanceledException or ObjectDisposedException)
+                    {
+                        connectionLifetime.Cancel();
+                    }
+                    finally
+                    {
+                        if (running) ordinaryRunning.Release();
+                        admission.Release();
+                    }
                 }
+            }
+            }
+            finally
+            {
+                connectionLifetime.Cancel();
+                await Task.WhenAll(tasks.Values).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                if (coordinator.State == AgentLifecycleState.Running
+                    && coordinator.ProcessRegistry.TryGet(activeRegistration.ProcessInstanceId, out var finalRegistration)
+                    && finalRegistration is not null)
+                    await PersistProcessAsync(finalRegistration, CancellationToken.None);
+            }
+
+            async Task SendResponseAsync(ApplicationResult<AgentResponse> result, CancellationToken token)
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeout.CancelAfter(requestTransferTimeout);
+                var response = result.Value is SimulationDocumentLoadedResponse or ManageInventoryLoadedResponse
+                    or AgentRealOperationEvidenceResponse
+                    ? await DocumentPayloadLimits.RunLargeAsync(() => codec.EncodeResponse(result, timeProvider.GetUtcNow()), timeout.Token)
+                    : codec.EncodeResponse(result, timeProvider.GetUtcNow());
+                await IpcPayloadTransfer.WriteAsync(stream, response, responseWrite, timeout.Token);
             }
         }
         finally
@@ -632,7 +711,7 @@ public sealed class CurrentUserAgentControlServer
     private static string ConnectionFailureCode(Exception exception) =>
         exception switch
         {
-            RequestTransferTimeoutException => "ipc.control.request_transfer_timeout",
+            IpcPayloadTransferTimeoutException => "ipc.control.request_transfer_timeout",
             TimeoutException => "ipc.control.handshake_timeout",
             Microsoft.Data.Sqlite.SqliteException =>
                 "agent.persistence.process_registration_failed",
@@ -660,10 +739,6 @@ public sealed class CurrentUserAgentControlServer
             : verifyClientProcess(processId));
     }
 
-    private sealed class RequestTransferTimeoutException : TimeoutException
-    {
-        public RequestTransferTimeoutException() : base("The Agent control frame transfer timed out.") { }
-    }
 }
 
 public static class AgentClientProcessVerifier

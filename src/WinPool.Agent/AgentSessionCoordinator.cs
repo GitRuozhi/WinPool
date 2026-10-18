@@ -91,6 +91,11 @@ public sealed class AgentSessionCoordinator
     private IRealOperationService? realOperationService;
     private AgentShutdownExecution? shutdownExecution;
     private Task<AgentShutdownExecution>? shutdownTask;
+    private int admittedRequests;
+    private bool preparingShutdown;
+    private TaskCompletionSource requestsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public Func<CancellationToken, Task<bool>>? PrepareHostShutdownAsync { get; set; }
+
 
     public AgentSessionCoordinator(
         IAgentRequestOperations operations,
@@ -151,22 +156,49 @@ public sealed class AgentSessionCoordinator
         }
     }
 
+    public bool CanRegisterApp(ProcessInstanceId instanceId, int processId)
+    {
+        lock (stateLock)
+            return (lifecycle.State is AgentLifecycleState.Starting or AgentLifecycleState.Recovering or AgentLifecycleState.Running) && (!preparingShutdown
+                || ProcessRegistry.TryGet(instanceId, out var process) && process?.ProcessId == processId);
+    }
+
     public Task<ApplicationResult<AgentResponse>> HandleAsync(
         AgentRequest request,
         CancellationToken cancellationToken = default) =>
         HandleAsync(request, null, cancellationToken);
 
-    public Task<ApplicationResult<AgentResponse>> HandleAsync(
-        AgentRequest request,
-        AgentVerifiedPeer? verifiedPeer,
-        CancellationToken cancellationToken = default)
+    public async Task<ApplicationResult<AgentResponse>> HandleAsync(
+        AgentRequest request, AgentVerifiedPeer? verifiedPeer, CancellationToken cancellationToken = default)
+    {
+        if (request is RequestAgentShutdownRequest shutdown)
+            return await BeginShutdownAsync(shutdown, cancellationToken);
+        if (request is AcknowledgeAgentShutdownPreparationRequest acknowledgement)
+            return operations is IAgentShutdownPreparation preparation && preparation.AcknowledgePreparation(acknowledgement, verifiedPeer)
+                ? ApplicationResult<AgentResponse>.Succeeded(new AgentAcknowledgement(), request.CorrelationId)
+                : RejectRealRequest(request.CorrelationId, "agent.shutdown.preparation_stale");
+        var admitted = false;
+        lock (stateLock)
+        {
+            if (lifecycle.State == AgentLifecycleState.Running)
+            {
+                if (admittedRequests++ == 0) requestsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                admitted = true;
+            }
+            else if (request is not GetAgentSnapshotRequest)
+                return RejectUnavailableRequest(request.CorrelationId, lifecycle.State);
+        }
+        try { return await HandleCoreAsync(request, verifiedPeer, cancellationToken); }
+        finally
+        {
+            if (admitted) lock (stateLock) if (--admittedRequests == 0) requestsDrained.TrySetResult();
+        }
+    }
+
+    private Task<ApplicationResult<AgentResponse>> HandleCoreAsync(
+        AgentRequest request, AgentVerifiedPeer? verifiedPeer, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        if (request is RequestAgentShutdownRequest shutdownRequest)
-        {
-            return BeginShutdownAsync(shutdownRequest, cancellationToken);
-        }
 
         if (request is EnterAgentRealModeRequest
             or ExitAgentRealModeRequest
@@ -188,21 +220,10 @@ public sealed class AgentSessionCoordinator
             return HandleRealOperationAsync(request, verifiedPeer, cancellationToken);
         }
 
-        lock (stateLock)
+        if (request is GetAgentSnapshotRequest snapshotRequest && lifecycle.State != AgentLifecycleState.Running)
         {
-            if (lifecycle.State != AgentLifecycleState.Running)
-            {
-                if (request is GetAgentSnapshotRequest snapshotRequest)
-                {
-                    return recoveringSnapshotFactory is not null
-                        ? RecoveringSnapshotAsync(snapshotRequest)
-                        : operations.GetSnapshotAsync(snapshotRequest, cancellationToken);
-                }
-
-                return Task.FromResult(RejectUnavailableRequest(
-                    request.CorrelationId,
-                    lifecycle.State));
-            }
+            return recoveringSnapshotFactory is not null ? RecoveringSnapshotAsync(snapshotRequest)
+                : operations.GetSnapshotAsync(snapshotRequest, cancellationToken);
         }
 
         return request switch
@@ -456,13 +477,6 @@ public sealed class AgentSessionCoordinator
         }
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (realOperationService is AgentRealOperationService realService
-            && !await realService.TryCloseAdmissionForShutdownAsync())
-        {
-            return RejectRealRequest(
-                request.CorrelationId, "agent.shutdown.real_operation_active");
-        }
-
         Task<AgentShutdownExecution> executionTask;
         await shutdownGate.WaitAsync(CancellationToken.None);
         try
@@ -478,13 +492,43 @@ public sealed class AgentSessionCoordinator
                 {
                     executionTask = shutdownTask;
                 }
-                else
+                else executionTask = null!;
+            }
+            if (executionTask is null)
+            {
+                var attemptId = Guid.NewGuid();
+                var preparation = operations as IAgentShutdownPreparation;
+                var proceeding = false;
+                try
                 {
-                    // The gate guarantees one workflow. A subsequent request starts
-                    // another attempt only after a completed pending shutdown.
-                    lifecycle.MarkShuttingDown(DateTimeOffset.UtcNow);
-                    shutdownTask = Task.Run(() => CompleteShutdownAsync(request.Reason));
-                    executionTask = shutdownTask;
+                    lock (stateLock) preparingShutdown = true;
+                    if (preparation is not null
+                        && !await preparation.PrepareClientsAsync(attemptId, request.Reason, cancellationToken))
+                        return RejectRealRequest(request.CorrelationId, "agent.shutdown.preparation_cancelled");
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (PrepareHostShutdownAsync is not null && !await PrepareHostShutdownAsync(cancellationToken))
+                        return RejectRealRequest(request.CorrelationId, "agent.shutdown.real_operation_active");
+                    if (realOperationService is AgentRealOperationService realService
+                        && !await realService.TryCloseAdmissionForShutdownAsync())
+                        return RejectRealRequest(request.CorrelationId, "agent.shutdown.real_operation_active");
+                    Task drained;
+                    lock (stateLock)
+                    {
+                        lifecycle.MarkShuttingDown(DateTimeOffset.UtcNow);
+                        drained = admittedRequests == 0 ? Task.CompletedTask : requestsDrained.Task;
+                        shutdownTask = Task.Run(async () =>
+                        {
+                            await drained.ConfigureAwait(false);
+                            return await CompleteShutdownAsync(request.Reason).ConfigureAwait(false);
+                        });
+                        executionTask = shutdownTask;
+                    }
+                    proceeding = true;
+                }
+                finally
+                {
+                    lock (stateLock) preparingShutdown = false;
+                    preparation?.EndPreparation(attemptId, proceeding);
                 }
             }
 

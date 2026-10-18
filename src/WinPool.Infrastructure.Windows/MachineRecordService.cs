@@ -23,20 +23,6 @@ public sealed class AgentBackedMachineRecordService(IAgentConnection connection)
         return Task.CompletedTask;
     }
 
-    public async Task<StorageSystemDocument?> LoadLocalScanAsync(
-        CancellationToken cancellationToken = default)
-    {
-        var result = await connection.SendAsync(
-            new LoadAgentInventoryCacheRequest(CorrelationId.New()),
-            cancellationToken);
-        if (!result.IsSuccess
-            || result.Value is not ManageInventoryLoadedResponse response)
-        {
-            throw new InventoryScanException(
-                "The Agent cached inventory request failed.",
-                result.Messages.FirstOrDefault()?.Code ?? string.Empty);
-        }
-
-        return LocalInventoryDocumentCodec.TryDecodeCached(response.Document);
-    }
+    public Task<StorageSystemDocument?> LoadLocalScanAsync(CancellationToken cancellationToken = default) =>
+        AgentInventoryReader.LoadLatestAsync(connection, cancellationToken);
 }

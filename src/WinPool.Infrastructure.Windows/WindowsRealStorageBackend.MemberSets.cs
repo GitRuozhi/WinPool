@@ -72,31 +72,42 @@ public sealed partial class WindowsRealStorageBackend
         WindowsStorageCommandResult provider;
         try
         {
-            provider = await adapter.ExecuteAsync(step.Command, target, CancellationToken.None).ConfigureAwait(false);
+            provider = await StorageOperationTiming.MeasureAsync("real.provider", () => adapter.ExecuteAsync(step.Command,
+                target, ((CallContext)preflight.CallContext!).WriteLease, CancellationToken.None), plan.OperationId, step.Id, "exact-members")
+                .ConfigureAwait(false);
             provider = provider with { NativeMsrSafetyEvidence = safetyEvidence?.NativePartitionAttributes,
                 VolumeSafetyEvidence = safetyEvidence?.VolumeSafetyEvidence, OfflinePartitionAttributes = safetyEvidence?.OfflinePartitionAttributes };
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         { return new(RealStepOutcome.OutcomeUnknown, "real.provider_return_unknown", JsonSerializer.Serialize(new { Error = ex.Message })); }
+        finally { await preflight.CallContext!.DisposeAsync().ConfigureAwait(false); }
         if (!provider.ProviderReturned) return new(RealStepOutcome.FailedWithoutEffect, provider.Code,
             JsonSerializer.Serialize(new WindowsNoEffectStepEvidence(true, provider.Code, closure.PhysicalMemberFingerprint, provider.ProviderError)
             { PlanHash = plan.PlanHash, StepId = step.Id }));
         if (provider.Code != "provider.returned") return new(RealStepOutcome.OutcomeUnknown, "real.provider_reported_uncertain_result", JsonSerializer.Serialize(provider));
         var deadline = timeProvider.GetUtcNow().Add(PostCallWindow);
+        using var observation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        observation.CancelAfter(PostCallWindow);
+        var observationToken = observation.Token;
+        var probe = 0;
+        var fullFallbackUsed = false;
+        var fullNext = false;
         string? diagnostic = null;
         do
         {
             try
             {
-                var after = await CaptureWithinWindowAsync(plan, step.Id + ":exact-after", deadline, ct).ConfigureAwait(false);
+                var useFull = fullNext;
+                fullNext = false;
+                var after = await CaptureWithinWindowAsync(plan, step.Id + ":exact-after", deadline, observationToken, useFull).ConfigureAwait(false);
                 var observed = ExactClosureFromTarget(after, target);
                 RequireMultiMaximumIdentity(plan, after, observed, observed.Fingerprint);
                 var verified = VerifyAfter(step.Command, target, provider, before, after);
                 if (verified is not null)
                 {
                     var observedSafety = step.Command is SetDiskOnlineCommand diskState
-                        ? await planner.ValidateObservedExactMemberSafetyAsync(after, observed, CancellationToken.None, diskState).ConfigureAwait(false)
-                        : await planner.ValidateObservedExactMemberSafetyAsync(after, observed, CancellationToken.None).ConfigureAwait(false);
+                        ? await planner.ValidateObservedExactMemberSafetyAsync(after, observed, observationToken, diskState).ConfigureAwait(false)
+                        : await planner.ValidateObservedExactMemberSafetyAsync(after, observed, observationToken).ConfigureAwait(false);
                     if (step.Command is SetDiskOnlineCommand)
                         RequireOfflinePartitionProof(after, observed.AsComponentClosure(), observedSafety);
                     var evidence = new WindowsVerifiedStepEvidence(observed.Fingerprint, observed.PhysicalMemberFingerprint,
@@ -108,9 +119,15 @@ public sealed partial class WindowsRealStorageBackend
                     { VerifiedPostState = PostState(after) };
                 }
             }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { diagnostic = ex.Message; }
+            catch (OperationCanceledException) when (observation.IsCancellationRequested) { break; }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                diagnostic = ex.Message;
+                if (!fullFallbackUsed && !fullNext && topologyReader.SupportsScopedCapture)
+                { fullNext = true; fullFallbackUsed = true; }
+            }
             if (timeProvider.GetUtcNow() >= deadline) break;
-            await Task.Delay(PostCallPoll, timeProvider, CancellationToken.None).ConfigureAwait(false);
+            if (!await DelayObservationProbeAsync(probe++, deadline, observationToken).ConfigureAwait(false)) break;
         } while (true);
         return new(RealStepOutcome.OutcomeUnknown, "real.postcondition_unverified", JsonSerializer.Serialize(new { Provider = provider, Diagnostic = diagnostic }));
     }

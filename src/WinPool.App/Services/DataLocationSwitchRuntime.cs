@@ -13,11 +13,11 @@ namespace WinPool.App.Services;
 /// </summary>
 internal static class DataLocationSwitchRuntime
 {
-    public static StorageLocationManager CreateManager() =>
+    public static StorageLocationManager CreateManager(Func<bool> simulationSavesFlushed) =>
         new(
             StorageDataLocations.StandardRoot,
             StorageDataLocations.PortableRoot,
-            new StoppedAgentWriteCoordinator());
+            new StoppedAgentWriteCoordinator(simulationSavesFlushed));
 
     public static async Task<bool> WaitForAgentExitAsync(
         CancellationToken cancellationToken)
@@ -87,18 +87,20 @@ internal static class DataLocationSwitchRuntime
         return new AgentMigrationExclusion(mutex);
     }
 
-    private sealed class StoppedAgentWriteCoordinator : IStorageWriteQuiescenceCoordinator
+    private sealed class StoppedAgentWriteCoordinator(Func<bool> simulationSavesFlushed) : IStorageWriteQuiescenceCoordinator
     {
         public Task<IAsyncDisposable> QuiesceAndFlushAsync(
             CorrelationId correlationId,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<IAsyncDisposable>(new NoOpAsyncDisposable());
+            if (!simulationSavesFlushed() || File.Exists(DataRootLayout.AgentEndpointPath(StorageDataLocations.CurrentRoot)))
+                throw new InvalidOperationException("Migration requires all App saves flushed and the old Agent endpoint removed while its exclusion is held.");
+            return Task.FromResult<IAsyncDisposable>(new VerifiedStoppedAgentLease());
         }
     }
 
-    private sealed class NoOpAsyncDisposable : IAsyncDisposable
+    private sealed class VerifiedStoppedAgentLease : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\WinPool.Application\WinPool.Application.csproj" />
     <ProjectReference Include="..\..\src\WinPool.Infrastructure.Windows\WinPool.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\..\src\WinPool.Ipc\WinPool.Ipc.csproj" />
+    <ProjectReference Include="..\WinPool.PowerShellHost.Fixture\WinPool.PowerShellHost.Fixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

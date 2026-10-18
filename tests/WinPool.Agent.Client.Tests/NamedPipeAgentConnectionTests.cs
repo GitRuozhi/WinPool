@@ -10,7 +10,7 @@ using WinPool.Ipc;
 
 namespace WinPool.Agent.Client.Tests;
 
-public sealed class NamedPipeAgentConnectionTests
+public sealed partial class NamedPipeAgentConnectionTests
 {
     [Theory]
     [InlineData(false)]
@@ -435,7 +435,7 @@ public sealed class NamedPipeAgentConnectionTests
     }
 
     [Fact]
-    public async Task IdleControlConnectionIsRenewedBeforeTheFirstRequestIsSent()
+    public async Task IdleControlConnectionIsReusedWithoutAnExtraRecoverySnapshot()
     {
         var directory = Path.Combine(Path.GetTempPath(), "WinPool.Agent.Client.Tests",
             Guid.NewGuid().ToString("N"));
@@ -461,21 +461,20 @@ public sealed class NamedPipeAgentConnectionTests
         try
         {
             await using var connection = new NamedPipeAgentConnection(endpointPath,
-                new RecordingLauncher(), null, null, new TrueAgentProcessLiveness(),
-                controlConnectionReuseIdleLimit: TimeSpan.FromMilliseconds(100));
+                new RecordingLauncher(), null, null, new TrueAgentProcessLiveness());
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             Assert.True((await connection.ConnectAsync(timeout.Token)).IsSuccess);
             Assert.Equal(1, operations.SnapshotRequestCount);
 
-            // Renewal is serialized with the next requests after a long idle.
+            // An idle lease does not require a new handshake or duplicate snapshot.
             await Task.Delay(200, timeout.Token);
             var first = connection.SendAsync(new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
             var second = connection.SendAsync(new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
             Assert.True((await first).IsSuccess);
             Assert.True((await second).IsSuccess);
-            Assert.Equal(4, operations.SnapshotRequestCount); // initial, renewed, first, second
+            Assert.Equal(3, operations.SnapshotRequestCount); // initial, first, second
 
-            // A later user request must also survive proactive renewal.
+            // Transfer timeout starts at the first byte, so long idle is valid.
             await Task.Delay(TimeSpan.FromSeconds(2.2), timeout.Token);
             var afterServerIdle = await connection.SendAsync(
                 new GetAgentSnapshotRequest(CorrelationId.New()), timeout.Token);
@@ -785,12 +784,12 @@ public sealed class NamedPipeAgentConnectionTests
             Assert.Equal(started, Assert.IsType<AgentInventoryStartedEvent>(eventEnumerator.Current));
             Assert.True(await secondEventEnumerator.MoveNextAsync());
             Assert.Equal(started, Assert.IsType<AgentInventoryStartedEvent>(secondEventEnumerator.Current));
-            eventHub.Publish(new AgentInventoryUpdatedEvent(purpose, SnapshotOperations.LocalInventory(), occurredAt, IsAutomatic: true));
+            eventHub.Publish(new AgentInventoryUpdatedEvent(purpose, new(SnapshotOperations.LocalInventory().DocumentId, SnapshotOperations.LocalInventory().Sha256, SnapshotOperations.LocalInventory().CapturedAtUtc), occurredAt, IsAutomatic: true));
             Assert.True(await eventEnumerator.MoveNextAsync());
             var report = Assert.IsType<AgentInventoryUpdatedEvent>(eventEnumerator.Current);
             Assert.Equal(purpose, report.Purpose);
             Assert.True(report.IsAutomatic);
-            Assert.Equal(SnapshotOperations.LocalInventory(), report.Document);
+            Assert.Equal(SnapshotOperations.LocalInventory().Sha256, report.Document.Sha256);
             Assert.True(await secondEventEnumerator.MoveNextAsync());
             Assert.Equal(report, Assert.IsType<AgentInventoryUpdatedEvent>(secondEventEnumerator.Current));
         }
@@ -831,7 +830,7 @@ public sealed class NamedPipeAgentConnectionTests
         Assert.True(cachedInventoryResponse.IsSuccess);
         lock (persistedProcesses)
         {
-            Assert.True(persistedProcesses.Count >= 2);
+            Assert.Single(persistedProcesses);
             Assert.All(
                 persistedProcesses,
                 process => Assert.Equal(
@@ -958,10 +957,10 @@ public sealed class NamedPipeAgentConnectionTests
         var result = await send.WaitAsync(TimeSpan.FromSeconds(5));
         await dispose.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Equal(ApplicationStatus.RequiresEnvironment, result.Status);
+        Assert.Equal(ApplicationStatus.OutcomeUnknown, result.Status);
         Assert.Contains(
             result.Messages,
-            message => message.Code == "agent.request.connection_lost");
+            message => message.Code == "agent.request.outcome_unknown");
 
         operations.ReleaseMainWindow.TrySetResult();
         serverCancellation.Cancel();
@@ -976,7 +975,7 @@ public sealed class NamedPipeAgentConnectionTests
     }
 
     [Fact]
-    public async Task CallerCancellationWhileWaitingForRequestGateKeepsConnectionUsable()
+    public async Task LightRequestCompletesWhileAnOrdinaryRequestIsWaiting()
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
@@ -1035,7 +1034,7 @@ public sealed class NamedPipeAgentConnectionTests
             new GetAgentSnapshotRequest(CorrelationId.New()),
             waitingCancellation.Token);
 
-        Assert.Equal(ApplicationStatus.Cancelled, waiting.Status);
+        Assert.Equal(ApplicationStatus.Succeeded, waiting.Status);
         operations.ReleaseMainWindow.TrySetResult();
         Assert.True((await first.WaitAsync(TimeSpan.FromSeconds(5))).IsSuccess);
         Assert.True(
@@ -1444,7 +1443,7 @@ public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
             CancellationToken cancellationToken) =>
             Task.FromResult(
                 ApplicationResult<AgentResponse>.Succeeded(
-                    new SimulationDocumentSavedResponse(request.Document),
+                    new SimulationDocumentSavedResponse(new(request.Document.DocumentId, request.Document.DocumentSchemaVersion, request.Document.DisplayName, request.Document.Sha256, request.Document.Revision, request.Document.UpdatedAtUtc)),
                     request.CorrelationId));
 
         public Task<ApplicationResult<AgentResponse>> DeleteSimulationDocumentAsync(

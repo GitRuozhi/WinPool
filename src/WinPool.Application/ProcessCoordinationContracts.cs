@@ -56,7 +56,7 @@ public sealed record SimulationDocumentPayload(
     string DocumentId,
     int DocumentSchemaVersion,
     string DisplayName,
-    string Json,
+    [property: System.Text.Json.Serialization.JsonConverter(typeof(DocumentJsonStringConverter))] string Json,
     string Sha256,
     long Revision,
     DateTimeOffset UpdatedAtUtc);
@@ -73,7 +73,7 @@ public sealed record LocalInventoryDocumentPayload(
     string DocumentId,
     int DocumentSchemaVersion,
     string DisplayName,
-    string Json,
+    [property: System.Text.Json.Serialization.JsonConverter(typeof(DocumentJsonStringConverter))] string Json,
     string Sha256,
     DateTimeOffset CapturedAtUtc);
 
@@ -148,6 +148,17 @@ public sealed record RequestAgentShutdownRequest(
     CorrelationId CorrelationId,
     bool BeginInBackground = false)
     : AgentRequest(CorrelationId);
+
+public sealed record AcknowledgeAgentShutdownPreparationRequest(
+    Guid ShutdownAttemptId, ProcessInstanceId AppInstanceId, bool Prepared, CorrelationId CorrelationId)
+    : AgentRequest(CorrelationId);
+
+public sealed record PrepareAgentShutdownEvent(Guid ShutdownAttemptId, ProcessInstanceId AppInstanceId,
+    int AppProcessId, DateTimeOffset AppStartedAtUtc, ShutdownReason Reason, DateTimeOffset OccurredAtUtc)
+    : AgentEvent(OccurredAtUtc);
+
+public sealed record AgentShutdownPreparationEndedEvent(Guid ShutdownAttemptId, bool Proceeding,
+    DateTimeOffset OccurredAtUtc) : AgentEvent(OccurredAtUtc);
 
 public enum AgentPreferenceField
 {
@@ -231,7 +242,7 @@ public sealed record SimulationDocumentLoadedResponse(
     : AgentResponse;
 
 public sealed record SimulationDocumentSavedResponse(
-    SimulationDocumentPayload Document)
+    SimulationDocumentMetadata Document)
     : AgentResponse;
 
 public sealed record SimulationDocumentDeletedResponse(
@@ -301,9 +312,11 @@ public sealed record AgentInventoryStartedEvent(
     DateTimeOffset OccurredAtUtc,
     bool IsAutomatic = false) : AgentEvent(OccurredAtUtc);
 
+public sealed record LocalInventoryDocumentReference(string DocumentId, string Sha256, DateTimeOffset CapturedAtUtc);
+
 public sealed record AgentInventoryUpdatedEvent(
     CollectionPurpose Purpose,
-    LocalInventoryDocumentPayload Document,
+    LocalInventoryDocumentReference Document,
     DateTimeOffset OccurredAtUtc,
     bool IsAutomatic = false) : AgentEvent(OccurredAtUtc);
 

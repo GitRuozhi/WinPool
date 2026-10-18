@@ -38,6 +38,13 @@ public interface IRealStorageBackend
         RealStepPreflight preflight,
         CancellationToken cancellationToken);
 
+    /// <summary>Reserves the exact ready host before the durable CallIssued transaction.</summary>
+    Task<RealStepPreflight> ReserveStepCallAsync(OperationPlan plan, RealOperationStep step,
+        RealStepPreflight preflight, CancellationToken cancellationToken) => Task.FromResult(preflight);
+
+    /// <summary>Releases transient selectors after execution or read-only recovery.</summary>
+    void ReleaseOperation(OperationId operationId) { }
+
     Task<RealReconciliationResult> ReconcileAsync(
         OperationPlan plan,
         IReadOnlyList<RealOperationStepProgress> persistedSteps,
@@ -102,7 +109,10 @@ public sealed record RealStepPreflight(
     public RealStepCallContext? CallContext { get; init; }
 }
 
-public abstract record RealStepCallContext(OperationId OperationId, string StepId);
+public abstract record RealStepCallContext(OperationId OperationId, string StepId) : IAsyncDisposable
+{
+    public virtual ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
 
 public sealed record RealVerifiedPostState(StorageSystemDocument Document,
     StorageInventoryScope? Scope, DateTimeOffset ObservedAt);

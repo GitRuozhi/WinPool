@@ -227,7 +227,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
         {
             Assert.Equal(current?.Sha256, request.ExpectedPreviousSha256);
             current = request.Document;
-            return new(current);
+            return new(new SimulationDocumentMetadata(current.DocumentId, current.DocumentSchemaVersion, current.DisplayName, current.Sha256, current.Revision, current.UpdatedAtUtc));
         }
     }
 }

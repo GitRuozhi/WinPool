@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.IO.Compression;
+
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -23,16 +23,24 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private readonly IWindowsStorageWriteProcessRunner _runner;
+    private readonly IWindowsStorageWriteProcessRunner? _runner;
+    private readonly WindowsPowerShellHost host;
 
-    public WindowsRealStorageCommandAdapter() : this(new WindowsPowerShellStorageWriteRunner()) { }
+    public WindowsRealStorageCommandAdapter(WindowsPowerShellHost? host = null) => this.host = host ?? WindowsPowerShellHost.Shared;
 
-    internal WindowsRealStorageCommandAdapter(IWindowsStorageWriteProcessRunner runner) =>
-        _runner = runner ?? throw new ArgumentNullException(nameof(runner));
+    internal WindowsRealStorageCommandAdapter(IWindowsStorageWriteProcessRunner runner)
+    { _runner = runner ?? throw new ArgumentNullException(nameof(runner)); host = WindowsPowerShellHost.Shared; }
+
+    public async Task<WindowsPowerShellWriteLease?> ReserveWriteAsync(CancellationToken token) =>
+        _runner is null ? await host.ReserveWriteAsync(token).ConfigureAwait(false) : null;
+
+    public Task<WindowsStorageCommandResult> ExecuteAsync(RealStorageCommand command,
+        WindowsStorageCommandTarget target, CancellationToken token) => ExecuteAsync(command, target, null, token);
 
     public async Task<WindowsStorageCommandResult> ExecuteAsync(
         RealStorageCommand command,
         WindowsStorageCommandTarget target,
+        WindowsPowerShellWriteLease? lease,
         CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -48,12 +56,22 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
             return Rejected("adapter.closed-command-or-target-required");
         }
 
+        if (_runner is null && (lease is null || target.HostCall != lease.HostCall))
+            return Rejected("adapter.durable-host-reservation-required");
+
+        WindowsStorageCommandResult WithCompletion(WindowsStorageCommandResult result) => result with
+        {
+            // Completion comes from the validated protocol frame, never from provider JSON.
+            CompletedHostCall = _runner is null && lease?.RequestCompleted == true ? lease.HostCall : null
+        };
         var payload = JsonSerializer.Serialize(new { CommandKind = kind, Command = command, Target = target }, JsonOptions);
         WindowsStorageProcessResult process;
         try
         {
-            process = await _runner.RunAsync(WindowsRealStoragePowerShellScript.Source, payload, token)
-                .ConfigureAwait(false);
+            process = _runner is not null
+                ? await _runner.RunAsync(WindowsRealStoragePowerShellScript.Source, payload, token).ConfigureAwait(false)
+                : new WindowsStorageProcessResult(0,
+                    await lease!.ExecuteAsync(new { CommandKind = kind, Command = command, Target = target }, token).ConfigureAwait(false), "");
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -63,13 +81,13 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         catch (Exception)
         {
             // The runner may have started a provider call before failing to report.
-            return new WindowsStorageCommandResult(true, "adapter.process-outcome-unknown",
-                null, null, null, null, null, null, "The write process outcome is unknown; reconcile read-only.");
+            return WithCompletion(new WindowsStorageCommandResult(true, "adapter.process-outcome-unknown",
+                null, null, null, null, null, null, "The write process outcome is unknown; reconcile read-only."));
         }
 
         if (string.IsNullOrWhiteSpace(process.StandardOutput))
         {
-            return Unknown("The write process returned no structured result.", process);
+            return WithCompletion(Unknown("The write process returned no structured result.", process));
         }
 
         try
@@ -77,25 +95,25 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
             var result = JsonSerializer.Deserialize<WindowsStorageCommandResult>(process.StandardOutput.Trim(), JsonOptions);
             if (result is null || string.IsNullOrWhiteSpace(result.Code))
             {
-                return Unknown("The write process result was incomplete.", process);
+                return WithCompletion(Unknown("The write process result was incomplete.", process));
             }
 
             if (process.ExitCode != 0)
             {
-                return Unknown("The write process exited abnormally; a storage call may have changed the target.", process);
+                return WithCompletion(Unknown("The write process exited abnormally; a storage call may have changed the target.", process));
             }
 
-            return result switch
+            return WithCompletion(result switch
             {
                 { Code: "provider.returned", ProviderReturned: true } => result,
                 { Code: "adapter.preflight-rejected", ProviderReturned: false } => result,
                 { Code: "provider.error-outcome-unknown", ProviderReturned: true } => result,
                 _ => Unknown("The write process returned an inconsistent result.", process)
-            };
+            });
         }
         catch (JsonException)
         {
-            return Unknown("The write process returned invalid structured data.", process);
+            return WithCompletion(Unknown("The write process returned invalid structured data.", process));
         }
     }
 
@@ -358,98 +376,5 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         var recovery = Guid.Parse("de94bba4-06d1-4d40-a16a-bfd50179d6ac");
         return role == recovery && target.CreatedInThisPlan &&
             format.FileSystem == RealFileSystem.Ntfs && format.ClusterBytes == 4096 && !format.Full;
-    }
-}
-
-internal sealed class WindowsPowerShellStorageWriteRunner : IWindowsStorageWriteProcessRunner
-{
-    public async Task<WindowsStorageProcessResult> RunAsync(
-        string fixedScript,
-        string payloadJson,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var executable = WindowsPowerShellRunner.ExecutablePath;
-        if (!StringComparer.Ordinal.Equals(fixedScript, WindowsRealStoragePowerShellScript.Source))
-        {
-            throw new InvalidOperationException("Only the embedded storage write script may run.");
-        }
-        if (!File.Exists(executable))
-        {
-            throw new FileNotFoundException("Windows PowerShell 5.1 is required.", executable);
-        }
-
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = executable,
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardInputEncoding = new UTF8Encoding(false),
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-                CreateNoWindow = true
-            }
-        };
-        process.StartInfo.ArgumentList.Add("-NoLogo");
-        process.StartInfo.ArgumentList.Add("-NoProfile");
-        process.StartInfo.ArgumentList.Add("-NonInteractive");
-        process.StartInfo.ArgumentList.Add("-ExecutionPolicy");
-        process.StartInfo.ArgumentList.Add("Bypass");
-        process.StartInfo.ArgumentList.Add("-EncodedCommand");
-        process.StartInfo.ArgumentList.Add(EncodeFixedScriptLoader());
-
-        if (!process.Start())
-        {
-            throw new InvalidOperationException("Unable to start Windows PowerShell 5.1.");
-        }
-
-        // After process creation no caller cancellation or fixed timer kills a possible write.
-        // The Agent persists CallIssued before this point and reconciles on lost output.
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteLineAsync(CompressFixedScript(fixedScript).AsMemory(), CancellationToken.None).ConfigureAwait(false);
-        await process.StandardInput.WriteAsync(payloadJson.AsMemory(), CancellationToken.None).ConfigureAwait(false);
-        process.StandardInput.Close();
-        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-        return new WindowsStorageProcessResult(process.ExitCode,
-            await outputTask.ConfigureAwait(false), await errorTask.ConfigureAwait(false));
-    }
-
-    internal static string CompressFixedScript(string script)
-    {
-        using var buffer = new MemoryStream();
-        using (var gzip = new GZipStream(buffer, CompressionLevel.SmallestSize, leaveOpen: true))
-        {
-            gzip.Write(Encoding.UTF8.GetBytes(script));
-        }
-
-        return Convert.ToBase64String(buffer.ToArray());
-    }
-
-    internal static string EncodeFixedScriptLoader()
-    {
-        // Only this fixed loader travels on the command line. RunAsync supplies the
-        // assembly-validated script as the first stdin line, then typed JSON data.
-        // Byte reads avoid buffering JSON before the script resets InputEncoding.
-        const string bootstrap = "$i=[Console]::OpenStandardInput();$l=[IO.MemoryStream]::new();"
-            + "while(($n=$i.ReadByte()) -ge 0 -and $n -ne 10){$l.WriteByte([byte]$n)};"
-            + "$b=[Convert]::FromBase64String([Text.Encoding]::ASCII.GetString($l.ToArray()));$m=[IO.MemoryStream]::new($b);"
-            + "$g=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);"
-            + "$r=[IO.StreamReader]::new($g,[Text.UTF8Encoding]::new($false));$s=$r.ReadToEnd();& ([ScriptBlock]::Create($s))";
-        return Convert.ToBase64String(Encoding.Unicode.GetBytes(bootstrap));
-    }
-
-    // Small read-only test harnesses still use a self-contained command line.
-    // Production writes use the bounded loader and framed stdin above.
-    internal static string EncodeFixedCompressedScript(string script)
-    {
-        var bootstrap = "$b=[Convert]::FromBase64String('" + CompressFixedScript(script)
-            + "');$m=[IO.MemoryStream]::new($b);$g=[IO.Compression.GZipStream]::new($m,[IO.Compression.CompressionMode]::Decompress);"
-            + "$r=[IO.StreamReader]::new($g,[Text.UTF8Encoding]::new($false));$s=$r.ReadToEnd();& ([ScriptBlock]::Create($s))";
-        return Convert.ToBase64String(Encoding.Unicode.GetBytes(bootstrap));
     }
 }

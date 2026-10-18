@@ -138,14 +138,16 @@ public sealed partial class OperationPlanRepository
         planCommand.Transaction = transaction;
         planCommand.CommandText = """
             INSERT INTO operation_plans(
-                operation_id, plan_hash, environment_id, risk, state,
+                operation_id, plan_hash, environment_id, system_id, target_ids_json, risk, state,
                 sanitized_json, created_at_utc_ms, preparation_id, preparation_intent_hash)
-            VALUES($operation, $hash, $environment, $risk, $state, $json, $created,
+            VALUES($operation, $hash, $environment, $system, $targets, $risk, $state, $json, $created,
                 $preparation, $intentHash);
             """;
         planCommand.Parameters.AddWithValue("$operation", Id(plan.OperationId.Value));
         planCommand.Parameters.AddWithValue("$hash", plan.PlanHash);
         planCommand.Parameters.AddWithValue("$environment", Id(plan.EnvironmentId.Value));
+        planCommand.Parameters.AddWithValue("$system", Id(plan.SystemId.Value));
+        planCommand.Parameters.AddWithValue("$targets", JsonSerializer.Serialize(plan.Targets, JsonOptions));
         planCommand.Parameters.AddWithValue("$risk", (int)plan.Risk);
         planCommand.Parameters.AddWithValue("$state", (int)state);
         planCommand.Parameters.AddWithValue("$json", JsonSerializer.Serialize(plan, JsonOptions));
@@ -550,6 +552,10 @@ public sealed partial class OperationPlanRepository
             UPDATE operation_steps SET state = $next,
                 target_json = COALESCE($target, target_json),
                 evidence_json = COALESCE($evidence, evidence_json),
+                created_object_id = CASE WHEN $evidence IS NULL THEN created_object_id
+                    WHEN json_valid($evidence) THEN json_extract($evidence,'$.CreatedObjectId') ELSE NULL END,
+                created_os_disk_id = CASE WHEN $evidence IS NULL THEN created_os_disk_id
+                    WHEN json_valid($evidence) THEN json_extract($evidence,'$.CreatedOsDiskId') ELSE NULL END,
                 updated_at_utc_ms = $at
             WHERE operation_id = $operation AND step_id = $step
               AND state = $expected

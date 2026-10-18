@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
@@ -197,6 +197,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
     public StorageStructurePage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            _simulationPreviewPageActive = false;
+            _simulationPreviewDelay?.Cancel();
+            _simulationPreviewKey = null;
+            _simulationPreviewRunning = false;
+        };
         EditorFormMetrics.ConfigurePropertyPane(PropertiesScrollViewer, PoolSectionsPanel, PropertiesColumn);
         NavigationCacheMode = NavigationCacheMode.Required;
         Performance = CreateTierFields("SSD", "PerformanceTier");
@@ -206,6 +213,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
+        _simulationPreviewPageActive = true;
         base.OnNavigatedTo(e);
         string? targetStableId = null;
         if (e.Parameter is EditorNavigationParameter parameter)
@@ -300,6 +308,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         ResetLayerSwitchesForSelection();
         RefreshAll();
+    }
+
+    protected override void OnSimulationDraftDiscarded()
+    {
+        EditingSession.Bind(ViewModel.ActiveDocument, ViewModel.ActiveSnapshot);
+        _formDirty = false; _formHistoryCaptured = false;
+        NormalizeSelection(); RefreshAll();
     }
 
     protected override bool OnRecoveredRealOperation(AgentRealOperationResponse response, bool inventoryRefreshed)
@@ -2670,10 +2685,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void RefreshPendingActions()
     {
-        PendingActionsPanel.Children.Clear();
-        _planBuildError = string.Empty;
         if (!ViewModel.IsUsingSimulatedInventory)
         {
+            PendingActionsPanel.Children.Clear();
+            _planBuildError = string.Empty;
             _currentPlan = null;
             _realDraftPreview = null;
             try
@@ -2711,26 +2726,101 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
             return;
         }
-        try
+        BeginSimulationPreview();
+        RenderSimulationPendingActions();
+    }
+
+    private (string Document, long Binding, long Content, string Inventory)? _simulationPreviewKey;
+    private Task _simulationPreviewTask = Task.CompletedTask;
+    private CancellationTokenSource? _simulationPreviewDelay;
+    private bool _simulationPreviewRunning;
+    private bool _simulationPreviewPageActive;
+    private readonly SemaphoreSlim _simulationPreviewGate = new(1, 1);
+
+    private void BeginSimulationPreview()
+    {
+        var session = EditingSession;
+        var document = ViewModel.ActiveDocument;
+        var key = (document.Id, session.BindingGeneration, session.ContentRevision, document.InventoryVersion);
+        if (_simulationPreviewKey == key) return;
+        _simulationPreviewKey = key;
+        _simulationPreviewDelay?.Cancel();
+        _simulationPreviewDelay?.Dispose();
+        _simulationPreviewDelay = new CancellationTokenSource();
+        var token = _simulationPreviewDelay.Token;
+        if (session.CurrentPlan is { } cached && cached.BaselineSystemId == document.SystemId
+            && cached.BaselineRevision == document.Revision && cached.BaselineInventoryVersion == document.InventoryVersion)
         {
-            _currentPlan = EditingSession.GetOrBuildPreview(ViewModel.ActiveDocument.Id, () =>
+            _simulationPreviewRunning = false;
+            _simulationPreviewTask = Task.CompletedTask;
+            return;
+        }
+        _currentPlan = null;
+        _planBuildError = string.Empty;
+        _simulationPreviewRunning = true;
+        // Capture form values on their owning UI thread; the full reducer runs below on a worker.
+        var projected = _formDirty ? ApplyFormToWorking(_working) : _working;
+        _simulationPreviewTask = BuildSimulationPreviewAsync();
+        async Task BuildSimulationPreviewAsync()
+        {
+            var entered = false;
+            try
             {
-                var projected = _formDirty ? ApplyFormToWorking(_working) : _working;
-                var built = SimulationDraftPlanner.BuildEdits(EditingSession.Baseline, projected);
+                await Task.Delay(75, token);
+                await _simulationPreviewGate.WaitAsync(token);
+                entered = true;
+                var built = await Task.Run(() => SimulationDraftPlanner.BuildEdits(session.Baseline, projected), token);
+                if (!IsCurrent()) return;
                 var enriched = built.Steps.Select(EnrichPlanIntent).ToList();
                 AppendPartitionIntents(enriched);
-                return SimulationDraftPlanner.Precheck(ViewModel.ActiveDocument, enriched);
-            });
+                var preview = await Task.Run(() => SimulationDraftPlanner.Precheck(document, enriched), token);
+                if (!IsCurrent()) return;
+                _currentPlan = preview;
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+            {
+                if (!IsCurrent()) return;
+                _planBuildError = exception.Message;
+            }
+            finally
+            {
+                if (entered) _simulationPreviewGate.Release();
+                if (IsCurrent())
+                {
+                    _simulationPreviewRunning = false;
+                    RenderSimulationPendingActions();
+                    UpdateButtonState();
+                }
+            }
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
-        {
-            _ = exception;
-            _currentPlan = null;
-            _planBuildError = Text(
-                "当前草稿无法生成可应用的操作；请检查字段值和待处理操作。",
-                "The current draft cannot produce applicable operations; check field values and pending operations.");
-        }
+        bool IsCurrent() => _simulationPreviewPageActive && !token.IsCancellationRequested && ReferenceEquals(EditingSession, session)
+            && _simulationPreviewKey == key && session.BindingGeneration == key.BindingGeneration
+            && session.ContentRevision == key.ContentRevision && ViewModel.ActiveDocument.Id == document.Id
+            && ViewModel.ActiveDocument.InventoryVersion == document.InventoryVersion;
+    }
 
+    private async Task EnsureCurrentSimulationPreviewAsync()
+    {
+        BeginSimulationPreview();
+        await _simulationPreviewTask;
+    }
+
+    private (SimulationDraftPlan? Plan, bool Running, string Error, LanguagePreference Language)? _pendingPresentation;
+    private void RenderSimulationPendingActions()
+    {
+        var presentation = (_currentPlan, _simulationPreviewRunning, _planBuildError, ViewModel.Localization.EffectiveLanguage);
+        if (_pendingPresentation == presentation) return;
+        _pendingPresentation = presentation;
+        PendingActionsPanel.Children.Clear();
+        if (_simulationPreviewRunning)
+        {
+            PendingActionsPanel.Children.Add(new TextBlock
+            {
+                Text = Text("正在预演当前草稿…", "Previewing the current draft…"), TextWrapping = TextWrapping.Wrap
+            });
+            return;
+        }
         if (_currentPlan is null || _currentPlan.IsEmpty)
         {
             var empty = new TextBlock
@@ -4349,7 +4439,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
             return;
         }
 
-        RefreshPendingActions();
+        await EnsureCurrentSimulationPreviewAsync();
         if (_currentPlan is null)
         {
             await ShowMessageAsync(Text("无法应用草稿", "Cannot apply draft"), _planBuildError);
@@ -4475,7 +4565,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         PublishOperationFeedback(
             GlobalNotificationSeverity.Info,
             Text("修改已应用", "Changes applied"),
-            Text("结构修改已写入模拟系统。", "The structural changes were saved to the simulation."),
+            Text("结构修改已应用到本地模拟内容，正在后台保存。", "Structural changes were applied locally and queued for background saving."),
             "storage-structure-editor",
             "structure.apply.completed");
     }

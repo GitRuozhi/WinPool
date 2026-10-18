@@ -114,6 +114,7 @@ public sealed class RealScopedInventoryRefreshPolicyTests
         return (document with { SourceFacts = document.SourceFacts! with
         {
             InventoryVersion = "same-snapshot", InventoryCapturedAt = at,
+            ObservationId = Guid.NewGuid(),
             ScopedCollection = new(captured, at.AddSeconds(-1), at, true)
         } }, requested);
     }

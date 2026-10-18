@@ -1,4 +1,4 @@
-using System.Management;
+
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinPool.Application;
@@ -636,79 +636,35 @@ public sealed class WindowsRealStorageSafetyInspector : IWindowsRealStorageSafet
         IReadOnlySet<string> efiPartitions)
     {
         if (volumes.Count == 0) return [];
-        using var searcher = new ManagementObjectSearcher(
-            @"root\CIMV2\Security\MicrosoftVolumeEncryption",
-            "SELECT DeviceID,DriveLetter FROM Win32_EncryptableVolume");
-        searcher.Options.Timeout = TimeSpan.FromSeconds(10);
-        using var results = searcher.Get();
-        var candidates = results.Cast<ManagementObject>().ToArray();
+        var json = WindowsPowerShellHost.Shared.QueryAsync(WindowsPowerShellQuery.BitLockerCandidates,
+            new { }, cancellationToken).GetAwaiter().GetResult();
+        var candidates = JsonSerializer.Deserialize<BitLockerCandidate[]>(json, WindowsPowerShellHost.JsonOptions)
+            ?? throw new InvalidDataException("The BitLocker enumeration returned no collection.");
         var evidence = new List<WindowsVolumeSafetyEvidence>();
-        try
+        foreach (var volume in volumes)
         {
-            foreach (var volume in volumes)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var probes = candidates.Select(instance => new BitLockerVolume(
-                    instance["DeviceID"]?.ToString()?.Trim(), instance["DriveLetter"]?.ToString()?.Trim(), () =>
-                    ReadBitLockerState(instance))).ToArray();
-                var proof = RequireBitLockerSafety(volume, probes, WindowsReadOnlyVdsFileSystemReader.Read,
-                    volume.PartitionStableId is { } partitionId && efiPartitions.Contains(partitionId), cancellationToken,
-                    ReadExactBitLockerVolume);
-                if (proof is not null) evidence.Add(proof);
-            }
-        }
-        finally
-        {
-            foreach (var candidate in candidates) candidate.Dispose();
+            cancellationToken.ThrowIfCancellationRequested();
+            var probes = candidates.Select(instance => new BitLockerVolume(instance.DeviceId, instance.DriveLetter,
+                () => ReadExactBitLockerVolume(instance.DeviceId ?? "", cancellationToken)?.State
+                    ?? throw new InvalidDataException("The enumerated BitLocker volume disappeared."))).ToArray();
+            var proof = RequireBitLockerSafety(volume, probes, WindowsReadOnlyVdsFileSystemReader.Read,
+                volume.PartitionStableId is { } partitionId && efiPartitions.Contains(partitionId), cancellationToken,
+                ReadExactBitLockerVolume);
+            if (proof is not null) evidence.Add(proof);
         }
         return evidence;
     }
 
-    private static BitLockerState ReadBitLockerState(ManagementObject instance, InvokeMethodOptions? options = null)
-    {
-        using var conversionParameters = instance.GetMethodParameters("GetConversionStatus");
-        conversionParameters["PrecisionFactor"] = 0U;
-        using var conversion = instance.InvokeMethod("GetConversionStatus", conversionParameters, options);
-        using var lockStatus = instance.InvokeMethod("GetLockStatus", null, options);
-        return new(conversion?["ReturnValue"] as uint?, conversion?["ConversionStatus"] as uint?,
-            lockStatus?["ReturnValue"] as uint?, lockStatus?["LockStatus"] as uint?);
-    }
+    private sealed record BitLockerCandidate(string? DeviceId, string? DriveLetter);
 
     private static ExactBitLockerState? ReadExactBitLockerVolume(string volumePath, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (!IsVolumeGuidPath(volumePath))
-            throw new InvalidDataException("The direct BitLocker probe requires one exact volume GUID path.");
-        var scope = new ManagementScope(@"root\CIMV2\Security\MicrosoftVolumeEncryption",
-            new ConnectionOptions { Authentication = AuthenticationLevel.PacketPrivacy,
-                Impersonation = ImpersonationLevel.Impersonate, Timeout = TimeSpan.FromSeconds(10) });
-        var escapedPath = volumePath.Replace("\\", "\\\\", StringComparison.Ordinal);
-        using var instance = new ManagementObject(scope,
-            new ManagementPath("Win32_EncryptableVolume.DeviceID=\"" + escapedPath + "\""),
-            new ObjectGetOptions { Timeout = TimeSpan.FromSeconds(10) });
-        try
-        {
-            instance.Get();
-        }
-        catch (ManagementException exception) when (exception.ErrorCode == ManagementStatus.NotFound)
-        {
-            // No object is not an encryption result. The caller may still use
-            // an independently successful, existing VDS or native EFI proof.
-            return null;
-        }
-        var deviceId = instance["DeviceID"] as string;
-        if (!SameVolumeGuidPath(deviceId, volumePath))
-            throw new InvalidDataException("The direct BitLocker object has a different volume identity.");
-        token.ThrowIfCancellationRequested();
-        var options = new InvokeMethodOptions { Timeout = TimeSpan.FromSeconds(10) };
-        using var encryption = instance.InvokeMethod("GetEncryptionMethod", null, options);
-        var state = ReadBitLockerState(instance, options);
-        token.ThrowIfCancellationRequested();
-        instance.Get();
-        return new(deviceId, instance["DeviceID"] as string,
-            encryption?["ReturnValue"] as uint?, encryption?["EncryptionMethod"] as uint?, state);
+        if (!IsVolumeGuidPath(volumePath)) throw new InvalidDataException("The direct BitLocker probe requires one exact volume GUID path.");
+        var json = WindowsPowerShellHost.Shared.QueryAsync(WindowsPowerShellQuery.BitLocker,
+            new { DeviceId = volumePath }, token).GetAwaiter().GetResult();
+        return JsonSerializer.Deserialize<ExactBitLockerState>(json, WindowsPowerShellHost.JsonOptions);
     }
-
     internal static WindowsVolumeSafetyEvidence? RequireBitLockerSafety(VolumeInfo volume, IReadOnlyList<BitLockerVolume> candidates,
         Func<string, CancellationToken, WindowsReadOnlyVdsFileSystemReader.Evidence> fileSystemReader,
         bool isEfiPartition, CancellationToken token,

@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace WinPool.Application;
@@ -36,6 +35,12 @@ public static class SimulationEditIntent
     public static string StableId(string prefix, string contextId) =>
         $"{prefix}:{Hash(new[] { prefix, contextId })[..32]}";
 
-    public static string Hash<T>(T value) => Convert.ToHexString(
-        SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value)))).ToLowerInvariant();
+    public static string Hash<T>(T value)
+    {
+        using var hash = SHA256.Create();
+        using var output = new CryptoStream(Stream.Null, hash, CryptoStreamMode.Write);
+        JsonSerializer.Serialize(output, value);
+        output.FlushFinalBlock();
+        return Convert.ToHexString(hash.Hash!).ToLowerInvariant();
+    }
 }

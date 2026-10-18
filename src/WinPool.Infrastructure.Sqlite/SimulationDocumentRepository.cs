@@ -11,7 +11,7 @@ public sealed class SimulationDocumentConflictException(string message)
 
 public sealed class SimulationDocumentRepository
 {
-    private const int MaximumDocumentBytes = 3 * 1024 * 1024;
+    private const int MaximumDocumentBytes = DocumentPayloadLimits.MaximumDocumentBytes;
     private readonly WinPoolSqliteStore store;
     private readonly AgentWriteOwnerLease writeOwner;
 
@@ -155,7 +155,14 @@ public sealed class SimulationDocumentRepository
     {
         if (string.IsNullOrWhiteSpace(commitId)) return null;
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        return await FindByCommitIdAsync(connection, null, commitId, cancellationToken);
+    }
+
+    private static async Task<SimulationCommitReceipt?> FindByCommitIdAsync(SqliteConnection connection,
+        SqliteTransaction? transaction, string commitId, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT commit_id, document_id, before_revision, document_revision,
                    before_sha256, after_sha256, intent_hash, committed_at_utc_ms
@@ -181,16 +188,18 @@ public sealed class SimulationDocumentRepository
             || intent.ExpectedRevision < 1 || document.Revision != checked(intent.ExpectedRevision + 1)
             || intent.Edits.Count == 0)
             throw new ArgumentException("The simulation commit intent is inconsistent.");
-        var existing = await FindByCommitIdAsync(intent.CommitId, cancellationToken);
-        if (existing is not null)
-        {
-            if (existing.DocumentId == intent.DocumentId && existing.IntentHash == intent.IntentHash)
-                return existing;
-            throw new SimulationDocumentConflictException("The commit ID is already bound to a different intent.");
-        }
         writeOwner.AssertOwnership(store);
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var transaction = connection.BeginTransaction(System.Data.IsolationLevel.Serializable, deferred: false);
+        var existing = await FindByCommitIdAsync(connection, transaction, intent.CommitId, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.DocumentId != intent.DocumentId || existing.IntentHash != intent.IntentHash
+                || existing.BeforeRevision != intent.ExpectedRevision || existing.BeforeSha256 != expectedPreviousSha256)
+                throw new SimulationDocumentConflictException("The commit ID is already bound to a different intent.");
+            await transaction.CommitAsync(cancellationToken);
+            return existing;
+        }
         var saved = await UpsertAsync(connection, transaction, document, expectedPreviousSha256, cancellationToken);
         var receipt = new SimulationCommitReceipt(intent.CommitId, saved.DocumentId,
             intent.ExpectedRevision, saved.Revision, expectedPreviousSha256, saved.Sha256,
@@ -291,6 +300,7 @@ public sealed class SimulationDocumentRepository
         {
             throw new ArgumentException("The simulation document payload size is invalid.", nameof(document));
         }
+        DocumentPayloadLimits.EnsureEnvelopeFits(document.Json, document.UpdatedAtUtc);
         using var parsed = JsonDocument.Parse(bytes);
         if (parsed.RootElement.ValueKind != JsonValueKind.Object)
         {

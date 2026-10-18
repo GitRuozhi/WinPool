@@ -12,6 +12,7 @@
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WinPool.Persistence.Tests" />
     <ProjectReference Include="..\WinPool.Application\WinPool.Application.csproj" />
     <ProjectReference Include="..\WinPool.Domain\WinPool.Domain.csproj" />
     <ProjectReference Include="..\WinPool.Monitoring\WinPool.Monitoring.csproj" />

@@ -44,7 +44,9 @@ public sealed record LoadAgentRealOperationEvidenceRequest(
     OperationId OperationId,
     int Offset,
     int Limit,
-    CorrelationId CorrelationId) : AgentRequest(CorrelationId);
+    CorrelationId CorrelationId,
+    string? StepId = null, RealEvidenceField? Field = null,
+    long ByteOffset = 0, int ByteCount = 256 * 1024, long? ExpectedRevision = null) : AgentRequest(CorrelationId);
 
 public sealed record QueryAgentRealPartitionResizeRangeRequest(
     StorageObjectId Partition,
@@ -114,12 +116,15 @@ public sealed record RealOperationStepProgress(
     RealOperationStepState State,
     string? Code,
     string? TargetEvidence,
-    string? ResultEvidence);
+    string? ResultEvidence,
+    RealOperationResultIdentity? ResultIdentity = null);
 
 /// <summary>
 /// The latest read-only reconciliation observation in this Agent lifetime.
 /// It does not replace persisted operation state or evidence.
 /// </summary>
+public sealed record RealOperationResultIdentity(string? CreatedObjectId, string? CreatedOsDiskId);
+
 public sealed record RealOperationReconciliationDiagnostic(string Code, string? Detail = null);
 
 /// <summary>
@@ -133,7 +138,8 @@ public sealed record AgentRealOperationResponse(
     string? Code,
     bool RequiresReconciliation,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    RealOperationReconciliationDiagnostic? ReconciliationDiagnostic = null) : AgentResponse;
+    RealOperationReconciliationDiagnostic? ReconciliationDiagnostic = null,
+    long ActiveStepElapsedMilliseconds = 0) : AgentResponse;
 
 /// <summary>Durable status changes carry no plan or evidence history.</summary>
 public sealed record AgentRealOperationStatusResponse(
@@ -143,12 +149,26 @@ public sealed record AgentRealOperationStatusResponse(
     IReadOnlyList<RealOperationStepProgress> Steps,
     string? Code,
     bool RequiresReconciliation,
-    RealOperationReconciliationDiagnostic? ReconciliationDiagnostic = null) : AgentResponse;
+    RealOperationReconciliationDiagnostic? ReconciliationDiagnostic = null,
+    SystemId? SystemId = null, string? PlanHash = null,
+    IReadOnlyList<StorageObjectId>? Targets = null,
+    long ActiveStepElapsedMilliseconds = 0) : AgentResponse;
 
 public sealed record AgentRealOperationEvidenceResponse(
     AgentRealOperationResponse Operation,
     int Offset,
-    int? NextOffset) : AgentResponse;
+    int? NextOffset,
+    IReadOnlyList<RealEvidenceReference>? EvidenceReferences = null,
+    RealEvidenceWindow? Window = null) : AgentResponse;
+
+public enum RealEvidenceField { Target, Result }
+public sealed record RealEvidenceReference(string StepId, RealEvidenceField Field, long TotalBytes,
+    long Revision, bool InlineComplete);
+public sealed record RealEvidenceWindow(string StepId, RealEvidenceField Field, long Revision,
+    long TotalBytes, long ByteOffset, byte[] Bytes, string Sha256)
+{
+    public long? NextOffset => ByteOffset + Bytes.Length < TotalBytes ? ByteOffset + Bytes.Length : null;
+}
 
 public sealed record AgentRealOperationStatusEvent(
     AgentRealOperationStatusResponse Status,

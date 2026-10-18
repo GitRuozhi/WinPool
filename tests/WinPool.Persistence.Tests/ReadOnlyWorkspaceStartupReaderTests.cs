@@ -95,20 +95,9 @@ public sealed class ReadOnlyWorkspaceStartupReaderTests
             json,
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant(),
             local.UpdatedAt);
-        var persistedSnapshot = await new InventorySnapshotRepository(database.Store, lease)
-            .SaveAsync(
-                new InventorySnapshot(
-                    local.SystemId,
-                    InventoryProviderKind.EmbeddedReadOnlyPowerShell,
-                    "startup-preview",
-                    new string('a', 64),
-                    local.UpdatedAt,
-                    [],
-                    []),
-                PersistedSystemKind.Local,
-                local.DisplayName);
         await new LocalInventoryDocumentRepository(database.Store, lease)
-            .SaveAsync(persistedSnapshot.SnapshotId, payload);
+            .SaveAsync(Guid.NewGuid(), payload, local.SystemId, local.DisplayName,
+                LocalSystemIdentityResolver.CreateAuthorityBinding(local.DisplayName));
         await new WorkspaceSessionStateRepository(database.Store, lease)
             .SaveAsync(State(local.Id), CancellationToken.None);
 
@@ -142,7 +131,7 @@ public sealed class ReadOnlyWorkspaceStartupReaderTests
 
     [Theory]
     [InlineData(16)]
-    [InlineData(21)]
+    [InlineData(22)]
     public async Task UnsupportedSchemasAreRejectedWithoutMutation(int schemaVersion)
     {
         await using var database = await TemporaryDatabase.CreateAsync();

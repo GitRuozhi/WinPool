@@ -8,6 +8,20 @@ namespace WinPool.Persistence.Tests;
 public sealed class MonitoringSqliteStoreTests
 {
     [Fact]
+    public async Task MigrationVerificationDoesNotReopenAWriterOrCreateSidecars()
+    {
+        await using var fixture = await MonitoringDatabaseFixture.CreateAsync();
+        var store = new MonitoringSqliteStore(fixture.MonitoringPath);
+        await store.InitializeAsync();
+        await store.CheckpointAndCloseAsync();
+        var before = ReadDatabaseFiles(fixture.MonitoringPath);
+        await store.VerifyForMigrationAsync(CancellationToken.None);
+        AssertDatabaseFilesEqual(before, fixture.MonitoringPath);
+        using var exclusive = new FileStream(fixture.MonitoringPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        Assert.True(exclusive.Length > 0);
+    }
+
+    [Fact]
     public async Task EditGapRestartPreservesUnknownEndpointAndRejectsIdentityOrStartRewrite()
     {
         await using var fixture = await MonitoringDatabaseFixture.CreateAsync();
@@ -72,6 +86,7 @@ public sealed class MonitoringSqliteStoreTests
             command.CommandText = "DROP TABLE monitor_edit_gaps; UPDATE monitoring_schema_info SET schema_version=1; DROP INDEX ix_monitor_samples_session_device_time;";
             await command.ExecuteNonQueryAsync();
         }
+        store.DrainConnectionPool();
         var before = ReadDatabaseFiles(fixture.MonitoringPath);
         await Assert.ThrowsAsync<CurrentMonitoringSchemaCorruptException>(() => store.InitializeAsync());
         AssertDatabaseFilesEqual(before, fixture.MonitoringPath);
@@ -83,6 +98,7 @@ public sealed class MonitoringSqliteStoreTests
         await using var fixture = await MonitoringDatabaseFixture.CreateAsync();
         var core = new WinPoolSqliteStore(fixture.CorePath);
         await core.InitializeAsync();
+        core.DrainConnectionPool();
         var coreBefore = File.ReadAllBytes(fixture.CorePath);
 
         var store = new MonitoringSqliteStore(fixture.MonitoringPath);
@@ -135,6 +151,7 @@ public sealed class MonitoringSqliteStoreTests
             await mutation.ExecuteNonQueryAsync();
         }
 
+        store.DrainConnectionPool();
         var before = ReadDatabaseFiles(fixture.MonitoringPath);
         var exception = await Assert.ThrowsAsync<CurrentMonitoringSchemaCorruptException>(
             () => new MonitoringSqliteStore(fixture.MonitoringPath).InitializeAsync());
@@ -156,6 +173,7 @@ public sealed class MonitoringSqliteStoreTests
             await mutation.ExecuteNonQueryAsync();
         }
 
+        store.DrainConnectionPool();
         var before = ReadDatabaseFiles(fixture.MonitoringPath);
         var exception = await Assert.ThrowsAsync<CurrentMonitoringSchemaCorruptException>(
             () => new MonitoringSqliteStore(fixture.MonitoringPath).InitializeAsync());
@@ -292,6 +310,7 @@ public sealed class MonitoringSqliteStoreTests
 
         public ValueTask DisposeAsync()
         {
+            TestDatabasePools.DrainDirectory(Directory);
             if (System.IO.Directory.Exists(Directory))
             {
                 System.IO.Directory.Delete(Directory, recursive: true);

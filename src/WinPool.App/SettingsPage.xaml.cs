@@ -154,6 +154,7 @@ public sealed partial class SettingsPage : Page
         {
             if (!((MainWindow)App.Window).IsCloseInProgress)
             {
+                ((MainWindow)App.Window).CancelLifecyclePreparation();
                 DataLocationOptions.IsEnabled = true;
                 ContextHelp.SetDisabledReason(DataLocationOptions, null);
             }
@@ -187,7 +188,7 @@ public sealed partial class SettingsPage : Page
         }
 
         using var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        await ((MainWindow)App.Window).SaveWorkspaceBeforeAgentShutdownAsync(shutdownTimeout.Token);
+        if (!await ((MainWindow)App.Window).PrepareWorkspaceForAgentShutdownAsync(shutdownTimeout.Token)) return;
         var shutdown = await ViewModel.AgentConnection.SendAsync(
             new RequestAgentShutdownRequest(
                 ShutdownReason.StorageLocationSwitch,
@@ -213,7 +214,7 @@ public sealed partial class SettingsPage : Page
         }
 
         using var migrationTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
-        var manager = DataLocationSwitchRuntime.CreateManager();
+        var manager = DataLocationSwitchRuntime.CreateManager(() => !ViewModel.HasUnsavedSimulationChanges);
         var planResult = await manager.PlanSwitchAsync(
             requestedMode,
             CorrelationId.New(),

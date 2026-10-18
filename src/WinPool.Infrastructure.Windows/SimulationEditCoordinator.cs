@@ -5,7 +5,7 @@ namespace WinPool.Infrastructure.Windows;
 
 public sealed record SimulationEditCommit(StorageSystemDocument Document, SimulationCommitIntent Intent);
 
-/// <summary>Previews frozen typed edits and publishes them only after an authoritative commit.</summary>
+/// <summary>Validates frozen edits in the background and hands the accepted local candidate to its save owner.</summary>
 public sealed class SimulationEditCoordinator(
     Func<StorageSystemDocument> currentDocument,
     Func<SimulationEditCommit, CancellationToken, Task> commitDocument,
@@ -64,12 +64,23 @@ public sealed class SimulationEditCoordinator(
                 applied = new(true, preview, string.Empty,
                     plan.DisplayItems.SelectMany(item => item.CommandPreview).ToArray());
             else
-                applied = singleEdit
+                applied = await Task.Run(() => singleEdit
                     ? simulationEditor.Apply(document, plan.Steps[0])
-                    : simulationEditor.ApplyPlan(document, plan);
+                    : simulationEditor.ApplyPlan(document, plan), cancellationToken);
             if (!applied.Succeeded)
                 return Failure(ApplicationStatus.Rejected, correlation, "simulation.plan-rejected", applied.Error);
+            var current = currentDocument();
+            if (current.Id != document.Id || current.Revision != document.Revision
+                || current.InventoryVersion != document.InventoryVersion)
+                return Failure(ApplicationStatus.Rejected, correlation, "simulation.plan.revision_conflict", "The local document changed while this edit was being previewed. The newer content was preserved.");
             var candidate = applied.Document with { Revision = checked(document.Revision + 1) };
+            // Reject a non-exportable candidate before publishing local content. The canonical
+            // envelope contract is shared with import/export and the durable repository.
+            await Task.Run(() => DocumentPayloadLimits.EncodeExport(candidate), cancellationToken);
+            current = currentDocument();
+            if (current.Id != document.Id || current.Revision != document.Revision
+                || current.InventoryVersion != document.InventoryVersion)
+                return Failure(ApplicationStatus.Rejected, correlation, "simulation.plan.revision_conflict", "The local document changed while this edit was being prepared. The newer content was preserved.");
             var intent = new SimulationCommitIntent(document.Id, document.Revision, commitId, plan.Steps);
             commitStarted = true;
             await commitDocument(new(candidate, intent), cancellationToken);
@@ -88,6 +99,8 @@ public sealed class SimulationEditCoordinator(
         { return Failure(ApplicationStatus.Rejected, correlation, "simulation.commit.conflict", exception.Message); }
         catch (SimulationCommitFailureException exception)
         { return Failure(ApplicationStatus.Failed, correlation, "simulation.commit.storage_failed", exception.Message); }
+        catch (InvalidDataException exception)
+        { return Failure(ApplicationStatus.Rejected, correlation, "simulation.document.invalid", exception.Message); }
         catch (IOException) when (commitStarted)
         { return Failure(ApplicationStatus.OutcomeUnknown, correlation, "simulation.commit.outcome_unknown", "The save connection failed after the commit began. Reconcile the document before retrying."); }
         catch (Exception exception) when (exception is ArgumentException or OverflowException)

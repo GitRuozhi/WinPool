@@ -127,7 +127,7 @@ public sealed class SqliteMigrationAuditorTests
 
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePools.DrainDirectory(Path);
             if (Directory.Exists(Path))
             {
                 Directory.Delete(Path, recursive: true);

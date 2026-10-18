@@ -122,6 +122,8 @@ public sealed record WinPoolFacts(
     public DateTimeOffset InventoryCapturedAt { get; init; }
     public ScopedInventoryCollection? ScopedCollection { get; init; }
     public bool IsMerged { get; init; }
+    /// <summary>Identity of an Agent-owned immutable observation; never write authorization.</summary>
+    public Guid ObservationId { get; init; }
 
     public static WinPoolFacts Empty(SystemId systemId) =>
         new(CurrentFormatVersion, systemId, 0, [], [], [], [], []);
@@ -193,7 +195,7 @@ public sealed record WinPoolFacts(
         StorageObjectId CopyTarget(StorageObjectId target) => new(targetSystemId, target.Kind, CopyObjectId(target.ProviderKey));
         var copy = this with
         {
-            SystemId = targetSystemId, Revision = 1, IsSimulation = true,
+            SystemId = targetSystemId, Revision = 1, IsSimulation = true, ObservationId = Guid.Empty,
             Sources = Sources.Select(source => source.Coverage is { } coverage ? source with
             {
                 Coverage = coverage with { ObjectIds = coverage.ObjectIds.Select(CopyObjectId).ToImmutableArray() }
@@ -214,7 +216,9 @@ public sealed record WinPoolFacts(
                     BeforeLocators = scoped.Scope.BeforeLocators.Select(locator => locator with
                     {
                         Target = CopyTarget(locator.Target)
-                    }).ToArray()
+                    }).ToArray(),
+                    BeforeComponentLocators = scoped.Scope.BeforeComponentLocators?.Select(locator => locator with
+                    { Target = CopyTarget(locator.Target) }).ToArray()
                 }
             } : null
         };

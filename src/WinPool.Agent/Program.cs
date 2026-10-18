@@ -143,6 +143,7 @@ internal static class Program
             var localIdentity = new LocalSystemIdentityResolver(store, writeOwner);
             var sharedIdentity = new AgentLocalSystemIdentity(localDocument, localIdentity);
             var collector = new AgentInventoryCollector(new WindowsHardwareInventoryProvider(), sharedIdentity);
+            coordinator.PrepareHostShutdownAsync = WindowsPowerShellHost.Shared.PrepareShutdownAsync;
             var inventoryReady = new TaskCompletionSource<AgentInventoryCoordinator>(TaskCreationOptions.RunContinuationsAsynchronously);
             var realMachineIdentity = new WindowsRealMachineIdentityProvider();
             var realTopologyReader = new WindowsRealStorageTopologyReader(
@@ -243,7 +244,6 @@ internal static class Program
                 new WorkspaceSessionStateRepository(store, writeOwner),
                 new SimulationDocumentRepository(store, writeOwner),
                 collector,
-                new InventorySnapshotRepository(store, writeOwner),
                 localDocument,
                 sharedIdentity,
                 processIncarnationVerifier,
@@ -349,6 +349,7 @@ internal static class Program
                             "Monitoring persistence disposal was skipped because its writer did not stop."));
                 }
                 runtime.StopInventoryAsync(CancellationToken.None).GetAwaiter().GetResult();
+                WindowsPowerShellHost.Shared.DisposeAsync().AsTask().GetAwaiter().GetResult();
                 pipeCancellation.Cancel();
                 serverTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
                     .GetAwaiter()

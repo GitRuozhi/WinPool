@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Globalization;
-using System.Management;
+using System.Text.Json;
 using System.Runtime.InteropServices;
 using WinPool.Application;
 
@@ -8,9 +8,7 @@ namespace WinPool.Infrastructure.Windows;
 
 internal static class WindowsNetworkFactCollector
 {
-    private const string NetworkNamespace = @"\\.\ROOT\StandardCimv2";
-
-    public static WinPoolFacts AddTo(WinPoolFacts facts, DateTimeOffset capturedAt)
+    public static WinPoolFacts AddTo(WinPoolFacts facts, DateTimeOffset capturedAt, JsonElement captured = default)
     {
         var source = Source("winpool/native", "WinPool.NetworkAdapter", FactOrigin.Native, capturedAt);
         var platformSource = Source("WinPool.Platform", capturedAt);
@@ -28,11 +26,18 @@ internal static class WindowsNetworkFactCollector
         var networkIdentities = ImmutableArray.CreateBuilder<WinPoolIdentityBinding>();
         try
         {
-            var scope = new ManagementScope(NetworkNamespace);
-            scope.Connect();
-            var addresses = ReadAddresses(scope);
-            var defaultRoutes = ReadDefaultRouteInterfaces(scope);
-            foreach (var adapter in ReadAdapters(scope))
+            if (captured.ValueKind != JsonValueKind.Object || captured.TryGetProperty("Error", out _))
+                throw new InvalidDataException("The bounded inventory did not return network observations.");
+            var addresses = captured.GetProperty("Addresses").EnumerateArray().Where(item => UInt32Value(item,"InterfaceIndex") is not null
+                && UInt32Value(item,"AddressFamily") is not null && TextValue(item,"IPAddress").Length > 0)
+                .GroupBy(item => UInt32Value(item,"InterfaceIndex")!.Value)
+                .ToDictionary(group => group.Key, group => group.Select(item => new NetworkAddressInfo(UInt32Value(item,"AddressFamily")!.Value, TextValue(item,"IPAddress"))).ToArray());
+            var defaultRoutes = captured.GetProperty("Routes").EnumerateArray().Select(item => UInt32Value(item,"InterfaceIndex"))
+                .OfType<uint>().ToHashSet();
+            foreach (var adapter in captured.GetProperty("Adapters").EnumerateArray().Select(item => new NetworkAdapterInfo(
+                TextValue(item,"InterfaceGuid"), UInt32Value(item,"InterfaceIndex"), TextValue(item,"Name"), TextValue(item,"DriverDescription"),
+                UInt64Value(item,"Speed"), TextValue(item,"PermanentAddress"), BooleanValue(item,"ConnectorPresent"), UInt32Value(item,"InterfaceType") ?? 0,
+                UInt32Value(item,"InterfaceOperationalStatus"), BooleanValue(item,"HardwareInterface"), BooleanValue(item,"Virtual"))).OrderBy(item => item.InterfaceIndex))
             {
                 if (!adapter.ConnectorPresent && adapter.InterfaceType == 0) continue;
                 var reliableIdentity = adapter.InterfaceGuid.Length > 0
@@ -67,7 +72,7 @@ internal static class WindowsNetworkFactCollector
             objects.AddRange(networkObjects);
             identities.AddRange(networkIdentities);
         }
-        catch (Exception exception) when (exception is ManagementException or UnauthorizedAccessException or COMException)
+        catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or JsonException or KeyNotFoundException)
         {
             sources = sources.SetItem(sources.Length - 2, source with { ReadState = FieldReadState.Failed, ReasonCode = exception.GetType().Name });
         }
@@ -85,74 +90,13 @@ internal static class WindowsNetworkFactCollector
         return result;
     }
 
-    private static IReadOnlyList<NetworkAdapterInfo> ReadAdapters(ManagementScope scope)
-    {
-        using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery(
-            "SELECT InterfaceGuid, InterfaceIndex, Name, DriverDescription, Speed, PermanentAddress, " +
-            "ConnectorPresent, InterfaceType, InterfaceOperationalStatus, HardwareInterface, Virtual FROM MSFT_NetAdapter"));
-        using var results = searcher.Get();
-        var adapters = new List<NetworkAdapterInfo>();
-        foreach (ManagementBaseObject item in results)
-        {
-            using (item)
-            {
-                adapters.Add(new(
-                    TextValue(item, "InterfaceGuid"), UInt32Value(item, "InterfaceIndex"), TextValue(item, "Name"),
-                    TextValue(item, "DriverDescription"), UInt64Value(item, "Speed"), TextValue(item, "PermanentAddress"),
-                    BooleanValue(item, "ConnectorPresent"), UInt32Value(item, "InterfaceType") ?? 0,
-                    UInt32Value(item, "InterfaceOperationalStatus"), BooleanValue(item, "HardwareInterface"),
-                    BooleanValue(item, "Virtual")));
-            }
-        }
-        return adapters.OrderBy(x => x.InterfaceIndex).ToArray();
-    }
-
-    private static IReadOnlyDictionary<uint, IReadOnlyList<NetworkAddressInfo>> ReadAddresses(ManagementScope scope)
-    {
-        using var searcher = new ManagementObjectSearcher(scope,
-            new ObjectQuery("SELECT InterfaceIndex, AddressFamily, IPAddress FROM MSFT_NetIPAddress"));
-        using var results = searcher.Get();
-        var addresses = new List<(uint InterfaceIndex, NetworkAddressInfo Address)>();
-        foreach (ManagementBaseObject item in results)
-        {
-            using (item)
-            {
-                if (UInt32Value(item, "InterfaceIndex") is not { } index || UInt32Value(item, "AddressFamily") is not { } family
-                    || TextValue(item, "IPAddress") is not { Length: > 0 } address) continue;
-                addresses.Add((index, new(family, address)));
-            }
-        }
-        return addresses.GroupBy(x => x.InterfaceIndex)
-            .ToDictionary(x => x.Key, x => (IReadOnlyList<NetworkAddressInfo>)x.Select(y => y.Address).ToArray());
-    }
-
-    private static IReadOnlySet<uint> ReadDefaultRouteInterfaces(ManagementScope scope)
-    {
-        using var searcher = new ManagementObjectSearcher(scope,
-            new ObjectQuery("SELECT InterfaceIndex, DestinationPrefix FROM MSFT_NetRoute"));
-        using var results = searcher.Get();
-        var interfaces = new HashSet<uint>();
-        foreach (ManagementBaseObject item in results)
-        {
-            using (item)
-            {
-                var prefix = TextValue(item, "DestinationPrefix");
-                if (prefix is not ("0.0.0.0/0" or "::/0") || UInt32Value(item, "InterfaceIndex") is not { } index) continue;
-                interfaces.Add(index);
-            }
-        }
-        return interfaces;
-    }
-
-    private static string TextValue(ManagementBaseObject item, string property) =>
-        Convert.ToString(item.Properties[property]?.Value, CultureInfo.InvariantCulture) ?? string.Empty;
-    private static uint? UInt32Value(ManagementBaseObject item, string property) =>
-        item.Properties[property]?.Value is { } value ? Convert.ToUInt32(value, CultureInfo.InvariantCulture) : null;
-    private static ulong? UInt64Value(ManagementBaseObject item, string property) =>
-        item.Properties[property]?.Value is { } value ? Convert.ToUInt64(value, CultureInfo.InvariantCulture) : null;
-    private static bool BooleanValue(ManagementBaseObject item, string property) =>
-        item.Properties[property]?.Value is { } value && Convert.ToBoolean(value, CultureInfo.InvariantCulture);
-
+    private static string TextValue(JsonElement item, string property) => item.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
+    private static uint? UInt32Value(JsonElement item, string property) => item.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.Number && value.TryGetUInt32(out var number) ? number : null;
+    private static ulong? UInt64Value(JsonElement item, string property) => item.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.Number && value.TryGetUInt64(out var number) ? number : null;
+    private static bool BooleanValue(JsonElement item, string property) => item.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
     private static WinPoolSource Source(string sourceNamespace, string name, FactOrigin origin, DateTimeOffset capturedAt)
     {
         var id = WinPoolIdentityRegistry.OpaqueSourceIdentity(sourceNamespace, name, capturedAt.ToString("O"));

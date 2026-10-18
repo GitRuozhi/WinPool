@@ -15,6 +15,7 @@ internal static class WindowsReadOnlyVdsFileSystemReader
     internal sealed record Evidence(string VolumePath, int FileSystemType, uint AllocationUnitSize);
     private static readonly object securityInitializationGate = new();
     private static int? processSecurityResult;
+    private static readonly SemaphoreSlim probeSlot = new(1, 1);
 
     // Called once by Agent startup before any COM/WMI activity. A late or failed
     // initialization is reported by HRESULT; the volume read remains fail closed.
@@ -26,6 +27,27 @@ internal static class WindowsReadOnlyVdsFileSystemReader
     }
 
     internal static Evidence Read(string volumePath, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        // A native COM call cannot always be interrupted. Keep at most one
+        // unfinished call, and retain its slot after the caller's deadline.
+        if (!probeSlot.Wait(0)) throw new InvalidOperationException("The previous read-only VDS probe is still running.");
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        var deadlineToken = deadline.Token;
+        var probe = Task.Run(() =>
+        {
+            try { return ReadCore(volumePath, deadlineToken); }
+            finally { probeSlot.Release(); deadline.Dispose(); }
+        });
+        _ = probe.ContinueWith(completed => _ = completed.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        try { return probe.WaitAsync(deadlineToken).GetAwaiter().GetResult(); }
+        catch (OperationCanceledException error) when (!token.IsCancellationRequested)
+        { throw new TimeoutException("The read-only VDS probe exceeded 60 seconds.", error); }
+    }
+
+    private static Evidence ReadCore(string volumePath, CancellationToken token)
     {
         object? loaderObject = null, serviceObject = null;
         try

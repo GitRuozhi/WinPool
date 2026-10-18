@@ -25,17 +25,28 @@ internal static class EmbeddedStorageInventoryScript
             "([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
             + Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(scope.BeforeLocators)))
             + "')) | ConvertFrom-Json)";
+        var component = scope?.BeforeComponentLocators is null ? "$null" : "([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
+            + Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(scope.BeforeComponentLocators))) + "')) | ConvertFrom-Json)";
+        var fields = WindowsRealStorageReadProfile.ForId(scope?.EvidenceProfile)?.Fields;
+        var encodedFields = fields is null ? "$null" : "([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
+            + Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(fields))) + "')) | ConvertFrom-Json)";
         return "$WinPoolIncludeHardware = " + (purpose == CollectionPurpose.Hardware ? "$true" : "$false")
             + "\n$WinPoolDiscoverProviderCache = " + (discoverProviderCache ? "$true" : "$false")
-            + "\n$WinPoolScopeLocators = " + selectors + "\n" + Template;
+            + "\n$WinPoolScopeLocators = " + selectors + "\n$WinPoolComponentLocators = " + component + "\n$WinPoolEvidenceFields = " + encodedFields + "\n" + Template;
     }
 
-    private static readonly string Template = Prelude + ScopeClosure + StorageClassQueries + ProviderDiscovery + StorageReads + TierMemberAssociationHelpers + InventoryBody + OsDiskParentBinding + ReportBody;
+    private static readonly string Template = Prelude + DeviceLocationReader + ScopeClosure + StorageClassQueries + ProviderDiscovery + StorageReads
+        + "\n$collectionTimings['baseClasses'] = $collectionClock.Elapsed.TotalMilliseconds\n"
+        + TierMemberAssociationHelpers + InventoryBody + OsDiskParentBinding + ReportBody;
+
+    internal static string HostTemplate => "param($parameters)\n$WinPoolIncludeHardware = [bool]$parameters.IncludeHardware\n"
+        + "$WinPoolDiscoverProviderCache = [bool]$parameters.DiscoverProviderCache\n$WinPoolScopeLocators = $parameters.ScopeLocators\n$WinPoolComponentLocators = $parameters.ComponentLocators\n$WinPoolEvidenceFields = $parameters.EvidenceFields\n" + Template;
 
     private const string Prelude = """
 $ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$collectionClock = [Diagnostics.Stopwatch]::StartNew()
+$collectionTimings = [ordered]@{}
 
 
 $sourceObservations = [System.Collections.Generic.List[object]]::new()
@@ -58,7 +69,9 @@ function Add-SourceObservation {
     $key = $namespace + '|' + $className + '|' + $identity
     if ($identity -ne '' -and $sourceSeen.ContainsKey($key)) { return }
     if ($identity -ne '') { $sourceSeen[$key] = $true }
+    $selected = if ($null -eq $WinPoolEvidenceFields) { $null } else { $WinPoolEvidenceFields.PSObject.Properties[$className] }
     $fields = foreach ($property in $Item.CimInstanceProperties) {
+        if ($null -ne $selected -and @($selected.Value) -notcontains [string]$property.Name) { continue }
         $type = [string]$property.CimType
         $state = 'Returned'
         $reason = $null
@@ -106,15 +119,23 @@ function Get-ScalarText {
 }
 
 function Get-Safe {
-    param([scriptblock]$Query, $Default = $null)
+    param([scriptblock]$Query, $Default = $null, [string]$TimingName = '')
     $classMatch = [regex]::Match($Query.ToString(), '(?:Win32|MSFT)_[A-Za-z0-9_]+|WmiMonitorID|BatteryStaticData|BatteryStatus|SoftwareLicensingProduct')
-    $queryNamespace = if ($Query.ToString() -match 'root\\wmi') { 'root/wmi' } else { 'root/cimv2' }
+    $queryNamespace = if ($classMatch.Value.StartsWith('MSFT_')) { 'root/Microsoft/Windows/Storage' } elseif ($Query.ToString() -match 'root\\wmi') { 'root/wmi' } else { 'root/cimv2' }
+    $timingKey = if ($TimingName -ne '') { $TimingName } elseif ($classMatch.Success) { $classMatch.Value } else { '' }
+    $queryClock = [Diagnostics.Stopwatch]::StartNew()
     try {
         $value = & $Query
+        $queryClock.Stop()
         if ($classMatch.Success) {
             [void]$sourceQuerySuccesses.Add([ordered]@{ ClassName=$classMatch.Value; Namespace=$queryNamespace })
         }
+        $projectionClock = [Diagnostics.Stopwatch]::StartNew()
         foreach ($observed in @($value)) { Add-SourceObservation $observed }
+        if ($timingKey -ne '') {
+            $key = 'projection:' + $timingKey
+            $collectionTimings[$key] = [double]$collectionTimings[$key] + $projectionClock.Elapsed.TotalMilliseconds
+        }
         if ($null -eq $value) { return $Default }
         return $value
     } catch {
@@ -122,6 +143,12 @@ function Get-Safe {
             [void]$sourceQueryFailures.Add([ordered]@{ ClassName=$classMatch.Value; Namespace=$queryNamespace; ReasonCode=[string]$_.FullyQualifiedErrorId })
         }
         return $Default
+    } finally {
+        $queryClock.Stop()
+        if ($timingKey -ne '') {
+            $key = 'query:' + $timingKey
+            $collectionTimings[$key] = [double]$collectionTimings[$key] + $queryClock.Elapsed.TotalMilliseconds
+        }
     }
 }
 
@@ -140,6 +167,8 @@ function ConvertFrom-U16 {
 
 function Get-SourceSet {
     param([string]$ClassName, [scriptblock]$Query, [string]$Namespace = 'root/Microsoft/Windows/Storage')
+    if ($null -ne $WinPoolScopeLocators -and $null -ne $WinPoolEvidenceFields -and
+        $ClassName.StartsWith('MSFT_') -and -not $WinPoolScopeQueried.ContainsKey($ClassName)) { return @() }
     try {
         $result = @(& $Query)
         [void]$sourceQuerySuccesses.Add([ordered]@{ ClassName=$ClassName; Namespace=$Namespace })
@@ -155,12 +184,54 @@ $scannedAt = [DateTimeOffset]::Now
 
 """;
 
+    internal const string DeviceLocationReader = """
+function Read-WinPoolDeviceLocation([string]$instanceId) {
+    if ([string]::IsNullOrWhiteSpace($instanceId)) { return $null }
+    if ($null -eq ('WinPoolDeviceLocation' -as [type])) {
+        # Define only the fixed native signatures; no compiler process or cached device values.
+        $assembly = [AppDomain]::CurrentDomain.DefineDynamicAssembly([Reflection.AssemblyName]::new('WinPool.Native.DeviceLocation'), [Reflection.Emit.AssemblyBuilderAccess]::Run)
+        $builder = $assembly.DefineDynamicModule('Native').DefineType('WinPoolDeviceLocation', [Reflection.TypeAttributes]'Public,Abstract,Sealed')
+        $flags = [Reflection.MethodAttributes]'Public,Static,PinvokeImpl'
+        $calling = [Reflection.CallingConventions]::Standard
+        $nativeCalling = [Runtime.InteropServices.CallingConvention]::Winapi
+        $charset = [Runtime.InteropServices.CharSet]::Unicode
+        $method = $builder.DefinePInvokeMethod('Locate', 'cfgmgr32.dll', 'CM_Locate_DevNodeW', $flags, $calling, [uint32], [type[]]@([uint32].MakeByRefType(),[string],[uint32]), $nativeCalling, $charset)
+        $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+        $method = $builder.DefinePInvokeMethod('Property', 'cfgmgr32.dll', 'CM_Get_DevNode_PropertyW', $flags, $calling, [uint32], [type[]]@([uint32],[byte[]],[uint32].MakeByRefType(),[byte[]],[uint32].MakeByRefType(),[uint32]), $nativeCalling, $charset)
+        $null = $method.DefineParameter(4, [Reflection.ParameterAttributes]::Out, 'buffer')
+        $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+        $null = $builder.CreateType()
+    }
+    [uint32]$device = 0
+    $result = [WinPoolDeviceLocation]::Locate([ref]$device, $instanceId, 0)
+    if ($result -ne 0) { throw ('native-location-device-unavailable:' + $result) }
+    # DEVPROPKEY from devpkey.h: DEVPKEY_Device_LocationInfo, DEVPROP_TYPE_STRING.
+    [byte[]]$key = ([guid]'a45c254e-df1c-4efd-8020-67d146a850e0').ToByteArray() + [BitConverter]::GetBytes([uint32]15)
+    [uint32]$type = 0; [uint32]$length = 0
+    $result = [WinPoolDeviceLocation]::Property($device, $key, [ref]$type, $null, [ref]$length, 0)
+    if ($result -notin @(0,0x1a)) { throw ('native-location-property-unavailable:' + $result) }
+    if ($length -gt 67108864) { throw 'native-location-exceeds-host-result-bound' }
+    $bytes = [byte[]]::new([int]$length)
+    $result = [WinPoolDeviceLocation]::Property($device, $key, [ref]$type, $bytes, [ref]$length, 0)
+    if ($result -ne 0 -or $type -ne 0x12 -or ($length % 2) -ne 0) { throw ('native-location-property-invalid:' + $result) }
+    return [Text.Encoding]::Unicode.GetString($bytes, 0, [int]$length).TrimEnd([char]0)
+}
+
+""";
+
     internal const string ScopeClosure = """
 $WinPoolScopeNamespace = 'root/Microsoft/Windows/Storage'
 $WinPoolScopeObjects = @{}
 $WinPoolScopePrimordialMembers = @{}
 $WinPoolScopePending = [System.Collections.Generic.Queue[object]]::new()
 $WinPoolScopeState = @{ Failed=$false }
+$WinPoolScopeQueried = @{}
+$WinPoolScopeAssociations = @{}
+function Get-WinPoolScopeAssociated($item, [string]$class) {
+    $key = (Get-WinPoolScopeKey $item) + '|' + $class
+    if (-not $WinPoolScopeAssociations.ContainsKey($key)) { throw 'scope-association-was-not-collected' }
+    return @($WinPoolScopeAssociations[$key])
+}
 $WinPoolScopeClasses = @('MSFT_StorageSubSystem','MSFT_StoragePool','MSFT_PhysicalDisk','MSFT_VirtualDisk','MSFT_StorageTier','MSFT_Disk','MSFT_Partition','MSFT_Volume')
 function Get-WinPoolScopeKey($item) {
     if ($null -eq $item -or $null -eq $item.CimClass) { throw 'scope-non-cim-object' }
@@ -187,6 +258,8 @@ function Add-WinPoolScopeObject($item) {
         }
         $WinPoolScopeObjects[$key] = $item
         $parents = @(Get-CimAssociatedInstance -InputObject $item -ResultClassName MSFT_StorageSubSystem -ErrorAction Stop)
+        $WinPoolScopeQueried['MSFT_StorageSubSystem'] = $true
+        $WinPoolScopeAssociations[$key + '|MSFT_StorageSubSystem'] = @($parents)
         if ($parents.Count -ne 1) { throw 'scope-primordial-subsystem-parent-unavailable' }
         foreach ($parent in $parents) { Add-WinPoolScopeObject $parent }
         return
@@ -212,7 +285,14 @@ function Find-WinPoolScopeIdentity([string]$class, [string]$property, [string]$v
     }
     # WQL escaping is independent from PowerShell parsing: selector text is decoded JSON data.
     $escaped = $value.Replace('\','\\').Replace("'","\'")
-    $matches = @(Get-CimInstance -Namespace $WinPoolScopeNamespace -ClassName $class -Filter ($property + " = '" + $escaped + "'") -ErrorAction Stop)
+    $query = @{ Namespace=$WinPoolScopeNamespace; ClassName=$class; Filter=($property + " = '" + $escaped + "'"); ErrorAction='Stop' }
+    if ($null -ne $WinPoolEvidenceFields -and $null -ne $WinPoolEvidenceFields.PSObject.Properties[$class]) {
+        $query.Property = @($WinPoolEvidenceFields.PSObject.Properties[$class].Value | Where-Object {
+            -not ($class -eq 'MSFT_PhysicalDisk' -and $_ -in @('IsBoot','IsSystem','IsPageFile','IsCrashDump')) -and
+            -not ($class -eq 'MSFT_Partition' -and $_ -eq 'Type') })
+    }
+    $matches = @(Get-CimInstance @query)
+    $WinPoolScopeQueried[$class] = $true
     if ($matches.Count -gt 1) { throw 'scope-selector-not-unique' }
     foreach ($match in $matches) {
         if (-not [string]::Equals([string]$match.$property, $value, [StringComparison]::Ordinal)) { throw 'scope-selector-not-exact' }
@@ -239,6 +319,8 @@ try {
         $associations = @{}
         foreach ($resultClass in $related) {
             $associations[$resultClass] = @(Get-CimAssociatedInstance -InputObject $item -ResultClassName $resultClass -ErrorAction Stop)
+            $WinPoolScopeQueried[$resultClass] = $true
+            $WinPoolScopeAssociations[(Get-WinPoolScopeKey $item) + '|' + $resultClass] = @($associations[$resultClass])
             foreach ($associated in $associations[$resultClass]) {
                 Add-WinPoolScopeObject $associated
             }
@@ -294,6 +376,19 @@ try {
             }
         }
     }
+    # A vanished parent can make an old child unreachable. A query for another object
+    # of the same class does not cover that old identity's absence.
+    if ($null -ne $WinPoolComponentLocators) {
+        foreach ($locator in @($WinPoolComponentLocators)) {
+            $observed = @($WinPoolScopeObjects.Values | Where-Object {
+                [string]$_.CimClass.CimClassName -eq [string]$locator.ClassName -and
+                [string]::Equals([string]$_.($locator.IdentityProperty), [string]$locator.IdentityValue, [StringComparison]::Ordinal)
+            })
+            if ($observed.Count -gt 0) { continue }
+            Find-WinPoolScopeIdentity $locator.ClassName $locator.IdentityProperty $locator.IdentityValue
+            if ($WinPoolScopePending.Count -gt 0) { throw 'scope-old-child-now-outside-current-component' }
+        }
+    }
     # Concrete pools are queued before their subsystem parent is visited. Validate only
     # after the closure is fully expanded, including either direct or exact pool parents.
     $physical = @($WinPoolScopeObjects.Values | Where-Object { [string]$_.CimClass.CimClassName -eq 'MSFT_PhysicalDisk' })
@@ -329,8 +424,12 @@ function Get-WinPoolStorageClass([string]$class) {
     }
 }
 
-$operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
-$computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem
+$operatingSystem = if ($null -ne $WinPoolEvidenceFields) {
+    Get-CimInstance -ClassName Win32_OperatingSystem -Property Caption,Version,BuildNumber,LastBootUpTime -ErrorAction Stop
+} else { Get-CimInstance -ClassName Win32_OperatingSystem }
+$computerSystem = if ($null -ne $WinPoolEvidenceFields) {
+    Get-CimInstance -ClassName Win32_ComputerSystem -Property Name -ErrorAction Stop
+} else { Get-CimInstance -ClassName Win32_ComputerSystem }
 $subsystemObjects = @(if ($WinPoolDiscoverProviderCache -or $null -eq $WinPoolScopeLocators) {
     Get-SourceSet 'MSFT_StorageSubSystem' { Get-StorageSubSystem -ErrorAction Stop }
 })
@@ -372,7 +471,9 @@ $nonPrimordialPoolObjects = @($poolObjects | Where-Object { -not $_.IsPrimordial
 $diskObjects = @(Get-SourceSet 'MSFT_Disk' { Get-WinPoolStorageClass 'MSFT_Disk' })
 $partitionObjects = @(Get-SourceSet 'MSFT_Partition' { Get-WinPoolStorageClass 'MSFT_Partition' })
 $volumeObjects = @(Get-SourceSet 'MSFT_Volume' { Get-WinPoolStorageClass 'MSFT_Volume' })
-$logicalDiskObjects = @(Get-SourceSet 'Win32_LogicalDisk' { Get-CimInstance -ClassName Win32_LogicalDisk -ErrorAction Stop } 'root/cimv2')
+$logicalDiskObjects = @(if ($null -eq $WinPoolScopeLocators -or $null -eq $WinPoolEvidenceFields) {
+    Get-SourceSet 'Win32_LogicalDisk' { Get-CimInstance -ClassName Win32_LogicalDisk -ErrorAction Stop } 'root/cimv2'
+})
 $networkDiskObjects = @($logicalDiskObjects | Where-Object { $_.DriveType -eq 4 })
 foreach ($className in @('Win32_OperatingSystem','Win32_ComputerSystem')) {
     [void]$sourceQuerySuccesses.Add([ordered]@{ ClassName=$className; Namespace='root/cimv2' })
@@ -399,9 +500,11 @@ $subsystems = foreach ($subsystem in $subsystemObjects) {
 
 $poolMembership = @{}
 $poolMembersByKey = @{}
+$poolCimMembersByKey = @{}
 foreach ($pool in @($nonPrimordialPoolObjects) + @($poolObjects | Where-Object { $_.IsPrimordial })) {
     $poolKey = Get-AssociationKey $pool ([string]$pool.FriendlyName)
-    $members = @(Get-SourceSet 'MSFT_PhysicalDisk' { if ($null -ne $WinPoolScopeLocators -and $pool.IsPrimordial) { Get-WinPoolScopePrimordialMembers $pool } else { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop } })
+    $members = @(Get-SourceSet 'MSFT_PhysicalDisk' { if ($null -ne $WinPoolScopeLocators -and $pool.IsPrimordial) { Get-WinPoolScopePrimordialMembers $pool } else { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_PhysicalDisk' } else { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop } } })
+    $poolCimMembersByKey[$poolKey] = @($members)
     $memberKeys = foreach ($member in $members) {
         $memberKey = Get-AssociationKey $member "$($member.DeviceId)|$($member.FriendlyName)|$($member.Size)"
         if (-not $pool.IsPrimordial -or -not $poolMembership.ContainsKey($memberKey)) {
@@ -501,12 +604,14 @@ function Get-ExactSingleHddTierMemberKey($tier, $virtual, $pool, $virtualTiers) 
             -not [string]::Equals([string]$actualTiers[0].UniqueId, $tierUniqueId, [StringComparison]::Ordinal) -or
             -not [string]::Equals([string]$actualTiers[0].ObjectId, $tierObjectId, [StringComparison]::Ordinal)) { return $null }
 
-        $parents = @(Get-StoragePool -VirtualDisk $virtual -ErrorAction Stop)
+        $parents = @(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_StoragePool' } else { Get-StoragePool -VirtualDisk $virtual -ErrorAction Stop })
         if ($parents.Count -ne 1 -or $parents[0].IsPrimordial -isnot [bool] -or $parents[0].IsPrimordial -or
             -not [string]::Equals([string]$parents[0].UniqueId, $poolUniqueId, [StringComparison]::Ordinal) -or
             -not [string]::Equals([string]$parents[0].ObjectId, $poolObjectId, [StringComparison]::Ordinal)) { return $null }
 
-        $poolMembers = @(Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop)
+        $poolMembers = @(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_PhysicalDisk' }
+            elseif ($null -ne $poolCimMembersByKey -and $poolCimMembersByKey.ContainsKey((Get-AssociationKey $pool ''))) { $poolCimMembersByKey[(Get-AssociationKey $pool '')] }
+            else { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop })
         if ($poolMembers.Count -ne 1) { return $null }
         $member = $poolMembers[0]
         $memberUniqueId = [string]$member.UniqueId
@@ -582,11 +687,11 @@ $storageTiers = @()
 $tierKeysSeen = @{}
 foreach ($pool in $nonPrimordialPoolObjects) {
     $poolKey = Get-AssociationKey $pool ([string]$pool.FriendlyName)
-    foreach ($virtual in @(Get-SourceSet 'MSFT_VirtualDisk' { Get-VirtualDisk -StoragePool $pool -ErrorAction Stop })) {
+    foreach ($virtual in @(Get-SourceSet 'MSFT_VirtualDisk' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_VirtualDisk' } else { Get-VirtualDisk -StoragePool $pool -ErrorAction Stop } })) {
         Add-SourceObservation $virtual
         $virtualKey = Get-AssociationKey $virtual "$($virtual.FriendlyName)|$($virtual.Size)"
         $osDiskNumbers = @()
-        foreach ($mappedDisk in @(Get-SourceSet 'MSFT_Disk' { Get-Disk -VirtualDisk $virtual -ErrorAction Stop })) {
+        foreach ($mappedDisk in @(Get-SourceSet 'MSFT_Disk' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_Disk' } else { Get-Disk -VirtualDisk $virtual -ErrorAction Stop } })) {
             $exactDisks = @($diskObjects | Where-Object {
                 [int]$_.Number -eq [int]$mappedDisk.Number -and
                 [string]::Equals([string]$_.UniqueId, [string]$mappedDisk.UniqueId, [StringComparison]::Ordinal) -and
@@ -608,7 +713,7 @@ foreach ($pool in $nonPrimordialPoolObjects) {
 
         $tierKeys = @()
         try {
-            $virtualTiers = @(Get-SourceSet 'MSFT_StorageTier' { Get-StorageTier -VirtualDisk $virtual -ErrorAction Stop })
+            $virtualTiers = @(Get-SourceSet 'MSFT_StorageTier' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_StorageTier' } else { Get-StorageTier -VirtualDisk $virtual -ErrorAction Stop } })
             foreach ($tier in $virtualTiers) {
                 Add-SourceObservation $tier
                 $tierKey = Get-AssociationKey $tier "$($tier.FriendlyName)|$($tier.MediaType)|$($tier.Size)"
@@ -678,7 +783,15 @@ foreach ($disk in $diskObjects) {
     $physicalMatch = @()
     $matchSource = 'ProviderUniqueId'
     try {
-        $physicalMatch = @($disk | Get-PhysicalDisk -ErrorAction Stop)
+        if ($null -ne $WinPoolScopeLocators) {
+            $physicalMatch = @(Get-WinPoolScopeAssociated $disk 'MSFT_PhysicalDisk')
+        }
+        if ($physicalMatch.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$disk.UniqueId)) {
+            $physicalMatch = @($physicalObjects | Where-Object { [string]::Equals([string]$_.UniqueId, [string]$disk.UniqueId, [StringComparison]::Ordinal) })
+        }
+        if ($null -eq $WinPoolScopeLocators -and $physicalMatch.Count -eq 0 -and -not $virtualDiskKeyByOsDisk.ContainsKey([int]$disk.Number)) {
+            $physicalMatch = @($disk | Get-PhysicalDisk -ErrorAction Stop)
+        }
     }
     catch {
     }
@@ -720,18 +833,18 @@ foreach ($disk in $diskObjects) {
 # association and eligible pool members separately from instance allocations.
 foreach ($pool in $nonPrimordialPoolObjects) {
     $poolKey = Get-AssociationKey $pool ''
-    foreach ($tier in @(Get-SourceSet 'MSFT_StorageTier' { Get-StorageTier -StoragePool $pool -ErrorAction Stop })) {
+    foreach ($tier in @(Get-SourceSet 'MSFT_StorageTier' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_StorageTier' } else { Get-StorageTier -StoragePool $pool -ErrorAction Stop } })) {
         $tierKey = Get-AssociationKey $tier ''
         if ($tierKeysSeen.ContainsKey($tierKey)) { continue }
         try {
-            $parents = @(Get-StoragePool -StorageTier $tier -ErrorAction Stop | Where-Object { -not $_.IsPrimordial })
+            $parents = @($(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $tier 'MSFT_StoragePool' } else { Get-StoragePool -StorageTier $tier -ErrorAction Stop }) | Where-Object { -not $_.IsPrimordial })
             if ($parents.Count -ne 1 -or
                 -not [string]::Equals([string]$parents[0].UniqueId, [string]$pool.UniqueId, [StringComparison]::Ordinal) -or
                 -not [string]::Equals([string]$parents[0].ObjectId, [string]$pool.ObjectId, [StringComparison]::Ordinal)) {
                 throw 'tier-template-pool-not-exact'
             }
-            if (@(Get-VirtualDisk -StorageTier $tier -ErrorAction Stop).Count -ne 0) { throw 'tier-owner-association-incomplete' }
-            $members = @(Get-PhysicalDisk -StoragePool $parents[0] -ErrorAction Stop)
+            if (@(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $tier 'MSFT_VirtualDisk' } else { Get-VirtualDisk -StorageTier $tier -ErrorAction Stop }).Count -ne 0) { throw 'tier-owner-association-incomplete' }
+            $members = @($poolCimMembersByKey[$poolKey])
             $memberKeys = @()
             foreach ($member in $members) {
                 $exact = @($physicalObjects | Where-Object {
@@ -817,17 +930,36 @@ $storagePools = foreach ($pool in $poolObjects) {
 }
 
 $partitions = foreach ($partition in $partitionObjects) {
-    $associatedDisk = Get-Safe { $partition | Get-Disk -ErrorAction Stop }
+    $associatedDisk = Get-Safe {
+        if ($null -ne $WinPoolScopeLocators) { return Get-WinPoolScopeAssociated $partition 'MSFT_Disk' }
+        $current = @($diskObjects | Where-Object { [uint32]$_.Number -eq [uint32]$partition.DiskNumber -and
+            ([string]::Equals([string]$_.ObjectId, [string]$partition.DiskId, [StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals([string]$_.Path, [string]$partition.DiskId, [StringComparison]::OrdinalIgnoreCase)) })
+        if ($current.Count -eq 1) { return $current[0] }
+        $partition | Get-Disk -ErrorAction Stop
+    }
     $volume = $null
     $volumeReadState = 'Returned'
     try {
-        $associatedVolume = @($partition | Get-Volume | Select-Object -First 1)
+        $associatedVolume = @(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $partition 'MSFT_Volume' }
+            else {
+                $paths = @($partition.AccessPaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { ([string]$_).TrimEnd('\') })
+                $current = @($volumeObjects | Where-Object { $paths -contains ([string]$_.Path).TrimEnd('\') -or
+                    $paths -contains ([string]$_.UniqueId).TrimEnd('\') })
+                if ($current.Count -gt 0) { $current }
+                elseif ([string]$partition.GptType -notmatch '(?i)e3c9e316-0b5c-4db8-817d-f92df00215ae') { $partition | Get-Volume }
+            })
+        if ($associatedVolume.Count -gt 1) { throw 'partition-volume-association-not-unique' }
         if ($associatedVolume.Count -gt 0) {
             $volume = $associatedVolume[0]
         }
     }
     catch {
         $volumeReadState = 'Failed'
+        [void]$sourceQueryFailures.Add([ordered]@{
+            ClassName='MSFT_Volume'; Namespace='root/Microsoft/Windows/Storage';
+            ReasonCode=('PartitionVolumeAssociationFailed:' + [string]$_.Exception.Message)
+        })
     }
     [ordered]@{
         DiskNumber = [int]$partition.DiskNumber
@@ -857,10 +989,7 @@ $partitions = foreach ($partition in $partitionObjects) {
         DriveType = if ($null -eq $volume) { '' } else { [string]$volume.DriveType }
         VolumeUniqueId = if ($null -eq $volume) { '' } else { [string]$volume.UniqueId }
         VolumeObjectId = if ($null -eq $volume) { '' } else { [string]$volume.ObjectId }
-        AccessPaths = @(Get-SafeList {
-            if ($null -eq $volume) { return @() }
-            @($volume | Get-VolumeAccessPath -ErrorAction Stop | ForEach-Object { [string]$_.AccessPath })
-        })
+        AccessPaths = @($partition.AccessPaths)
     }
 }
 
@@ -914,6 +1043,8 @@ function Resolve-OsDiskDeviceParents($disk) {
 
     private const string ReportBody = """
 
+$collectionTimings['storageAssociations'] = $collectionClock.Elapsed.TotalMilliseconds
+
 $osDisks = foreach ($disk in $diskObjects) {
     $deviceParents = Resolve-OsDiskDeviceParents $disk
     [ordered]@{
@@ -961,7 +1092,8 @@ $pageFileUsages = foreach ($usage in @(Get-SafeList { @(Get-CimInstance -ClassNa
     }
 }
 
-$diskDrives = foreach ($drive in @(Get-SafeList { @(if ($null -eq $WinPoolScopeLocators) { Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction Stop } else { $diskObjects | ForEach-Object { Get-CimInstance -ClassName Win32_DiskDrive -Filter ('Index = ' + [uint32]$_.Number) -ErrorAction Stop } }) })) {
+$diskDrives = foreach ($drive in @(Get-SafeList { @(if ($null -eq $WinPoolScopeLocators) { Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction Stop }
+    elseif ($null -eq $WinPoolEvidenceFields) { $diskObjects | ForEach-Object { Get-CimInstance -ClassName Win32_DiskDrive -Filter ('Index = ' + [uint32]$_.Number) -ErrorAction Stop } }) })) {
     [ordered]@{
         Index = if ($null -eq $drive.Index) { $null } else { [int]$drive.Index }
         InterfaceType = [string]$drive.InterfaceType
@@ -992,77 +1124,33 @@ foreach ($disk in $diskObjects) {
     Add-NativeObservation 'Windows.DiskRoles' (Get-AssociationKey $disk '') ([ordered]@{ DiskNumber=[int]$disk.Number; IsPageFile=$page; IsCrashDump=$dump })
 }
 
+$collectionTimings['rolesAndSupplements'] = $collectionClock.Elapsed.TotalMilliseconds
 if ($WinPoolIncludeHardware) {
 # ---------- Hardware inventory (read-only KS native collectors) ----------
 
 
 $timeZone = Get-Safe { Get-CimInstance -ClassName Win32_TimeZone -ErrorAction Stop }
 $licensedProduct = Get-Safe { @(Get-CimInstance -ClassName SoftwareLicensingProduct -Filter "PartialProductKey IS NOT NULL" -ErrorAction Stop | Where-Object { $_.LicenseStatus -eq 1 } | Select-Object -First 1) }
+$collectionTimings['hardwareLicense'] = $collectionClock.Elapsed.TotalMilliseconds
 $adminUser = Get-Safe { Get-LocalUser -Name 'Administrator' -ErrorAction Stop }
-$powerSchemeText = [string](Get-Safe { (& powercfg.exe /getactivescheme 2>$null) -join ' ' })
-$powerPlan = ''
-$powerMatches = [regex]::Matches($powerSchemeText, '\(([^()]*)\)')
-if ($powerMatches.Count -gt 0) { $powerPlan = $powerMatches[$powerMatches.Count - 1].Groups[1].Value }
-$biosMode = if (Get-Safe { Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State' -ErrorAction Stop } $false) { 'UEFI' } else { 'Legacy' }
+$powerSchemeText = [string](Get-Safe { (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes' -Name ActivePowerScheme -ErrorAction Stop).ActivePowerScheme })
 $allProcesses = @(Get-SafeList { @(Get-Process -ErrorAction Stop) })
-$processThreads = Get-Safe { [decimal]($allProcesses | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum } 0
-$processHandles = Get-Safe { [decimal]($allProcesses | Measure-Object -Property Handles -Sum).Sum } 0
+$processThreads = Get-Safe { [decimal]$total = 0; foreach ($process in $allProcesses) { $total += $process.Threads.Count }; $total } 0
+$processHandles = Get-Safe { [decimal]$total = 0; foreach ($process in $allProcesses) { $total += $process.HandleCount }; $total } 0
+$collectionTimings['hardwareSession'] = $collectionClock.Elapsed.TotalMilliseconds
 $installedCulture = [System.Globalization.CultureInfo]::InstalledUICulture
 $currentRegion = [System.Globalization.RegionInfo]::CurrentRegion
 
 $bios = Get-Safe { Get-CimInstance -ClassName Win32_BIOS -ErrorAction Stop }
 $baseBoard = Get-Safe { Get-CimInstance -ClassName Win32_BaseBoard -ErrorAction Stop }
+$collectionTimings['hardwareContext'] = $collectionClock.Elapsed.TotalMilliseconds
 
-$processors = foreach ($cpu in @(Get-SafeList { @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop) })) {
-    [ordered]@{
-        Name = [string]$cpu.Name
-        MaxClockSpeed = if ($null -eq $cpu.MaxClockSpeed) { $null } else { [decimal]$cpu.MaxClockSpeed }
-        NumberOfCores = if ($null -eq $cpu.NumberOfCores) { $null } else { [int]$cpu.NumberOfCores }
-        NumberOfLogicalProcessors = if ($null -eq $cpu.NumberOfLogicalProcessors) { $null } else { [int]$cpu.NumberOfLogicalProcessors }
-        L2CacheSize = if ($null -eq $cpu.L2CacheSize) { $null } else { [decimal]$cpu.L2CacheSize }
-        L3CacheSize = if ($null -eq $cpu.L3CacheSize) { $null } else { [decimal]$cpu.L3CacheSize }
-    }
-}
+$null = Get-SafeList { @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop) }
+$null = Get-SafeList { @(Get-CimInstance -ClassName Win32_CacheMemory -ErrorAction Stop) }
+$null = Get-SafeList { @(Get-CimInstance -ClassName Win32_PhysicalMemoryArray -ErrorAction Stop) }
+$null = Get-SafeList { @(Get-CimInstance -ClassName Win32_PhysicalMemory -ErrorAction Stop) }
 
-$cpuCaches = foreach ($cache in @(Get-SafeList { @(Get-CimInstance -ClassName Win32_CacheMemory -ErrorAction Stop) })) {
-    [ordered]@{
-        Level = if ($null -eq $cache.Level) { $null } else { [int]$cache.Level }
-        MaxCacheSize = if ($null -eq $cache.MaxCacheSize) { $null } else { [decimal]$cache.MaxCacheSize }
-        Purpose = [string]$cache.Purpose
-    }
-}
-
-$memoryArrays = foreach ($array in @(Get-SafeList { @(Get-CimInstance -ClassName Win32_PhysicalMemoryArray -ErrorAction Stop) })) {
-    [ordered]@{
-        MemoryDevices = if ($null -eq $array.MemoryDevices) { $null } else { [int]$array.MemoryDevices }
-        MemoryErrorCorrection = if ($null -eq $array.MemoryErrorCorrection) { $null } else { [int]$array.MemoryErrorCorrection }
-    }
-}
-
-$memoryDevices = foreach ($stick in @(Get-SafeList { @(Get-CimInstance -ClassName Win32_PhysicalMemory -ErrorAction Stop) })) {
-    [ordered]@{
-        Capacity = if ($null -eq $stick.Capacity) { $null } else { [decimal]$stick.Capacity }
-        Speed = if ($null -eq $stick.Speed) { $null } else { [decimal]$stick.Speed }
-        ConfiguredClockSpeed = if ($null -eq $stick.ConfiguredClockSpeed) { $null } else { [decimal]$stick.ConfiguredClockSpeed }
-        SMBIOSMemoryType = if ($null -eq $stick.SMBIOSMemoryType) { $null } else { [int]$stick.SMBIOSMemoryType }
-        PartNumber = ([string]$stick.PartNumber).Trim()
-        DeviceLocator = [string]$stick.DeviceLocator
-        BankLabel = [string]$stick.BankLabel
-        Manufacturer = [string]$stick.Manufacturer
-        SerialNumber = ([string]$stick.SerialNumber).Trim()
-    }
-}
-
-$logicalVolumes = foreach ($logical in @(Get-SafeList { @(Get-CimInstance -ClassName Win32_LogicalDisk -ErrorAction Stop) })) {
-    [ordered]@{
-        DeviceID = [string]$logical.DeviceID
-        DriveType = if ($null -eq $logical.DriveType) { $null } else { [int]$logical.DriveType }
-        VolumeSerialNumber = [string]$logical.VolumeSerialNumber
-        Compressed = if ($null -eq $logical.Compressed) { $null } else { [bool]$logical.Compressed }
-        ProviderName = [string]$logical.ProviderName
-    }
-}
-
+$collectionTimings['hardwareMemory'] = $collectionClock.Elapsed.TotalMilliseconds
 $videoMemoryByDeviceId = @{}
 $videoRegistryRoot = Get-Safe { [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Video') }
 if ($null -ne $videoRegistryRoot) {
@@ -1077,9 +1165,9 @@ if ($null -ne $videoRegistryRoot) {
     }
     $videoRegistryRoot.Close()
 }
-$videoControllers = foreach ($controller in @(Get-SafeList { @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop) })) {
+foreach ($controller in @(Get-SafeList { @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop) })) {
     $pnpId = ([string]$controller.PNPDeviceID).Trim()
-    $locationInfo = [string](Get-Safe { (Get-PnpDeviceProperty -InstanceId $pnpId -KeyName 'DEVPKEY_Device_LocationInfo' -ErrorAction Stop).Data })
+    $locationInfo = Get-Safe { Read-WinPoolDeviceLocation $pnpId } -TimingName 'PnpLocation'
     $dedicatedBytes = $null
     if (-not [string]::IsNullOrWhiteSpace($pnpId)) {
         $pnpIdLower = $pnpId.ToLowerInvariant()
@@ -1091,19 +1179,6 @@ $videoControllers = foreach ($controller in @(Get-SafeList { @(Get-CimInstance -
         }
     }
     Add-NativeObservation 'Registry.VideoMemory' $pnpId ([ordered]@{ PNPDeviceID=$pnpId; DedicatedMemoryBytes=$dedicatedBytes; LocationInfo=$locationInfo })
-    [ordered]@{
-        Name = [string]$controller.Name
-        DriverVersion = [string]$controller.DriverVersion
-        AdapterRAM = if ($null -eq $controller.AdapterRAM) { $null } else { [decimal]$controller.AdapterRAM }
-        DedicatedMemoryBytes = $dedicatedBytes
-        CurrentHorizontalResolution = if ($null -eq $controller.CurrentHorizontalResolution) { $null } else { [int]$controller.CurrentHorizontalResolution }
-        CurrentVerticalResolution = if ($null -eq $controller.CurrentVerticalResolution) { $null } else { [int]$controller.CurrentVerticalResolution }
-        CurrentRefreshRate = if ($null -eq $controller.CurrentRefreshRate) { $null } else { [int]$controller.CurrentRefreshRate }
-        CurrentBitsPerPixel = if ($null -eq $controller.CurrentBitsPerPixel) { $null } else { [int]$controller.CurrentBitsPerPixel }
-        PNPDeviceID = $pnpId
-        LocationInfo = $locationInfo
-        Status = [string]$controller.Status
-    }
 }
 
 $wmiMonitors = @(Get-SafeList { @(Get-CimInstance -Namespace 'root\wmi' -ClassName WmiMonitorID -ErrorAction Stop) })
@@ -1116,55 +1191,26 @@ foreach ($screen in $screens) {
         Name=[string]$screen.DeviceName; Width=[int]$screen.Bounds.Width; Height=[int]$screen.Bounds.Height; BitsPerPixel=[int]$screen.BitsPerPixel; Primary=[bool]$screen.Primary
     })
 }
-$networkAdapters = foreach ($adapter in @(Get-SafeList { @(Get-NetAdapter -ErrorAction Stop) })) {
-    $interfaceIndex = [int]$adapter.ifIndex
-    $ipv4Addresses = @($allNetIpAddresses | Where-Object { $_.InterfaceIndex -eq $interfaceIndex -and $_.AddressFamily -eq 'IPv4' } | ForEach-Object { [string]$_.IPAddress })
-    $ipv6Addresses = @($allNetIpAddresses | Where-Object { $_.InterfaceIndex -eq $interfaceIndex -and $_.AddressFamily -eq 'IPv6' } | ForEach-Object { [string]$_.IPAddress })
-    $dhcp = [string]($allNetInterfaces | Where-Object { $_.InterfaceIndex -eq $interfaceIndex } | Select-Object -First 1 | ForEach-Object { $_.Dhcp })
-    $dnsServers = @($allDnsClients | Where-Object { $_.InterfaceIndex -eq $interfaceIndex } | ForEach-Object { @($_.ServerAddresses) } | ForEach-Object { $_ })
-    $gateways = @($allDefaultRoutes | Where-Object { $_.InterfaceIndex -eq $interfaceIndex } | ForEach-Object { [string]$_.NextHop })
-    [ordered]@{
-        Name = [string]$adapter.Name
-        InterfaceDescription = [string]$adapter.InterfaceDescription
-        LinkSpeed = [string]$adapter.LinkSpeed
-        Status = [string]$adapter.Status
-        MacAddress = ([string]$adapter.MacAddress) -replace '-', ''
-        IPv4Addresses = @($ipv4Addresses)
-        IPv6Addresses = @($ipv6Addresses)
-        Dhcp = $dhcp
-        DnsServers = @($dnsServers)
-        DefaultGateways = @($gateways)
+$collectionTimings['hardwareVideo'] = $collectionClock.Elapsed.TotalMilliseconds
+$networkSupplement = $null
+try {
+    $networkSupplement = [ordered]@{
+        Adapters = @(Get-CimInstance -Namespace 'root/StandardCimv2' -ClassName MSFT_NetAdapter -Property InterfaceGuid,InterfaceIndex,Name,DriverDescription,Speed,PermanentAddress,ConnectorPresent,InterfaceType,InterfaceOperationalStatus,HardwareInterface,Virtual -ErrorAction Stop | Select-Object InterfaceGuid,InterfaceIndex,Name,DriverDescription,Speed,PermanentAddress,ConnectorPresent,InterfaceType,InterfaceOperationalStatus,HardwareInterface,Virtual)
+        Addresses = @(Get-CimInstance -Namespace 'root/StandardCimv2' -ClassName MSFT_NetIPAddress -Property InterfaceIndex,AddressFamily,IPAddress -ErrorAction Stop | Select-Object InterfaceIndex,AddressFamily,IPAddress)
+        Routes = @(Get-CimInstance -Namespace 'root/StandardCimv2' -ClassName MSFT_NetRoute -Filter "DestinationPrefix = '0.0.0.0/0' OR DestinationPrefix = '::/0'" -Property InterfaceIndex,DestinationPrefix -ErrorAction Stop | Select-Object InterfaceIndex)
     }
-}
-
-$winBatteries = @(Get-SafeList { @(Get-CimInstance -ClassName Win32_Battery -ErrorAction Stop) })
-$batteryStatic = @(Get-SafeList { @(Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryStaticData -ErrorAction Stop) })
-$batteryRuntime = @(Get-SafeList { @(Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryStatus -ErrorAction Stop) })
-$batteries = for ($batteryIndex = 0; $batteryIndex -lt $winBatteries.Count; $batteryIndex++) {
-    $battery = $winBatteries[$batteryIndex]
-    $static = if ($batteryIndex -lt $batteryStatic.Count) { $batteryStatic[$batteryIndex] } else { $null }
-    $runtime = if ($batteryIndex -lt $batteryRuntime.Count) { $batteryRuntime[$batteryIndex] } else { $null }
-    $designCapacity = if ($null -ne $static -and $null -ne $static.DesignedCapacity) { [decimal]$static.DesignedCapacity }
-        elseif ($null -ne $battery.DesignCapacity) { [decimal]$battery.DesignCapacity }
-        else { $null }
-    [ordered]@{
-        Name = [string]$battery.Name
-        DesignCapacity = $designCapacity
-        RemainingCapacity = if ($null -eq $runtime -or $null -eq $runtime.RemainingCapacity) { $null } else { [decimal]$runtime.RemainingCapacity }
-        BatteryStatus = if ($null -eq $battery.BatteryStatus) { $null } else { [int]$battery.BatteryStatus }
-        EstimatedChargeRemaining = if ($null -eq $battery.EstimatedChargeRemaining) { $null } else { [int]$battery.EstimatedChargeRemaining }
-    }
-}
+} catch { $networkSupplement = [ordered]@{ Error=[string]$_.Exception.Message } }
+$collectionTimings['hardwareNetwork'] = $collectionClock.Elapsed.TotalMilliseconds
+$null = Get-SafeList { @(Get-CimInstance -ClassName Win32_Battery -ErrorAction Stop) }
+$null = Get-SafeList { @(Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryStaticData -ErrorAction Stop) }
+$null = Get-SafeList { @(Get-CimInstance -Namespace 'root\wmi' -ClassName BatteryStatus -ErrorAction Stop) }
 
 
 Add-NativeObservation 'Windows.Session' 'machine' ([ordered]@{ InstalledUICulture=[string]$installedCulture.Name; RegionName=[string]$currentRegion.Name; AdministratorEnabled=if ($null -eq $adminUser) {$null} else {[bool]$adminUser.Enabled}; ActivePowerScheme=$powerSchemeText; Processes=[int]$allProcesses.Count; Threads=$processThreads; Handles=$processHandles })
 
-} else {
-    $hardware = [ordered]@{}
-    $logicalVolumes = @()
-
 }
 
+$collectionTimings['completeBeforeEncoding'] = $collectionClock.Elapsed.TotalMilliseconds
 [ordered]@{
     ScannedAt = $scannedAt.ToString('o')
     Computer = [ordered]@{
@@ -1182,11 +1228,14 @@ Add-NativeObservation 'Windows.Session' 'machine' ([ordered]@{ InstalledUICultur
     OsDisks = @($osDisks)
     Partitions = @($partitions)
     NetworkDisks = @($networkDisks)
-    LogicalVolumes = @($logicalVolumes)
     DiskDrives = @($diskDrives)
     SourceObservations = @($sourceObservations.ToArray())
     SourceQueryFailures = @($sourceQueryFailures.ToArray())
     SourceQuerySuccesses = @($sourceQuerySuccesses.ToArray())
+    NetworkSupplement = if ($WinPoolIncludeHardware) { $networkSupplement } else { $null }
+    ProviderPhaseElapsedMilliseconds = $collectionTimings
+    ScopeQueriedClasses = @($WinPoolScopeQueried.Keys)
+    ScopeClosureComplete = -not $WinPoolScopeState.Failed
     CollectionPurpose = if ($WinPoolIncludeHardware) { 'Hardware' } else { 'Storage' }
     Warnings = @($warnings)
 } | ConvertTo-Json -Depth 12 -Compress

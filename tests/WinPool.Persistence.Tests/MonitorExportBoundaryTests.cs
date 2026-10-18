@@ -36,7 +36,7 @@ public sealed class MonitorExportBoundaryTests
         Assert.Equal(0, result.RowCount);
         Assert.Equal("previous export", await File.ReadAllTextAsync(destination));
         Assert.Empty(Directory.EnumerateFiles(root, "*.tmp"));
-        SqliteConnection.ClearAllPools();
+        store.DrainConnectionPool();
         // Retain the isolated fixture for inspection; no user data is involved.
     }
 }

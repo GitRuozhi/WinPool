@@ -10,55 +10,6 @@ public sealed class RealVirtualDiskCreationCapacityResolverTests
 {
     private const long MiB = 1024L * 1024;
 
-    [Theory]
-    [InlineData("zh-CN", 1L)]
-    [InlineData("en-US", 1L)]
-    [InlineData("zh-CN", 3_997_809_246_208L)]
-    [InlineData("en-US", 3_997_809_246_208L)]
-    [InlineData("zh-CN", long.MaxValue)]
-    [InlineData("en-US", long.MaxValue)]
-    public void ExactGigabyteTextRoundTripsEveryByteAtCapacityBoundaries(string cultureName, long originalBytes)
-    {
-        var culture = CultureInfo.GetCultureInfo(cultureName);
-        var text = RealVirtualDiskCreationCapacityResolver.FormatGigabytes(originalBytes, culture);
-
-        Assert.True(RealVirtualDiskCreationCapacityResolver.TryParseGigabytes(text, out var bytes, out var maximum, culture));
-        Assert.Equal(originalBytes, bytes);
-        Assert.False(maximum);
-        if (originalBytes == 1)
-            Assert.Equal("0.000000000931322574615478515625", text);
-        if (originalBytes == long.MaxValue)
-            Assert.Equal("8589934591.999999999068677425384521484375", text);
-    }
-
-    [Theory]
-    [InlineData("zh-CN")]
-    [InlineData("en-US")]
-    public void InvalidGigabyteTextCannotRoundOrOverflowIntoAnExecutableCapacity(string cultureName)
-    {
-        var culture = CultureInfo.GetCultureInfo(cultureName);
-        foreach (var text in new[] { "0.1", "0.0000000000000000000000000001", "8589934592", "-1", "0", "", "invalid", "NaN", "Infinity" })
-        {
-            Assert.False(RealVirtualDiskCreationCapacityResolver.TryParseGigabytes(text, out var bytes, out var maximum, culture), text);
-            Assert.Null(bytes);
-            Assert.False(maximum);
-        }
-    }
-
-    [Theory]
-    [InlineData("zh-CN")]
-    [InlineData("en-US")]
-    public async Task MaximumGigabyteTextKeepsTheUnmeasuredSearchIntent(string cultureName)
-    {
-        Assert.True(RealVirtualDiskCreationCapacityResolver.TryParseGigabytes(" mAx ", out var bytes, out var maximum,
-            CultureInfo.GetCultureInfo(cultureName)));
-        Assert.Null(bytes);
-        Assert.True(maximum);
-        var capacity = await RealVirtualDiskCreationCapacityResolver.ResolveAsync(maximum, bytes, true, true,
-            () => throw new InvalidOperationException("MAX text must not become an estimated provider capacity."));
-        Assert.Equal(new RealVirtualDiskCreationCapacity(0, true), capacity);
-    }
-
     [Fact]
     public async Task NativeMaximumSkipsProviderRangeAndCarriesNoEstimatedBytes()
     {

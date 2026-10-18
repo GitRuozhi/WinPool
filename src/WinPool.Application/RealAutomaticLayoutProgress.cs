@@ -67,11 +67,15 @@ public sealed class RealAutomaticLayoutProgress
             if (result?.State != RealOperationStepState.Verified) continue;
             if (step.Command is CreatePartitionCommand)
             {
-                using var evidence = JsonDocument.Parse(result.ResultEvidence ?? "{}");
-                if (!evidence.RootElement.TryGetProperty("CreatedObjectId", out var value)
-                    || value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
-                    throw new InvalidDataException("A verified partition creation has no exact output identity.");
-                var id = value.GetString()!;
+                var id = result.ResultIdentity?.CreatedObjectId;
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    using var evidence = JsonDocument.Parse(result.ResultEvidence ?? "{}");
+                    if (!evidence.RootElement.TryGetProperty("CreatedObjectId", out var value)
+                        || value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+                        throw new InvalidDataException("A verified partition creation has no exact output identity.");
+                    id = value.GetString()!;
+                }
                 if (created.TryGetValue(step.Id, out var previous) && previous != id)
                     throw new InvalidDataException("A verified partition identity changed.");
                 created[step.Id] = id;

@@ -6,17 +6,15 @@ namespace WinPool.Infrastructure.Windows;
 internal static class WindowsRealStoragePowerShellScript
 {
     internal const string Source = """
+        param($request)
         $ErrorActionPreference = 'Stop'
         $ProgressPreference = 'SilentlyContinue'
-        [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
-        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
         Set-StrictMode -Version Latest
         $invoked = $false
         $code = 'adapter.preflight-rejected'
         $outputObject = $null
         $tieredCreationInput = $null
         $capabilityEvidence = $null
-        $request = $null
 
         function Assert-Exact($actual, $expected, $reason) {
             if ([string]::IsNullOrWhiteSpace([string]$expected) -or
@@ -345,12 +343,10 @@ internal static class WindowsRealStoragePowerShellScript
         }
 
         try {
-            $request = [Console]::In.ReadToEnd() | ConvertFrom-Json -ErrorAction Stop
             if ($null -eq $request -or $null -eq $request.Target -or $null -eq $request.Command -or
                 [string]::IsNullOrWhiteSpace([string]$request.Target.ExpectedFingerprint)) {
                 throw 'invalid-fixed-payload'
             }
-            Import-Module Storage -ErrorAction Stop
             $t = $request.Target
             $c = $request.Command
             switch ([string]$request.CommandKind) {
@@ -745,6 +741,6 @@ internal static class WindowsRealStoragePowerShellScript
                 TieredCreationInput = $tieredCreationInput; ProviderFailure = $providerFailure
             }
         }
-        [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 8))
+        $result | ConvertTo-Json -Compress -Depth 8
         """;
 }

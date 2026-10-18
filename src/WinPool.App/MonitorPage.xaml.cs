@@ -87,14 +87,16 @@ public sealed partial class MonitorPage : Page
     private readonly ObservableCollection<MonitorRowViewModel> _rows = [];
     private readonly ObservableCollection<string> _storageEventRows = [];
     private readonly Dictionary<string, MonitorRowViewModel> _rowsByInstance = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<int, MonitorRowViewModel> _rowsByDiskNumber = new();
     private readonly Dictionary<string, MonitorRowViewModel> _rowsByStableId = new(StringComparer.Ordinal);
     private WorkspaceViewModel _viewModel = null!;
     private DispatcherQueueTimer? _pollTimer;
-    private DispatcherQueueTimer? _preferenceSyncTimer;
+    private long _displayRevision;
+    private long _lastWindowRevision = -1;
+    private long _lastDisplayRevision = -1;
     private bool _ready;
     private bool _updatingContinuousMonitoring;
     private bool _applyingSampleRate;
+    private int _navigationGeneration;
 
     public MonitorPage()
     {
@@ -106,10 +108,11 @@ public sealed partial class MonitorPage : Page
     private void MonitorPage_Unloaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
         _ready = false;
+        _navigationGeneration++;
         _pollTimer?.Stop();
         _pollTimer = null;
-        _preferenceSyncTimer?.Stop();
-        _preferenceSyncTimer = null;
+        _viewModel.PropertyChanged -= ViewModelPropertyChanged;
+        MonitorRoot.Loaded -= MonitorRoot_Loaded;
     }
 
     private MonitoringService Monitoring => _viewModel.Monitoring;
@@ -117,6 +120,7 @@ public sealed partial class MonitorPage : Page
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
+        var generation = ++_navigationGeneration;
         _viewModel = (WorkspaceViewModel)e.Parameter;
         MonitorRoot.Loaded += MonitorRoot_Loaded;
         try
@@ -130,6 +134,7 @@ public sealed partial class MonitorPage : Page
         {
             LogMonitorFailure("PreferenceRefresh", exception);
         }
+        if (generation != _navigationGeneration) return;
         Guard("UpdateText", UpdateText);
         Guard("BuildRows", BuildRows);
         RestoreExistingGraphSeries();
@@ -140,79 +145,54 @@ public sealed partial class MonitorPage : Page
         ApplyPollInterval();
         _pollTimer.Tick += (_, _) => Poll();
         _pollTimer.Start();
-        _preferenceSyncTimer = DispatcherQueue.CreateTimer();
-        _preferenceSyncTimer.Interval = TimeSpan.FromMilliseconds(500);
-        _preferenceSyncTimer.Tick += PreferenceSyncTimer_Tick;
-        _preferenceSyncTimer.Start();
+        _viewModel.PropertyChanged += ViewModelPropertyChanged;
         Poll();
         _ready = true;
     }
 
     private void RestoreExistingGraphSeries()
     {
-        var windows = Monitoring.GetWindows();
-        var series = new List<DiskGraphSeries>();
-        foreach (var (instance, points) in windows)
+        foreach (var instance in Monitoring.GetLatest().Keys)
         {
             var row = ResolveRow(instance);
             row.InstanceName = instance;
             _rowsByInstance[instance] = row;
-            if (points.Length < 2)
-            {
-                continue;
-            }
-
-            series.Add(new DiskGraphSeries
-            {
-                InstanceName = instance,
-                DisplayName = row.Name,
-                Color = row.SeriesColor,
-                Points = points
-            });
         }
-
-        ActivityGraph.SetSeries(series);
+        _lastWindowRevision = -1;
     }
-
     private void ApplyPollInterval()
     {
         if (_pollTimer is not null)
         {
             _pollTimer.Interval = TimeSpan.FromMilliseconds(
-                Math.Clamp(1000.0 / Math.Max(0.2, Monitoring.SampleRateHz), 50, 1000));
+                Math.Clamp(1000.0 / Math.Max(0.2, Monitoring.SampleRateHz), 100, 1000));
         }
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         _ready = false;
+        _navigationGeneration++;
         _pollTimer?.Stop();
         _pollTimer = null;
-        _preferenceSyncTimer?.Stop();
-        _preferenceSyncTimer = null;
+        _viewModel.PropertyChanged -= ViewModelPropertyChanged;
+        MonitorRoot.Loaded -= MonitorRoot_Loaded;
         base.OnNavigatedFrom(e);
     }
 
-    private void PreferenceSyncTimer_Tick(
-        DispatcherQueueTimer sender,
-        object args)
+    private void ViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
-        if (!_ready || _updatingContinuousMonitoring || _applyingSampleRate)
+        if (args.PropertyName != nameof(WorkspaceViewModel.CurrentAgentPreferences)) return;
+        DispatcherQueue.TryEnqueue(() =>
         {
-            return;
-        }
-
-        try
-        {
+            if (!_ready || _updatingContinuousMonitoring || _applyingSampleRate) return;
             SyncContinuousMonitoringSwitch();
+            _applyingSampleRate = true;
+            try { RateOptions.SelectedIndex = IndexOfRate(_viewModel.CurrentAgentPreferences.MonitoringSampleRateHz); }
+            finally { _applyingSampleRate = false; }
             ApplyPollInterval();
-        }
-        catch (Exception exception)
-        {
-            LogMonitorFailure("PreferenceSync", exception);
-        }
+        });
     }
-
     private void SyncContinuousMonitoringSwitch()
     {
         _updatingContinuousMonitoring = true;
@@ -517,7 +497,6 @@ public sealed partial class MonitorPage : Page
     {
         _rows.Clear();
         _rowsByInstance.Clear();
-        _rowsByDiskNumber.Clear();
         _rowsByStableId.Clear();
         var snapshot = _viewModel.Snapshot;
         foreach (var disk in snapshot.OsDisks.OrderBy(x => x.Number))
@@ -545,7 +524,6 @@ public sealed partial class MonitorPage : Page
                 volumes,
                 physical?.MediaType ?? (virtualDisk is null ? string.Empty : _viewModel.Localization["VirtualDisk"]),
                 FormatCapacity(disk.Size),
-                disk.Number,
                 !string.IsNullOrWhiteSpace(volumes));
             var stableId = physical?.StableId ?? virtualDisk?.StableId;
             if (stableId is not null) _rowsByStableId[stableId] = row;
@@ -558,7 +536,6 @@ public sealed partial class MonitorPage : Page
         string volumes,
         string media,
         string capacity,
-        int? diskNumber,
         bool showInGraph)
     {
         var row = new MonitorRowViewModel
@@ -572,11 +549,11 @@ public sealed partial class MonitorPage : Page
             AutoColor = SeriesPalette[_rows.Count % SeriesPalette.Length]
         };
         row.SeriesColor = row.AutoColor;
-        _rows.Add(row);
-        if (diskNumber is not null)
+        row.PropertyChanged += (_, args) =>
         {
-            _rowsByDiskNumber[diskNumber.Value] = row;
-        }
+            if (args.PropertyName is nameof(MonitorRowViewModel.ShowInGraph) or nameof(MonitorRowViewModel.SeriesColor)) _displayRevision++;
+        };
+        _rows.Add(row);
         return row;
     }
 
@@ -609,13 +586,9 @@ public sealed partial class MonitorPage : Page
 
     private void PollCore()
     {
-        if (!Monitoring.IsRunning && Monitoring.SessionFilePath is null)
-        {
-            UpdateDiagnosticsAndStorageEvents();
+        if (!IsLoaded || Visibility != Visibility.Visible || !App.Window.AppWindow.IsVisible
+            || App.Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter { State: Microsoft.UI.Windowing.OverlappedPresenterState.Minimized })
             return;
-        }
-
-        var windows = Monitoring.GetWindows();
         var latest = Monitoring.GetLatest();
         foreach (var (instance, point) in latest)
         {
@@ -660,25 +633,18 @@ public sealed partial class MonitorPage : Page
                     _ => zh ? "待核验" : "Pending verification"
                 };
         }
-        foreach (var row in _rows)
+        var revision = Monitoring.WindowRevision;
+        if (revision != _lastWindowRevision || _displayRevision != _lastDisplayRevision)
         {
-            if (!row.ShowInGraph || row.InstanceName is null)
+            var windows = Monitoring.GetWindows(_rows.Where(row => row.ShowInGraph && row.InstanceName is not null).Select(row => row.InstanceName!));
+            foreach (var row in _rows)
             {
-                continue;
+                if (!row.ShowInGraph || row.InstanceName is null || !windows.TryGetValue(row.InstanceName, out var points) || points.Length < 2) continue;
+                series.Add(new DiskGraphSeries { InstanceName = row.InstanceName, DisplayName = row.Name, Color = row.SeriesColor, Points = points });
             }
-            if (!windows.TryGetValue(row.InstanceName, out var points) || points.Length < 2)
-            {
-                continue;
-            }
-            series.Add(new DiskGraphSeries
-            {
-                InstanceName = row.InstanceName,
-                DisplayName = row.Name,
-                Color = row.SeriesColor,
-                Points = points
-            });
+            ActivityGraph.SetSeries(series, revision, _displayRevision);
+            _lastWindowRevision = revision; _lastDisplayRevision = _displayRevision;
         }
-        ActivityGraph.SetSeries(series);
         UpdateDiagnosticsAndStorageEvents();
     }
 
@@ -686,7 +652,7 @@ public sealed partial class MonitorPage : Page
     {
         var zh = _viewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         var runtime = Monitoring.GetRuntimeDiagnostics();
-        MonitorStatusText.Text = Monitoring.UsesAgent && !Monitoring.IsRemoteStateKnown
+        MonitorStatusText.Text = !Monitoring.IsRemoteStateKnown
             ? zh ? "监控状态未知" : "Monitoring state unknown"
             : Monitoring.IsRunning
             ? zh
@@ -755,7 +721,7 @@ public sealed partial class MonitorPage : Page
             return row;
         }
 
-        if (Monitoring.UsesAgent && Monitoring.GetSeriesTarget(instance) is { } target)
+        if (Monitoring.GetSeriesTarget(instance) is { } target)
         {
             var stateSeries = instance.StartsWith("Storage Space:", StringComparison.OrdinalIgnoreCase);
             if (!stateSeries && _rowsByStableId.TryGetValue(target.ProviderKey, out row!))
@@ -764,15 +730,9 @@ public sealed partial class MonitorPage : Page
                 return row;
             }
             row = AddRow(Monitoring.GetSeriesDisplayName(instance), string.Empty, string.Empty,
-                stateSeries ? _viewModel.Localization["VirtualDisk"] : string.Empty, string.Empty, null, !stateSeries);
+                stateSeries ? _viewModel.Localization["VirtualDisk"] : string.Empty, string.Empty, !stateSeries);
             row.TargetId = target;
             if (!stateSeries) _rowsByStableId[target.ProviderKey] = row;
-            return row;
-        }
-
-        var number = Monitoring.UsesAgent ? null : MonitoringService.ParseDiskNumber(instance);
-        if (number is not null && _rowsByDiskNumber.TryGetValue(number.Value, out row!))
-        {
             return row;
         }
 
@@ -782,7 +742,6 @@ public sealed partial class MonitorPage : Page
             string.Empty,
             string.Empty,
             string.Empty,
-            number,
             instance.Contains(':') &&
             !instance.StartsWith("Storage Space:", StringComparison.OrdinalIgnoreCase));
         return row;
@@ -931,14 +890,6 @@ public sealed partial class MonitorPage : Page
     {
         var l = _viewModel.Localization;
         await Monitoring.FlushAsync();
-        var sessionPath = Monitoring.SessionFilePath;
-        if (!Monitoring.UsesAgent
-            && (sessionPath is null || !File.Exists(sessionPath)))
-        {
-            PublishMonitorExportInfo(l["NoMonitoringData"], "monitor.export.empty");
-            return;
-        }
-
         if (ExportButton.XamlRoot is null)
         {
             return;

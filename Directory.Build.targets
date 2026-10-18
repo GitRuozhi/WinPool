@@ -1,4 +1,9 @@
 <Project>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App' or '$(MSBuildProjectName)' == 'WinPool.Agent'">
+    <Content Include="$(MSBuildThisFileDirectory)assets\ThirdParty\RuntimeLicenses\**\*"
+             Link="Tools\Licenses\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
   <!-- Re-apply after the SDK so WinUI/RID evaluation cannot reintroduce tfm/rid folders. -->
   <PropertyGroup Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
     <OutputPath>$(WinPoolLocalTreeRoot)App\</OutputPath>
@@ -13,9 +18,25 @@
     <WinPoolMergeRuntimeCommand>pwsh -NoProfile -ExecutionPolicy Bypass -File "$(WinPoolMergeRuntimeScript)" -AppDir "$(WinPoolLocalTreeRoot)App" -AgentDir "$(WinPoolLocalTreeRoot)Agent" -Destination "$(MSBuildThisFileDirectory)artifacts\$(Configuration)" -ReplaceDestination</WinPoolMergeRuntimeCommand>
   </PropertyGroup>
 
-  <Target Name="MergeLocalAppAndAgentRuntime"
+  <Target Name="CollectLocalRuntimeMergeInputs"
           AfterTargets="BuildAgentRuntime"
           Condition="'$(MSBuildProjectName)' == 'WinPool.App'">
+    <ItemGroup>
+      <WinPoolAppRuntimeFiles Include="$(WinPoolLocalTreeRoot)App\**\*" />
+      <WinPoolAgentRuntimeFiles Include="$(WinPoolLocalTreeRoot)Agent\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(MSBuildThisFileDirectory)artifacts\build" />
+    <WriteLinesToFile File="$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).inputs"
+                      Lines="@(WinPoolAppRuntimeFiles->'%(FullPath)|%(ModifiedTime)');@(WinPoolAgentRuntimeFiles->'%(FullPath)|%(ModifiedTime)')"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+  <Target Name="MergeLocalAppAndAgentRuntime"
+          AfterTargets="CollectLocalRuntimeMergeInputs"
+          Condition="'$(MSBuildProjectName)' == 'WinPool.App'"
+          Inputs="@(WinPoolAppRuntimeFiles);@(WinPoolAgentRuntimeFiles);$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).inputs;$(WinPoolMergeRuntimeScript);$(MSBuildThisFileFullPath);$(MSBuildThisFileDirectory)build\Record-BuildIdentity.ps1"
+          Outputs="$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).stamp;@(WinPoolAppRuntimeFiles->'$(MSBuildThisFileDirectory)artifacts\$(Configuration)\%(RecursiveDir)%(Filename)%(Extension)');@(WinPoolAgentRuntimeFiles->'$(MSBuildThisFileDirectory)artifacts\$(Configuration)\%(RecursiveDir)%(Filename)%(Extension)')">
     <Exec Command="$(WinPoolMergeRuntimeCommand)" />
+    <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build\Record-BuildIdentity.ps1&quot; -RuntimeRoot &quot;$(MSBuildThisFileDirectory)artifacts\$(Configuration)&quot; -IdentityPath &quot;$(MSBuildThisFileDirectory)artifacts\build\runtime-$(Configuration).identity.json&quot;" />
+    <Touch Files="$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).stamp" AlwaysCreate="true" />
   </Target>
 </Project>

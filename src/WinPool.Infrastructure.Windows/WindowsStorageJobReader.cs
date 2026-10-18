@@ -1,4 +1,4 @@
-using System.Management;
+using System.Text.Json;
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -19,27 +19,15 @@ public interface IWindowsStorageJobReader
 /// </summary>
 public sealed class WindowsStorageJobReader : IWindowsStorageJobReader
 {
-    public Task<WindowsStorageJobAbsenceEvidence> ReadAsync(CancellationToken cancellationToken) => Task.Run(() =>
+    private readonly WindowsPowerShellHost host;
+    public WindowsStorageJobReader(WindowsPowerShellHost? host = null) => this.host = host ?? WindowsPowerShellHost.Shared;
+    public async Task<WindowsStorageJobAbsenceEvidence> ReadAsync(CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        using var searcher = new ManagementObjectSearcher(
-            new ManagementScope(@"\\.\root\Microsoft\Windows\Storage"),
-            new ObjectQuery("SELECT * FROM MSFT_StorageJob"),
-            new System.Management.EnumerationOptions { ReturnImmediately = false, Timeout = TimeSpan.FromSeconds(10) });
-        using var results = searcher.Get();
-        var jobs = new List<WindowsStorageJobObservation>();
-        foreach (ManagementObject job in results)
-        {
-            using (job)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (job["UniqueId"] is not string { Length: > 0 } uniqueId
-                    || job["ObjectId"] is not string { Length: > 0 } objectId
-                    || job["JobState"] is not ushort state)
-                    throw new InvalidDataException("A storage job identity or state is unavailable.");
-                jobs.Add(new(uniqueId, objectId, state));
-            }
-        }
-        return new WindowsStorageJobAbsenceEvidence(DateTimeOffset.UtcNow, jobs);
-    }, cancellationToken);
+        var json = await host.QueryAsync(WindowsPowerShellQuery.StorageJobs, new { }, cancellationToken).ConfigureAwait(false);
+        var result = JsonSerializer.Deserialize<WindowsStorageJobAbsenceEvidence>(json, WindowsPowerShellHost.JsonOptions)
+            ?? throw new InvalidDataException("The storage-job query returned no observation.");
+        if (result.Jobs.Any(job => string.IsNullOrWhiteSpace(job.UniqueId) || string.IsNullOrWhiteSpace(job.ObjectId)))
+            throw new InvalidDataException("A storage job identity is unavailable.");
+        return result;
+    }
 }

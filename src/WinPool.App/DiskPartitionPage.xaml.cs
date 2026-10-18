@@ -84,6 +84,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         UpdateButtonState();
     }
 
+    protected override void OnSimulationDraftDiscarded()
+    {
+        CancelResizePrompt();
+        _working = ViewModel.ActiveSnapshot;
+        RefreshAll();
+    }
+
     protected override void OnRealOperationActivityChanged(bool isBusy, bool showOverlay, string phase)
     {
         RealTopologyOverlay.Visibility = showOverlay ? Visibility.Visible : Visibility.Collapsed;
@@ -3044,7 +3051,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         PublishOperationFeedback(
             GlobalNotificationSeverity.Info,
             successTitle,
-            successMessage,
+            Text("修改已应用到本地模拟内容，正在后台保存。", "Changes were applied locally and queued for background saving."),
             "disk-partition-editor",
             "partition.submit.completed");
         RefreshAll();

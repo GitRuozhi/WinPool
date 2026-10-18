@@ -191,7 +191,12 @@ public static class WinPoolFactRefresh
         var removedObjectIds = current.Objects.Where(item => accepted.Any(source => Key(source) == Key(oldSources[item.SourceRef])
             && Complete(source) && Covers(source, item.Id) && CanApply(source, item.Id))).Select(x => x.Id).ToHashSet();
         var returned = incoming.Objects.Where(item => acceptedById.TryGetValue(item.SourceRef, out var source)
-            && source.ReadState == FieldReadState.Returned && Covers(source, item.Id) && CanApply(source, item.Id)).ToArray();
+            && source.ReadState == FieldReadState.Returned && Covers(source, item.Id) && CanApply(source, item.Id))
+            .Select(item => acceptedById[item.SourceRef].Coverage?.FieldNames is { } queried
+                && oldObjects.TryGetValue(item.Id, out var previous)
+                    ? item with { Fields = item.Fields.AddRange(previous.Fields.Where(field => !queried.Contains(field.Name, StringComparer.OrdinalIgnoreCase)
+                        && item.Fields.All(currentField => !currentField.Name.Equals(field.Name, StringComparison.OrdinalIgnoreCase)))) }
+                    : item).ToArray();
         var acceptedObjectIds = returned.Select(x => x.Id).ToHashSet();
         var replacedObjectIds = removedObjectIds.Concat(acceptedObjectIds).ToHashSet();
         var objects = current.Objects.Where(x => !replacedObjectIds.Contains(x.Id)).Concat(returned).ToImmutableArray();
@@ -230,6 +235,7 @@ public static class WinPoolFactRefresh
         var merged = current with
         {
             Revision = checked(current.Revision + 1), Sources = sources, Objects = objects, IsMerged = true,
+            ObservationId = incoming.ObservationId,
             InventoryVersion = incoming.InventoryCapturedAt > current.InventoryCapturedAt ? incoming.InventoryVersion : current.InventoryVersion,
             InventoryCapturedAt = incoming.InventoryCapturedAt > current.InventoryCapturedAt ? incoming.InventoryCapturedAt : current.InventoryCapturedAt,
             Relationships = retainedRelations.Concat(acceptedRelations)

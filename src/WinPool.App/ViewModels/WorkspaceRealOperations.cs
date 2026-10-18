@@ -9,6 +9,57 @@ namespace WinPool.App.ViewModels;
 public sealed partial class WorkspaceViewModel
 {
     private readonly Dictionary<OperationId, string> _recoveredRealOperationFeedback = [];
+    private readonly RealOperationWaitClock _realOperationWaitClock = new();
+    private CancellationTokenSource? _realOperationWaitCancellation;
+
+    public string DescribeRealOperationActivity(AgentRealOperationResponse status)
+    {
+        UpdateRealOperationWait(status.Plan.OperationId, status.State, status.Steps, status.ActiveStepElapsedMilliseconds);
+        return _realOperationWaitClock.Format(Localization.EffectiveLanguage == LanguagePreference.ZhCn)
+            ?? (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "正在执行／核对" : "Executing / verifying");
+    }
+
+    private void UpdateRealOperationWait(OperationId operationId, RealOperationState state,
+        IReadOnlyList<RealOperationStepProgress> steps, long elapsed)
+    {
+        _realOperationWaitClock.Observe(operationId, state, steps, elapsed);
+        if (!_realOperationWaitClock.IsActive) { StopRealOperationWaitClock(); return; }
+        if (_realOperationWaitCancellation is not null) return;
+        var owner = new CancellationTokenSource();
+        _realOperationWaitCancellation = owner;
+        _ = TickRealOperationWaitAsync(owner);
+    }
+
+    private async Task TickRealOperationWaitAsync(CancellationTokenSource owner)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(owner.Token))
+            {
+                void Render()
+                {
+                    if (!ReferenceEquals(_realOperationWaitCancellation, owner)
+                        || !IsRealOperationBusy && !RealOperationSubmission.IsBlocked) return;
+                    var text = _realOperationWaitClock.Format(Localization.EffectiveLanguage == LanguagePreference.ZhCn);
+                    if (text is null || text == RealOperationPhase) return;
+                    RealOperationPhase = text;
+                    RealOperationActivityChanged?.Invoke();
+                }
+                if (_dispatcher is null || _dispatcher.HasThreadAccess) Render();
+                else _dispatcher.TryEnqueue(Render);
+            }
+        }
+        catch (OperationCanceledException) when (owner.IsCancellationRequested) { }
+        finally { owner.Dispose(); }
+    }
+
+    private void StopRealOperationWaitClock()
+    {
+        var previous = _realOperationWaitCancellation;
+        _realOperationWaitCancellation = null;
+        previous?.Cancel();
+    }
     private readonly Dictionary<Guid, AgentRealStructureJobResponse> _recoverableStructureJobs = [];
     public AgentRealStructureJobResponse? FindRecoverableStructureJob(SystemId systemId) =>
         _recoverableStructureJobs.Values.Where(job => job.SystemId == systemId)
@@ -33,6 +84,7 @@ public sealed partial class WorkspaceViewModel
     public string? RealOperationOwner { get; private set; }
     private const string EditorProgressKey = "editor:active-operation";
     public AgentRealOperationResponse? LastRealOperationStatus { get; private set; }
+    public AgentRealOperationStatusResponse? LastRealOperationLightStatus { get; private set; }
     public event Action? RealOperationActivityChanged;
     public event Func<AgentRealOperationResponse, bool, bool>? RealOperationRecovered;
 
@@ -72,6 +124,7 @@ public sealed partial class WorkspaceViewModel
         if (!RealOperationSubmission.Observe(status)) return;
         RealStructureResults.ObserveUnresolved(status);
         LastRealOperationStatus = status;
+        UpdateRealOperationWait(status.Plan.OperationId, status.State, status.Steps, status.ActiveStepElapsedMilliseconds);
         if (_recoveredRealOperationFeedback.TryGetValue(status.Plan.OperationId, out var previous))
         {
             var key = RealOperationFeedback.RecoveryKey(status);
@@ -142,7 +195,11 @@ public sealed partial class WorkspaceViewModel
             "real", $"real:refresh:{scope.Key}", options: new GlobalNotificationOptions { Detail = exception.Message });
     }
 
-    public void StopRealOperationRecovery() => _realOperationRecoveryCancellation.Cancel();
+    public void StopRealOperationRecovery()
+    {
+        StopRealOperationWaitClock();
+        _realOperationRecoveryCancellation.Cancel();
+    }
 
     public async Task RecheckRealOperationsAsync()
     {
@@ -192,13 +249,17 @@ public sealed partial class WorkspaceViewModel
         await Task.Yield();
         try
         {
-            await foreach (var status in RealOperationRecovery.WatchAsync(_agentConnection!,
+            await foreach (var status in RealOperationRecovery.WatchLightAsync(_agentConnection!,
                 RealOperationSubmission, subscription.Token))
             {
                 if (IsRealOperationBusy) continue;
-                if (RealOperationSubmissionState.IsReconciledTerminal(status))
-                    await RecoverRealOperationsAsync(status);
-                else ObserveRealOperation(status);
+                var known = await RealOperationStatusCache.For(_agentConnection!).ResolveAsync(status, subscription.Token);
+                if (known is not null)
+                {
+                    if (RealOperationSubmissionState.IsReconciledTerminal(known)) await RecoverRealOperationsAsync(known);
+                    else ObserveRealOperation(known);
+                }
+                else await ObserveLightRecoveryAsync(status, subscription.Token);
             }
         }
         catch (OperationCanceledException) when (subscription.IsCancellationRequested) { }
@@ -231,6 +292,7 @@ public sealed partial class WorkspaceViewModel
         if (_agentConnection is null) return;
         var closed = new List<AgentRealOperationResponse>();
         var deferred = new List<AgentRealOperationResponse>();
+        var lightStatuses = new List<AgentRealOperationStatusResponse>();
         var cancellationToken = _realOperationRecoveryCancellation.Token;
         try
         {
@@ -269,7 +331,7 @@ public sealed partial class WorkspaceViewModel
                             : "Completed changes remain. In an empty structure draft, select Restore pending job to inspect the remaining goal; applying again requires confirmation.",
                         "real", $"real:job:{job.JobId:D}", options: new GlobalNotificationOptions
                         { Detail = $"JobId: {job.JobId:D}\n{string.Join(Environment.NewLine, job.Completed)}" });
-                }, retainedStatus);
+                }, retainedStatus, lightStatuses.Add);
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
             {
@@ -279,6 +341,8 @@ public sealed partial class WorkspaceViewModel
                 _notificationService.PublishWarning(Localization["Warning"], exception.Message,
                     "real", "real:recover:unavailable");
             }
+            foreach (var status in lightStatuses.DistinctBy(status => status.OperationId))
+                await ObserveLightRecoveryAsync(status, cancellationToken);
             foreach (var status in closed)
             {
                 await RealStructureResults.RecoverAsync(status,
@@ -317,6 +381,30 @@ public sealed partial class WorkspaceViewModel
                         RealOperationSubmission.IsBlocked ? "待核对 / Needs reconciliation" : string.Empty);
             }
         }
+    }
+
+    private async Task ObserveLightRecoveryAsync(AgentRealOperationStatusResponse status, CancellationToken cancellationToken)
+    {
+        if (status.SystemId is not { } systemId || string.IsNullOrWhiteSpace(status.PlanHash)) return;
+        LastRealOperationLightStatus = status;
+        UpdateRealOperationWait(status.OperationId, status.State, status.Steps, status.ActiveStepElapsedMilliseconds);
+        if (RealOperationSubmissionState.IsReconciledTerminal(status))
+        {
+            var local = SystemCatalog.Systems.FirstOrDefault(document => document.IsLocal && document.SystemId == systemId);
+            var anchors = status.Targets?.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray() ?? [];
+            if (local?.SourceFacts is not { } facts || anchors.Length == 0) return;
+            var scope = StorageInventoryScopeFactory.Create(facts, status.OperationId, null, anchors);
+            if (!await RefreshRealOperationScopeAsync(scope, cancellationToken)) return;
+        }
+        if (!RealOperationSubmission.Observe(status)) return;
+        var chinese = Localization.EffectiveLanguage == LanguagePreference.ZhCn;
+        _notificationService.PublishWarning(chinese ? "真实操作状态" : "Real operation status",
+            status.RequiresReconciliation
+                ? chinese ? "结果仍待核实，写入保护保留。" : "The outcome remains unresolved; write protection remains active."
+                : $"{status.State}: {status.Code}", "real", $"real:recover:{status.OperationId.Value}",
+            options: new GlobalNotificationOptions { SystemId = systemId.Value.ToString("D"), Code = status.Code ?? string.Empty,
+                Detail = $"OperationId: {status.OperationId.Value}\nPlanHash: {status.PlanHash}\nRevision: {status.Revision}\n{status.ReconciliationDiagnostic?.Detail}" });
+        SetRealOperationActivity(false, false, RealOperationSubmission.IsBlocked ? "待核对 / Needs reconciliation" : string.Empty);
     }
 
     private bool NotifyRecoveredRealOperation(AgentRealOperationResponse status, bool inventoryRefreshed)

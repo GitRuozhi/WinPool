@@ -375,6 +375,30 @@ public sealed class SimulationEditCoordinatorTests
             request => Assert.IsType<LookupAgentSimulationCommitRequest>(request));
     }
 
+    [Fact]
+    public async Task LostCommitRetryUsesOriginalBeforeHashAfterCommittedDocumentWasLoaded()
+    {
+        var original = CreateDocument(StorageSystemKind.Simulation);
+        var connection = new LostCommitReplyConnection("not-found");
+        var repository = new AgentBackedStorageSystemRepository(connection);
+        await repository.SaveSimulationAsync(original);
+        const string commitId = "lost-receipt-reload";
+        var frozen = SimulationEditIntent.Freeze(new SimulationEditRequest(
+            SimulationEditKind.Rename, "physical:p1", Name: "Saved remotely"), commitId, original.UpdatedAt.AddSeconds(1));
+        var reduced = new SimulationOperationService().ReducePlan(original, new(commitId, [frozen]));
+        Assert.True(reduced.Succeeded, reduced.Error);
+        var candidate = reduced.Document with { Revision = original.Revision + 1 };
+        var intent = new SimulationCommitIntent(original.Id, original.Revision, commitId, [frozen]);
+        await Assert.ThrowsAsync<SimulationCommitOutcomeUnknownException>(
+            () => repository.SaveEditAsync(candidate, intent));
+
+        Assert.Equal(candidate.Revision, (await repository.LoadSimulationAsync(original.Id))!.Revision);
+        connection.LookupFault = "none";
+        Assert.Same(candidate, await repository.SaveEditAsync(candidate, intent));
+        Assert.Single(connection.Requests.OfType<CommitAgentSimulationEditRequest>());
+        Assert.Equal(2, connection.Requests.OfType<LookupAgentSimulationCommitRequest>().Count());
+    }
+
     [Theory]
     [InlineData(ApplicationStatus.Rejected, "agent.persistence.simulation_commit_conflict", ApplicationStatus.Rejected, "simulation.commit.conflict", false)]
     [InlineData(ApplicationStatus.Rejected, "agent.persistence.simulation_commit_conflict", ApplicationStatus.Rejected, "simulation.commit.conflict", true)]
@@ -484,6 +508,7 @@ public sealed class SimulationEditCoordinatorTests
         ApplicationStatus? commitStatus = null, string? commitCode = null) : IAgentConnection
     {
         private SimulationCommitReceipt? firstReceipt;
+        public string LookupFault { get; set; } = lookupFault;
         public SimulationDocumentPayload? Current { get; private set; }
         public List<AgentRequest> Requests { get; } = [];
         public Task<ApplicationResult<AgentHandshake>> ConnectAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
@@ -497,7 +522,7 @@ public sealed class SimulationEditCoordinatorTests
                 case SaveAgentSimulationDocumentRequest save:
                     Assert.Equal(Current?.Sha256, save.ExpectedPreviousSha256);
                     Current = save.Document;
-                    response = new SimulationDocumentSavedResponse(Current);
+                    response = new SimulationDocumentSavedResponse(new(Current.DocumentId, Current.DocumentSchemaVersion, Current.DisplayName, Current.Sha256, Current.Revision, Current.UpdatedAtUtc));
                     break;
                 case LoadAgentSimulationDocumentRequest:
                     response = new SimulationDocumentLoadedResponse(Current);
@@ -527,10 +552,10 @@ public sealed class SimulationEditCoordinatorTests
                     Assert.Equal(firstReceipt.CommitId, lookup.CommitId);
                     Assert.Equal(firstReceipt.DocumentId, lookup.DocumentId);
                     Assert.Equal(firstReceipt.IntentHash, lookup.IntentHash);
-                    if (lookupFault == "unavailable")
+                    if (LookupFault == "unavailable")
                         return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(ApplicationStatus.Failed, request.CorrelationId));
-                    response = lookupFault == "not-found" ? new SimulationCommitLookupResponse(false, null)
-                        : new SimulationCommitLookupResponse(true, lookupFault switch
+                    response = LookupFault == "not-found" ? new SimulationCommitLookupResponse(false, null)
+                        : new SimulationCommitLookupResponse(true, LookupFault switch
                         {
                             "none" => firstReceipt,
                             "commit-id" => firstReceipt with { CommitId = "other" },
@@ -538,7 +563,7 @@ public sealed class SimulationEditCoordinatorTests
                             "intent-hash" => firstReceipt with { IntentHash = "other" },
                             "document-id" => firstReceipt with { DocumentId = "simulation:other" },
                             "revision" => firstReceipt with { AfterRevision = firstReceipt.AfterRevision + 1 },
-                            _ => throw new NotSupportedException(lookupFault)
+                            _ => throw new NotSupportedException(LookupFault)
                         });
                     break;
                 default: throw new NotSupportedException(request.GetType().Name);

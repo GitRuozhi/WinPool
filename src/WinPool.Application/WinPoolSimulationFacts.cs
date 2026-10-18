@@ -22,10 +22,10 @@ public static class WinPoolSimulationFacts
     public static WinPoolFacts Create(StorageSnapshot snapshot, SystemId systemId) =>
         Build(snapshot, systemId, 1);
 
-    public static WinPoolFacts ApplyCandidate(WinPoolFacts? previous, StorageSnapshot before, StorageSnapshot candidate, SystemId systemId)
+    public static WinPoolFacts ApplyCandidate(WinPoolFacts? previous, StorageSnapshot before, StorageSnapshot candidate, SystemId systemId, long logicalSteps = 1)
     {
         _ = before;
-        var generated = Build(candidate, systemId, checked((previous?.Revision ?? 0) + 1));
+        var generated = Build(candidate, systemId, checked((previous?.Revision ?? 0) + logicalSteps));
         if (previous is null) return generated;
 
         var previousSources = previous.Sources.ToDictionary(x => x.Id);

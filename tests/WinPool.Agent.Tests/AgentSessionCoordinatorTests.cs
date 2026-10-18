@@ -7,6 +7,50 @@ namespace WinPool.Agent.Tests;
 public sealed class AgentSessionCoordinatorTests
 {
     [Fact]
+    public async Task CancelledPreparationKeepsAgentRunningAndSaveRequestsAvailable()
+    {
+        var operations = new RecordingRequestOperations { PausePreparation = true };
+        var actions = new RecordingShutdownActions();
+        var coordinator = CreateCoordinator(actions, operations);
+        var shutdown = coordinator.HandleAsync(new RequestAgentShutdownRequest(ShutdownReason.TrayExit, CorrelationId.New()));
+        await operations.PreparationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(AgentLifecycleState.Running, coordinator.State);
+        Assert.False(coordinator.CanRegisterApp(ProcessInstanceId.New(), 1234));
+        Assert.True((await coordinator.HandleAsync(new SaveAgentWorkspaceStateRequest(
+            new WorkspaceSessionState(WorkspaceSessionState.CurrentSchemaVersion, "simulation:test", ManageWorkspaceCategory.System, new Dictionary<ManageWorkspaceCategory, string>(), "", DateTimeOffset.UtcNow),
+            CorrelationId.New()))).IsSuccess);
+        operations.ContinuePreparation.SetResult(false);
+        Assert.Equal(ApplicationStatus.Rejected, (await shutdown).Status);
+        Assert.Equal(AgentLifecycleState.Running, coordinator.State);
+        Assert.Empty(actions.Calls);
+        Assert.False(operations.PreparationProceeded);
+        Assert.True((await coordinator.HandleAsync(new LoadAgentWorkspaceStateRequest(CorrelationId.New()))).IsSuccess);
+    }
+
+    [Fact]
+    public async Task AcknowledgedPreparationDrainsAcceptedSaveBeforeClosingResources()
+    {
+        var operations = new RecordingRequestOperations { PausePreparation = true, PauseSave = true };
+        var actions = new RecordingShutdownActions();
+        var coordinator = CreateCoordinator(actions, operations);
+        var save = coordinator.HandleAsync(new SaveAgentWorkspaceStateRequest(
+            new WorkspaceSessionState(WorkspaceSessionState.CurrentSchemaVersion, "simulation:test", ManageWorkspaceCategory.System, new Dictionary<ManageWorkspaceCategory, string>(), "", DateTimeOffset.UtcNow),
+            CorrelationId.New()));
+        await operations.SaveEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var shutdown = coordinator.HandleAsync(new RequestAgentShutdownRequest(ShutdownReason.TrayExit, CorrelationId.New()));
+        await operations.PreparationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True((await coordinator.HandleAsync(new LookupAgentSimulationCommitRequest("commit", "simulation:test", "hash", CorrelationId.New()))).IsSuccess);
+        operations.ContinuePreparation.SetResult(true);
+        await operations.PreparationEnded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(AgentLifecycleState.ShuttingDown, coordinator.State);
+        Assert.Empty(actions.Calls);
+        Assert.False((await coordinator.HandleAsync(new LoadAgentWorkspaceStateRequest(CorrelationId.New()))).IsSuccess);
+        operations.ContinueSave.SetResult();
+        Assert.True((await save).IsSuccess);
+        Assert.True((await shutdown).IsSuccess);
+        Assert.True(operations.PreparationProceeded);
+    }
+    [Fact]
     public async Task RealModeRequestWithoutOsPeerOrServiceIsRejected()
     {
         var coordinator = CreateCoordinator(new RecordingShutdownActions());
@@ -570,9 +614,26 @@ public sealed class AgentSessionCoordinatorTests
             registry);
     }
 
-    private sealed class RecordingRequestOperations : IAgentRequestOperations
+    private sealed class RecordingRequestOperations : IAgentRequestOperations, IAgentShutdownPreparation
     {
         public int RequestCount { get; private set; }
+        public bool PausePreparation { get; init; }
+        public bool PauseSave { get; init; }
+        public bool PreparationProceeded { get; private set; }
+        public TaskCompletionSource PreparationEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> ContinuePreparation { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource PreparationEnded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SaveEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ContinueSave { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<bool> PrepareClientsAsync(Guid attemptId, ShutdownReason reason, CancellationToken cancellationToken)
+        {
+            if (!PausePreparation) return Task.FromResult(true);
+            PreparationEntered.TrySetResult();
+            return ContinuePreparation.Task.WaitAsync(cancellationToken);
+        }
+        public bool AcknowledgePreparation(AcknowledgeAgentShutdownPreparationRequest request, AgentVerifiedPeer? peer) => false;
+        public void EndPreparation(Guid attemptId, bool proceeding)
+        { PreparationProceeded = proceeding; PreparationEnded.TrySetResult(); }
 
         public Task<ApplicationResult<AgentResponse>> GetSnapshotAsync(
             GetAgentSnapshotRequest request,
@@ -599,10 +660,13 @@ public Task<ApplicationResult<AgentResponse>> OpenNativePropertiesAsync(
             CancellationToken cancellationToken) =>
             Succeed(request);
 
-        public Task<ApplicationResult<AgentResponse>> SaveWorkspaceStateAsync(
+        public async Task<ApplicationResult<AgentResponse>> SaveWorkspaceStateAsync(
             SaveAgentWorkspaceStateRequest request,
-            CancellationToken cancellationToken) =>
-            Succeed(request);
+            CancellationToken cancellationToken)
+        {
+            if (PauseSave) { SaveEntered.TrySetResult(); await ContinueSave.Task.WaitAsync(cancellationToken); }
+            return await Succeed(request);
+        }
 
         public Task<ApplicationResult<AgentResponse>> ListSimulationDocumentsAsync(
             ListAgentSimulationDocumentsRequest request,

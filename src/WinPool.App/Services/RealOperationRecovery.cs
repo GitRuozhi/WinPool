@@ -11,10 +11,15 @@ public static class RealOperationRecovery
         RealOperationSubmissionState submission, Action<AgentRealOperationResponse> observe,
         CancellationToken cancellationToken,
         Action<AgentRealStructureJobResponse>? observeJob = null,
-        AgentRealOperationResponse? retainedStatus = null)
+        AgentRealOperationResponse? retainedStatus = null,
+        Action<AgentRealOperationStatusResponse>? observeLight = null)
     {
-        if (retainedStatus is not null && Matches(submission, retainedStatus)) observe(retainedStatus);
-        else await QueryRetainedAsync(connection, submission, observe, cancellationToken);
+        if (retainedStatus is not null && Matches(submission, retainedStatus))
+        {
+            RealOperationStatusCache.For(connection).Remember(retainedStatus);
+            observe(retainedStatus);
+        }
+        else await QueryRetainedAsync(connection, submission, observe, cancellationToken, observeLight);
 
         var result = await connection.SendAsync(
             new ListAgentRecoverableRealOperationsRequest(CorrelationId.New()), cancellationToken);
@@ -25,6 +30,7 @@ public static class RealOperationRecovery
         {
             var operation = await cache.ResolveAsync(status, cancellationToken);
             if (operation is not null) observe(operation);
+            else observeLight?.Invoke(status);
         }
         foreach (var job in recovered.StructureJobs ?? []) observeJob?.Invoke(job);
     }
@@ -46,9 +52,21 @@ public static class RealOperationRecovery
         }
     }
 
+    public static async IAsyncEnumerable<AgentRealOperationStatusResponse> WatchLightAsync(IAgentConnection connection,
+        RealOperationSubmissionState submission, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (submission.OperationId is not { } operationId) yield break;
+        var hash = submission.PlanHash;
+        await foreach (var status in RealOperationStatusCache.For(connection).WatchStatusAsync(operationId, cancellationToken))
+        {
+            if (submission.OperationId != operationId || submission.PlanHash != hash) yield break;
+            if (status.PlanHash == hash) yield return status;
+        }
+    }
+
     public static async Task RecheckAsync(IAgentConnection connection,
         RealOperationSubmissionState submission, Action<AgentRealOperationResponse> observe,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Action<AgentRealOperationStatusResponse>? observeLight = null)
     {
         if (submission.OperationId is not { } operationId) return;
         var result = await connection.SendAsync(new ReconcileAgentRealOperationRequest(
@@ -56,18 +74,21 @@ public static class RealOperationRecovery
         if (!result.IsSuccess) return;
         var operation = await RealOperationStatusCache.For(connection).ResolveAsync(result.Value, cancellationToken);
         if (operation is not null) observe(operation);
+        else if (result.Value is AgentRealOperationStatusResponse light) observeLight?.Invoke(light);
     }
 
     private static async Task QueryRetainedAsync(IAgentConnection connection,
         RealOperationSubmissionState submission, Action<AgentRealOperationResponse> observe,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Action<AgentRealOperationStatusResponse>? observeLight)
     {
         if (submission.OperationId is not { } operationId) return;
         var planHash = submission.PlanHash;
-        var status = await RealOperationStatusCache.For(connection).QueryAsync(operationId, cancellationToken);
-        if (status is not null && status.Plan.OperationId == operationId
-            && StringComparer.Ordinal.Equals(status.Plan.PlanHash, planHash))
-            observe(status);
+        var cache = RealOperationStatusCache.For(connection);
+        var status = await cache.QueryStatusAsync(operationId, cancellationToken);
+        if (status is null || status.OperationId != operationId || status.PlanHash != planHash) return;
+        var known = await cache.ResolveAsync(status, cancellationToken);
+        if (known is not null) observe(known);
+        else observeLight?.Invoke(status);
     }
 
     private static bool Matches(RealOperationSubmissionState submission, AgentRealOperationResponse status) =>

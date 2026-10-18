@@ -77,13 +77,9 @@ internal sealed class MonitorAlertObserver : IDisposable
         try
         {
             var monitoring = _viewModel.Monitoring;
-            if (monitoring.UsesAgent)
-            {
-                _hasAuthoritativeAgentSnapshot |= monitoring.IsRemoteStateKnown;
-            }
+            _hasAuthoritativeAgentSnapshot |= monitoring.IsRemoteStateKnown;
 
-            if (!monitoring.UsesAgent
-                || (monitoring.IsRemoteStateKnown && _viewModel.AgentPreferencesLoaded))
+            if (monitoring.IsRemoteStateKnown && _viewModel.AgentPreferencesLoaded)
             {
                 await SynchronizeMonitoringAsync();
                 if (_disposed)
@@ -304,7 +300,7 @@ internal sealed class MonitorAlertObserver : IDisposable
         }
 
         if (diagnostics.ConsecutiveFailures > 0
-            && (!monitoring.UsesAgent || _hasAuthoritativeAgentSnapshot))
+            && _hasAuthoritativeAgentSnapshot)
         {
             var failureCode = diagnostics.LastFailureCode ?? "unknown";
             issues.Add(new(
@@ -313,7 +309,7 @@ internal sealed class MonitorAlertObserver : IDisposable
                     ? $"⚠ 通信或采样异常：{failureCode}"
                     : $"⚠ Communication or sampling issue: {failureCode}"));
         }
-        else if ((!monitoring.UsesAgent || monitoring.IsRemoteStateKnown)
+        else if (monitoring.IsRemoteStateKnown
                  && !string.IsNullOrWhiteSpace(monitoring.LastError)
                  && !string.Equals(monitoring.LastError, runtime.PersistenceFailure, StringComparison.Ordinal)
                  && !string.Equals(monitoring.LastError, runtime.ArchiveFailure, StringComparison.Ordinal)
@@ -330,7 +326,7 @@ internal sealed class MonitorAlertObserver : IDisposable
                         : $"⚠ Monitoring stopped: {monitoring.LastError}"));
         }
 
-        var stateIsAuthoritative = !monitoring.UsesAgent || monitoring.IsRemoteStateKnown;
+        var stateIsAuthoritative = monitoring.IsRemoteStateKnown;
         var snapshot = monitoring.UpdateIssueStates(
             issues.Select(issue => issue with
             {

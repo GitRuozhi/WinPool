@@ -58,7 +58,16 @@ public sealed class RealOperationSubmissionState
         return true;
     }
 
-    public bool Observe(AgentRealOperationResponse response)
+    public bool Observe(AgentRealOperationResponse response) => Observe(new AgentRealOperationStatusResponse(
+        response.Plan.OperationId, 0, response.State, response.Steps, response.Code,
+        response.RequiresReconciliation, response.ReconciliationDiagnostic, response.Plan.SystemId, response.Plan.PlanHash));
+
+    public static bool IsReconciledTerminal(AgentRealOperationStatusResponse response) =>
+        !response.RequiresReconciliation && response.State is RealOperationState.Succeeded
+            or RealOperationState.Rejected or RealOperationState.Cancelled
+            or RealOperationState.Failed or RealOperationState.PartiallyCompleted;
+
+    public bool Observe(AgentRealOperationStatusResponse response)
     {
         var terminal = response.State is RealOperationState.Succeeded or RealOperationState.Rejected
             or RealOperationState.Cancelled or RealOperationState.Failed or RealOperationState.PartiallyCompleted;
@@ -106,10 +115,14 @@ public sealed class RealOperationSubmissionState
         return true;
     }
 
-    private static bool TryGetIdentity(AgentRealOperationResponse response, out OperationIdentity identity)
+    private static bool TryGetIdentity(AgentRealOperationResponse response, out OperationIdentity identity) =>
+        TryGetIdentity(response.Plan.OperationId, response.Plan.PlanHash, out identity);
+
+    private static bool TryGetIdentity(AgentRealOperationStatusResponse response, out OperationIdentity identity) =>
+        TryGetIdentity(response.OperationId, response.PlanHash, out identity);
+
+    private static bool TryGetIdentity(OperationId operationId, string? planHash, out OperationIdentity identity)
     {
-        var operationId = response.Plan.OperationId;
-        var planHash = response.Plan.PlanHash;
         if (operationId.Value == Guid.Empty || string.IsNullOrWhiteSpace(planHash))
         {
             identity = default;

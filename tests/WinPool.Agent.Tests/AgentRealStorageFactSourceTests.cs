@@ -14,6 +14,28 @@ public sealed class AgentRealStorageFactSourceTests
     private const string PhysicalId = "physical:7";
 
     [Fact]
+    public async Task ProductionStartupAndMonitorConsumeOneCompleteHardwareObservation()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var source = new FixedFactSource(() => Document(SystemId.New()));
+        var collector = harness.Wrap(source);
+        var primed = await collector.CollectStartupAsync(CancellationToken.None);
+        var monitor = await collector.CollectForMonitorAsync(null, CancellationToken.None);
+        Assert.Same(primed, monitor);
+        var published = new List<AgentEvent>();
+        var coordinator = new AgentInventoryCoordinator(collector, harness.LocalDocument, harness.Identity,
+            new UnusedDeviceResolver(), published.Add);
+        await coordinator.CaptureStartupAsync(CancellationToken.None);
+        await coordinator.CaptureStartupAsync(CancellationToken.None);
+        Assert.Equal(1, source.CaptureCount);
+        Assert.Equal(new[] { CollectionPurpose.Storage, CollectionPurpose.Hardware },
+            published.OfType<AgentInventoryUpdatedEvent>().Select(value => value.Purpose));
+        Assert.NotEqual(Guid.Empty, primed.SourceFacts!.ObservationId);
+        await collector.CaptureFreshAsync(CancellationToken.None);
+        Assert.Equal(2, source.CaptureCount);
+    }
+
+    [Fact]
     public async Task SameGenerationCoalescesCompleteRawCaptureAndVerifiedMonitorReusesIt()
     {
         await using var harness = await Harness.CreateAsync();
@@ -42,6 +64,9 @@ public sealed class AgentRealStorageFactSourceTests
         Assert.False(monitor.SourceFacts!.IsMerged);
         Assert.True(monitor.SourceFacts.ScopedCollection!.Complete);
         Assert.Equal(scope, monitor.SourceFacts.ScopedCollection.Scope);
+        Assert.Single(monitor.Snapshot.StorageSubsystems);
+        Assert.Equal("primordial", Assert.Single(monitor.Snapshot.PhysicalDisks).PoolStableId);
+        Assert.Single(monitor.SourceFacts.Relationships, relation => relation.Kind == "subsystem-pool");
         monitor.SourceFacts.Validate();
     }
 
@@ -66,7 +91,6 @@ public sealed class AgentRealStorageFactSourceTests
         await using var harness = await Harness.CreateAsync();
         var cached = Document(SystemId.New(), serial: "CACHED-SERIAL");
         var coordinator = new AgentInventoryCoordinator(new FixedHardwareProvider(cached),
-            new InventorySnapshotRepository(harness.Store, harness.Lease),
             harness.LocalDocument, harness.Identity, new UnusedDeviceResolver());
         var inventory = await coordinator.CaptureManageAsync(
             new(CorrelationId.New(), CollectionPurpose.Storage), CancellationToken.None);
@@ -83,7 +107,7 @@ public sealed class AgentRealStorageFactSourceTests
         Assert.Equal(LocalInventoryDocumentCodec.Encode(raw).Json,
             LocalInventoryDocumentCodec.Encode(rebound with
                 { SystemId = raw.SystemId, SourceFacts = rebound.SourceFacts! with
-                    { SystemId = raw.SystemId, Sources = raw.SourceFacts!.Sources } }).Json);
+                    { SystemId = raw.SystemId, Sources = raw.SourceFacts!.Sources, ObservationId = raw.SourceFacts.ObservationId } }).Json);
         Assert.NotEqual(raw.SystemId, saved.SystemId);
 
         // New helper/resolver instances use the durable authority after restart.
@@ -273,10 +297,9 @@ public sealed class AgentRealStorageFactSourceTests
 
         public async Task SaveAsync(StorageSystemDocument document)
         {
-            var snapshot = InventorySnapshotProjection.Project(document.SystemId, document.Snapshot);
-            var saved = await new InventorySnapshotRepository(Store, Lease).SaveAsync(snapshot,
-                PersistedSystemKind.Local, document.Snapshot.Computer.Name, CancellationToken.None);
-            await LocalDocument.SaveAsync(saved.SnapshotId, LocalInventoryDocumentCodec.Encode(document));
+            await LocalDocument.SaveAsync(Guid.NewGuid(), LocalInventoryDocumentCodec.Encode(document),
+                document.SystemId, document.Snapshot.Computer.Name,
+                LocalSystemIdentityResolver.CreateAuthorityBinding(document.Snapshot.Computer.Name));
             Identity.Invalidate();
         }
 

@@ -129,7 +129,11 @@ public sealed record RealOperationSpecification(
     string SupportEvidence,
     string ExpectedFinalState,
     DateTimeOffset ExpiresAt,
-    IReadOnlyList<RealOperationStep> Steps);
+    IReadOnlyList<RealOperationStep> Steps)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? EvidenceProfile { get; init; }
+}
 
 // An App proposal. The Agent assigns identity and derives the final plan from fresh facts.
 public sealed record RealOperationIntentRequest(

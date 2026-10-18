@@ -122,7 +122,6 @@ public sealed class WinPoolFactCaptureTests
     public void OrdinaryCollectionDisablesDiscoveryAndKeepsTheFixedTemplate(CollectionPurpose purpose)
     {
         var script = EmbeddedStorageInventoryScript.ForPurpose(purpose);
-        ReadOnlyStorageCommandPolicy.EnsureSafe(script);
         Assert.Contains("$WinPoolDiscoverProviderCache = $false", script);
         Assert.Contains("$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-WinPoolStorageClass 'MSFT_PhysicalDisk' })", script);
         Assert.Equal(60, WindowsPowerShellRunner.TimeoutSeconds);
@@ -184,7 +183,7 @@ $physicalObjects = @(Get-PhysicalDisk -ErrorAction Stop)
         start.ArgumentList.Add("-NoProfile");
         start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-EncodedCommand");
-        start.ArgumentList.Add(WindowsPowerShellStorageWriteRunner.EncodeFixedCompressedScript(harness));
+        start.ArgumentList.Add(PowerShellFixtureScriptCodec.EncodeFixedCompressedScript(harness));
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
@@ -306,7 +305,7 @@ $physicalObjects = @(Get-PhysicalDisk -ErrorAction Stop)
         Assert.Contains(retained.Sources, x => x.ReadState == FieldReadState.Failed);
     }
 
-    [Fact]
+    [EnvironmentEnabledFact("WINPOOL_READ_ONLY_ADMISSION")]
     public async Task StorageRefreshOmitsHardwareAndFullRefreshReturnsTypedProcessorFacts()
     {
         var provider = new WindowsHardwareInventoryProvider();

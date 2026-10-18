@@ -1,4 +1,6 @@
 using WinPool.Application;
+using WinPool.Domain;
+using Microsoft.Data.Sqlite;
 
 namespace WinPool.Infrastructure.Sqlite;
 
@@ -58,10 +60,18 @@ public sealed class LocalInventoryDocumentRepository
                 DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(6))));
     }
 
-    public async Task SaveAsync(
-        Guid snapshotId,
-        LocalInventoryDocumentPayload document,
-        CancellationToken cancellationToken = default)
+    public Task SaveAsync(Guid snapshotId, LocalInventoryDocumentPayload document,
+        CancellationToken cancellationToken = default) =>
+        SaveCoreAsync(snapshotId, document, null, null, null, cancellationToken);
+
+    public Task SaveAsync(Guid snapshotId, LocalInventoryDocumentPayload document,
+        SystemId systemId, string displayName, string canonicalBinding,
+        CancellationToken cancellationToken = default) =>
+        SaveCoreAsync(snapshotId, document, systemId, displayName, canonicalBinding, cancellationToken);
+
+    private async Task SaveCoreAsync(Guid snapshotId, LocalInventoryDocumentPayload document,
+        SystemId? systemId, string? displayName, string? canonicalBinding,
+        CancellationToken cancellationToken)
     {
         if (snapshotId == Guid.Empty)
         {
@@ -70,7 +80,28 @@ public sealed class LocalInventoryDocumentRepository
         Validate(document);
         writeOwner.AssertOwnership(store);
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        if (systemId is { } identity)
+        {
+            if (identity.Value == Guid.Empty || string.IsNullOrWhiteSpace(displayName)
+                || string.IsNullOrWhiteSpace(canonicalBinding))
+                throw new ArgumentException("The local system identity is incomplete.");
+            await using var system = connection.CreateCommand();
+            system.Transaction = transaction;
+            system.CommandText = """
+                INSERT INTO systems(system_id,kind,display_name,machine_binding_hash,created_at_utc_ms)
+                VALUES($id,0,$name,$binding,$at)
+                ON CONFLICT(system_id) DO UPDATE SET kind=0,display_name=excluded.display_name,
+                    machine_binding_hash=excluded.machine_binding_hash;
+                """;
+            system.Parameters.AddWithValue("$id", identity.Value.ToString("N"));
+            system.Parameters.AddWithValue("$name", displayName.Trim());
+            system.Parameters.AddWithValue("$binding", canonicalBinding);
+            system.Parameters.AddWithValue("$at", document.CapturedAtUtc.ToUnixTimeMilliseconds());
+            await system.ExecuteNonQueryAsync(cancellationToken);
+        }
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO local_inventory_document(
                 singleton, snapshot_id, document_id, document_schema_version,
@@ -95,11 +126,13 @@ public sealed class LocalInventoryDocumentRepository
             "$captured",
             document.CapturedAtUtc.ToUnixTimeMilliseconds());
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static void Validate(LocalInventoryDocumentPayload document)
     {
         ArgumentNullException.ThrowIfNull(document);
+        DocumentPayloadLimits.EnsureEnvelopeFits(document.Json, document.CapturedAtUtc);
         if (string.IsNullOrWhiteSpace(document.DocumentId)
             || document.DocumentSchemaVersion <= 0
             || string.IsNullOrWhiteSpace(document.DisplayName)

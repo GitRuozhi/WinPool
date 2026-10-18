@@ -16,6 +16,7 @@ internal sealed class AgentInventoryCollector(
     private readonly object sync = new();
     private readonly List<PendingBatch> batches = [];
     private VerifiedBatch? verified;
+    private Task<StorageSystemDocument>? startupCapture;
     private long generation;
     public bool SupportsScopedCapture => provider is IScopedHardwareInventoryProvider;
 
@@ -25,6 +26,7 @@ internal sealed class AgentInventoryCollector(
         {
             batches.Clear();
             verified = null;
+            startupCapture = null;
             return ++generation;
         }
     }
@@ -43,6 +45,34 @@ internal sealed class AgentInventoryCollector(
 
     public Task<StorageSystemDocument> CaptureFreshAsync(StorageInventoryScope scope, CancellationToken cancellationToken) =>
         CollectScopedAsync(scope, cancellationToken);
+
+    public Task<StorageSystemDocument> CollectStartupAsync(CancellationToken cancellationToken)
+    {
+        lock (sync)
+            return startupCapture ??= CollectAsync(CollectionPurpose.Hardware, null, BeginGeneration(), cancellationToken);
+    }
+
+    public Task<StorageSystemDocument> CaptureForPreparationAsync(IReadOnlyList<StorageObjectId> targets,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (sync)
+            if (verified is { } observed && observed.Generation == generation &&
+                targets.All(target => target.System == observed.Document.SystemId &&
+                    observed.Document.SourceFacts!.Objects.Any(item => item.Id == target.ProviderKey)))
+                return Task.FromResult(observed.Document);
+        return CaptureFreshAsync(cancellationToken);
+    }
+
+    public StorageInventoryScope? ResolveScope(OperationId operationId, string stepId, IReadOnlyList<StorageObjectId> targets)
+    {
+        lock (sync)
+            if (SupportsScopedCapture && verified is { } observed && observed.Generation == generation &&
+                targets.All(target => target.System == observed.Document.SystemId &&
+                    observed.Document.SourceFacts!.Objects.Any(item => item.Id == target.ProviderKey)))
+                return StorageInventoryScopeFactory.Create(observed.Document.SourceFacts!, operationId, stepId, targets);
+        return null;
+    }
 
     public void AcceptVerifiedPostState(StorageSystemDocument document, StorageInventoryScope? scope)
     {
@@ -104,6 +134,11 @@ internal sealed class AgentInventoryCollector(
             lock (sync) batches.Remove(batch);
             return await CollectAsync(purpose, scope, requestedGeneration, cancellationToken).ConfigureAwait(false);
         }
+        if (IsComplete(document, purpose))
+        {
+            lock (sync)
+                if (requestedGeneration == generation) verified = new(document, scope, requestedGeneration);
+        }
         return document;
     }
 
@@ -130,6 +165,7 @@ internal sealed class AgentInventoryCollector(
             SourceFacts = facts with
             {
                 SystemId = binding.SystemId,
+                ObservationId = Guid.NewGuid(),
                 Sources = facts.Sources.Select(x => x with { CaptureGeneration = captureGeneration }).ToImmutableArray()
             }
         };
@@ -139,13 +175,15 @@ internal sealed class AgentInventoryCollector(
         CollectionPurpose purpose, StorageInventoryScope? requested) =>
         (existingPurpose == CollectionPurpose.Hardware || purpose == CollectionPurpose.Storage)
         && (existing is null || requested is not null && existing.SystemId == requested.SystemId
+            && WindowsRealStorageReadProfile.Covers(existing.EvidenceProfile, requested.EvidenceProfile)
             && existing.BeforeObjectIds.Intersect(requested.BeforeObjectIds, StringComparer.Ordinal).Count() == requested.BeforeObjectIds.Count
             && existing.Targets.Intersect(requested.Targets).Count() == requested.Targets.Count);
 
     private static bool CoversVerified(VerifiedBatch batch, StorageInventoryScope? scope)
     {
         if (batch.Scope is null) return true;
-        if (scope is null || batch.Scope.SystemId != scope.SystemId) return false;
+        if (scope is null || batch.Scope.SystemId != scope.SystemId
+            || !WindowsRealStorageReadProfile.Covers(batch.Scope.EvidenceProfile, scope.EvidenceProfile)) return false;
         // The exact closure also covers newly created objects observed after the
         // write. BeforeObjectIds alone cannot name those output identities.
         var covered = batch.Scope.BeforeObjectIds.Concat(batch.Document.SourceFacts!.Objects.Select(x => x.Id))
@@ -157,8 +195,10 @@ internal sealed class AgentInventoryCollector(
     {
         var facts = document.SourceFacts!;
         if (facts.ScopedCollection is { Complete: false }) return false;
-        string[] required = ["MSFT_StorageSubSystem", "MSFT_StoragePool", "MSFT_PhysicalDisk", "MSFT_VirtualDisk",
-            "MSFT_StorageTier", "MSFT_Disk", "MSFT_Partition", "MSFT_Volume"];
+        string[] required = facts.ScopedCollection?.Scope.EvidenceProfile is not null
+            ? facts.Sources.Where(source => source.ClassName.StartsWith("MSFT_", StringComparison.Ordinal)).Select(source => source.ClassName).Distinct().ToArray()
+            : ["MSFT_StorageSubSystem", "MSFT_StoragePool", "MSFT_PhysicalDisk", "MSFT_VirtualDisk",
+                "MSFT_StorageTier", "MSFT_Disk", "MSFT_Partition", "MSFT_Volume"];
         return required.All(name => facts.Sources.Any(x => x.ClassName == name && x.ReadState == FieldReadState.Returned))
             && facts.Sources.Where(x => purpose == CollectionPurpose.Hardware || x.ClassName.StartsWith("MSFT_", StringComparison.Ordinal)
                 || x.ClassName is "Windows.DiskRoles" or "Windows.StorageProviderDiscovery" or "Win32_DiskDrive")
@@ -173,6 +213,12 @@ internal sealed class AgentInventoryCollector(
         IReadOnlyList<string> currentIds = present.Length == 0 ? [] : StorageInventoryScopeFactory.Create(facts,
             scope.OperationId, scope.StepId, present, scope.Generation).BeforeObjectIds;
         var ids = scope.BeforeObjectIds.Concat(currentIds).ToHashSet(StringComparer.Ordinal);
+        // Keep the selected member's observed availability pool and its exact
+        // subsystem parent without traversing that pool to unrelated siblings.
+        foreach (var edge in facts.Relationships.Where(edge => edge.Kind == "pool-member" && ids.Contains(edge.ToId)))
+            ids.Add(edge.FromId);
+        foreach (var edge in facts.Relationships.Where(edge => edge.Kind == "subsystem-pool" && ids.Contains(edge.ToId)))
+            ids.Add(edge.FromId);
         var objects = facts.Objects.Where(x => ids.Contains(x.Id)
             || x.ObjectType is FactObjectType.Computer or FactObjectType.OperatingSystem or FactObjectType.LogicalDisk or FactObjectType.NetworkDisk)
             .ToImmutableArray();
@@ -182,7 +228,8 @@ internal sealed class AgentInventoryCollector(
         {
             Sources = facts.Sources.Select(x => x.ClassName.StartsWith("MSFT_", StringComparison.Ordinal)
                 || x.ClassName is "Windows.DiskRoles" or "Win32_DiskDrive"
-                ? x with { Coverage = new(scope.Key, coverage, x.ReadState == FieldReadState.Returned, scope.Generation) } : x).ToImmutableArray(),
+                ? x with { Coverage = new(scope.Key, coverage, x.ReadState == FieldReadState.Returned, scope.Generation)
+                    { FieldNames = x.Coverage?.FieldNames } } : x).ToImmutableArray(),
             Objects = objects,
             Identities = facts.Identities.Where(x => actualIds.Contains(x.ObjectId)).ToImmutableArray(),
             Relationships = facts.Relationships.Where(x => actualIds.Contains(x.FromId) && actualIds.Contains(x.ToId)).ToImmutableArray(),

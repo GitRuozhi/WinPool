@@ -9,6 +9,35 @@ namespace WinPool.App.Tests;
 public sealed class MonitoringEventCacheTests
 {
     [Fact]
+    public async Task OnlySelectedChangedSeriesCopiesWindowAndReseedInvalidatesItsView()
+    {
+        var first = new Fixture();
+        var connection = new Connection { Snapshot = first.Snapshot(1, 2) };
+        using var service = new MonitoringService(connection);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await PushAsync(service, connection, new AgentStateReseedEvent(connection.Snapshot, "initial", DateTimeOffset.UtcNow), timeout.Token);
+        Assert.Empty(service.GetWindows([]));
+        var revision = service.WindowRevision;
+        var shown = Assert.Single(service.GetWindows(["synthetic"])).Value;
+        Assert.Same(shown, Assert.Single(service.GetWindows(["synthetic"])).Value);
+        Assert.Same(service.GetLatest(), service.GetLatest());
+
+        await PushAsync(service, connection, first.Batch(3), timeout.Token);
+        Assert.Empty(service.GetWindows([]));
+        Assert.Equal(2, shown.Length); // A hidden window is not eagerly recopied by sample arrival.
+        var changed = Assert.Single(service.GetWindows(["synthetic"])).Value;
+        Assert.Equal(3, changed.Length); Assert.NotSame(shown, changed);
+        Assert.True(service.WindowRevision > revision);
+
+        var replacement = new Fixture();
+        await PushAsync(service, connection, new AgentStateReseedEvent(replacement.Snapshot(1, 2), "replacement", DateTimeOffset.UtcNow), timeout.Token);
+        var replaced = Assert.Single(service.GetWindows(["synthetic"])).Value;
+        Assert.Equal(2, replaced.Length); Assert.NotSame(changed, replaced);
+        Assert.Equal(replacement.Target, service.GetSeriesTarget("synthetic"));
+        await service.DetachAsync();
+    }
+
+    [Fact]
     public async Task ReconnectSnapshotRejectsOlderStatesAndRetainsSamplesThroughNextBatch()
     {
         var fixture = new Fixture();
@@ -32,7 +61,7 @@ public sealed class MonitoringEventCacheTests
             snapshot with { MonitorStateRevision = 2 }, "late.snapshot", DateTimeOffset.UtcNow), timeout.Token);
 
         Assert.Equal(Enumerable.Range(1, 21).Select(value => (double)value),
-            Assert.Single(service.GetWindows()).Value.Select(point => point.ActivityPercent));
+            Assert.Single(service.GetWindows(service.GetLatest().Keys)).Value.Select(point => point.ActivityPercent));
         Assert.True(service.IsRemoteStateKnown);
         Assert.True(service.IsRunning);
         Assert.Equal(0, service.GetRuntimeDiagnostics().TransportGapCount);
@@ -64,7 +93,7 @@ public sealed class MonitoringEventCacheTests
         await PushAsync(service, connection, new AgentMonitorStateEvent(firstSnapshot.AgentInstanceId, firstSnapshot.ActiveMonitoringSession,
             new(0, 0), [], DateTimeOffset.UtcNow) { MonitorStateRevision = 3 }, timeout.Token);
         await PushAsync(service, connection, next.Batch(3) with { AgentInstanceId = nextSnapshot.AgentInstanceId }, timeout.Token);
-        Assert.Equal([1d, 2d, 3d], Assert.Single(service.GetWindows()).Value.Select(point => point.ActivityPercent));
+        Assert.Equal([1d, 2d, 3d], Assert.Single(service.GetWindows(service.GetLatest().Keys)).Value.Select(point => point.ActivityPercent));
         Assert.Equal(next.Target, service.GetSeriesTarget("synthetic"));
 
         connection.Snapshot = next.Snapshot(1, 2, 3, 5) with
@@ -73,7 +102,7 @@ public sealed class MonitoringEventCacheTests
             MonitorStateRevision = 6
         };
         await PushAsync(service, connection, next.Batch(5) with { AgentInstanceId = nextSnapshot.AgentInstanceId }, timeout.Token);
-        var points = Assert.Single(service.GetWindows()).Value;
+        var points = Assert.Single(service.GetWindows(service.GetLatest().Keys)).Value;
         Assert.Equal([1d, 2d, 3d, 5d], points.Select(point => point.ActivityPercent));
         Assert.True(points[^1].GapBefore);
         Assert.Equal(1, service.GetRuntimeDiagnostics().TransportGapCount);
@@ -91,11 +120,11 @@ public sealed class MonitoringEventCacheTests
         await PushAsync(service, connection, new AgentStateReseedEvent(fixture.Snapshot(1), "test.initial", DateTimeOffset.UtcNow), timeout.Token);
         await PushAsync(service, connection, fixture.Batch(2), timeout.Token);
         await PushAsync(service, connection, fixture.Batch(2), timeout.Token);
-        Assert.Equal(2, Assert.Single(service.GetWindows()).Value.Length);
+        Assert.Equal(2, Assert.Single(service.GetWindows(service.GetLatest().Keys)).Value.Length);
         Assert.Empty(connection.Requests);
 
         await PushAsync(service, connection, fixture.Batch(4) with { HasGap = true }, timeout.Token);
-        var points = Assert.Single(service.GetWindows()).Value;
+        var points = Assert.Single(service.GetWindows(service.GetLatest().Keys)).Value;
         Assert.Equal(3, points.Length);
         Assert.True(points[^1].GapBefore);
         Assert.Equal(1, service.GetRuntimeDiagnostics().TransportGapCount);
@@ -124,7 +153,7 @@ public sealed class MonitoringEventCacheTests
             new(0, 0), [], DateTimeOffset.UtcNow) { MonitorStateRevision = 100 }, timeout.Token);
 
         Assert.True(service.IsRemoteStateKnown);
-        Assert.Single(Assert.Single(service.GetWindows()).Value);
+        Assert.Single(Assert.Single(service.GetWindows(service.GetLatest().Keys)).Value);
         Assert.Equal(replacement.Target, service.GetSeriesTarget("synthetic"));
         Assert.Empty(connection.Requests);
         await service.DetachAsync();

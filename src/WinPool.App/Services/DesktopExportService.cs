@@ -9,7 +9,7 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        WriteIndented = true,
+        WriteIndented = false,
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() }
     };
@@ -68,16 +68,13 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
             return null;
         }
 
-        await using var stream = File.Create(file.Path);
-        await JsonSerializer.SerializeAsync(
-            stream,
-            new StorageSystemExportEnvelope(
-                "WinPool",
-                StorageSystemDocument.CurrentSchemaVersion,
-                DateTimeOffset.Now,
-                document),
-            JsonOptions,
-            cancellationToken);
+        var canonical = await Task.Run(async () =>
+        {
+            await DocumentPayloadLimits.LargeParseGate.WaitAsync(cancellationToken);
+            try { return DocumentPayloadLimits.EncodeExport(document); }
+            finally { DocumentPayloadLimits.LargeParseGate.Release(); }
+        }, cancellationToken).WaitAsync(cancellationToken);
+        await File.WriteAllTextAsync(file.Path, canonical, cancellationToken);
         return file.Path;
     }
 
@@ -109,30 +106,17 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
         {
             return null;
         }
-        if (new FileInfo(file.Path).Length > 64 * 1024 * 1024)
+        if (new FileInfo(file.Path).Length > DocumentPayloadLimits.MaximumDocumentBytes)
         {
             throw new InvalidDataException("The WinPool import exceeds the 64 MiB safety limit.");
         }
 
-        await using var stream = File.OpenRead(file.Path);
-        using var importJson = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        StorageSystemImportJsonValidator.Validate(importJson.RootElement);
-        var envelope = JsonSerializer.Deserialize<StorageSystemExportEnvelope>(
-            importJson.RootElement,
-            JsonOptions)
-            ?? throw new InvalidDataException("The WinPool import is empty.");
-        if (envelope.System is null)
+        var loading = Task.Run(async () =>
         {
-            throw new InvalidDataException("The WinPool import is missing its system document.");
-        }
-        if (envelope.Product != "WinPool"
-            || envelope.SchemaVersion != StorageSystemDocument.CurrentSchemaVersion
-            || envelope.System.SchemaVersion != StorageSystemDocument.CurrentSchemaVersion)
-        {
-            throw new InvalidDataException("The WinPool import version is not supported.");
-        }
-        StorageSystemImportValidator.Validate(envelope.System);
-        return envelope.System.AsImportedSimulation();
+            await using var stream = File.OpenRead(file.Path);
+            return await DocumentPayloadLimits.ReadExportAsync(stream, cancellationToken);
+        }, cancellationToken);
+        return await loading.WaitAsync(cancellationToken);
     }
 
     private static string NormalizeFileName(string value)
@@ -143,9 +127,4 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
 
     private static Microsoft.UI.WindowId ParentWindowId => WinPool_App.App.Window.AppWindow.Id;
 
-    private sealed record StorageSystemExportEnvelope(
-        string Product,
-        int SchemaVersion,
-        DateTimeOffset ExportedAt,
-        StorageSystemDocument System);
 }

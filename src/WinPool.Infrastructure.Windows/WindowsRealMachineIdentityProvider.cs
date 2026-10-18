@@ -1,4 +1,4 @@
-using System.Management;
+using System.Text.Json;
 using Microsoft.Win32;
 using WinPool.Application;
 using WinPool.Domain;
@@ -11,10 +11,24 @@ namespace WinPool.Infrastructure.Windows;
 /// </summary>
 public sealed class WindowsRealMachineIdentityProvider : IRealMachineIdentityProvider
 {
-    public Task<string> ReadBindingAsync(CancellationToken cancellationToken) =>
-        Task.Run(ReadBinding, cancellationToken);
+    private readonly object sync = new();
+    private Task<string>? binding;
 
-    private static string ReadBinding()
+    public Task<string> ReadBindingAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Task<string> current;
+        lock (sync)
+        {
+            // One Agent incarnation owns one stable machine binding. Storage
+            // identity and protection facts still get a fresh observation.
+            if (binding is null || binding.IsFaulted) binding = ReadBindingAsync();
+            current = binding;
+        }
+        return current.WaitAsync(cancellationToken);
+    }
+
+    private static async Task<string> ReadBindingAsync()
     {
         using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography", false);
         var machineGuid = (key?.GetValue("MachineGuid") as string)?.Trim();
@@ -25,13 +39,11 @@ public sealed class WindowsRealMachineIdentityProvider : IRealMachineIdentityPro
             throw new InvalidDataException("The current Windows MachineGuid is unavailable.");
         }
 
-        using var searcher = new ManagementObjectSearcher(
-            @"root\cimv2",
-            "SELECT UUID FROM Win32_ComputerSystemProduct");
-        searcher.Options.Timeout = TimeSpan.FromSeconds(10);
-        using var results = searcher.Get();
-        var identifiers = results.Cast<ManagementBaseObject>()
-            .Select(item => item["UUID"]?.ToString()?.Trim())
+        var raw = await WindowsPowerShellHost.Shared.QueryAsync(WindowsPowerShellQuery.MachineIdentity,
+            new { }, CancellationToken.None).ConfigureAwait(false);
+        using var result = JsonDocument.Parse(raw);
+        var identifiers = result.RootElement.GetProperty("HardwareUuids").EnumerateArray()
+            .Select(item => item.GetString()?.Trim())
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

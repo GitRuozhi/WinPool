@@ -1348,7 +1348,7 @@ public sealed class RotatingMonitorSessionPersistenceTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePools.DrainDirectory(DataRoot);
             if (Directory.Exists(DataRoot))
             {
                 Directory.Delete(DataRoot, recursive: true);

@@ -139,7 +139,7 @@ public sealed class MonitoringArchiveMeasurementTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePools.DrainDirectory(root);
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
@@ -320,7 +320,7 @@ public sealed class MonitoringArchiveMeasurementTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePools.DrainDirectory(root);
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
@@ -356,7 +356,7 @@ public sealed class MonitoringArchiveMeasurementTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePools.DrainDirectory(root);
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);

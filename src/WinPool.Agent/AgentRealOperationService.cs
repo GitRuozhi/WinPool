@@ -23,18 +23,19 @@ public sealed partial class AgentRealOperationService : IRealOperationService
     private readonly IRealMachineIdentityProvider machineIdentity;
     private readonly IOperationAuthority authority;
     private readonly TimeProvider timeProvider;
+    private readonly IProcessIncarnationVerifier processVerifier;
     private readonly Func<bool> isAdministrator;
     private readonly Func<TrustedRealSession, bool> isSessionStillArmed;
     private readonly SemaphoreSlim mutationGate = new(1, 1);
     private readonly ConcurrentDictionary<OperationId, byte> stopAfterCurrentStep = new();
     private readonly ConcurrentDictionary<OperationId, Task> runningTasks = new();
+    private readonly ConcurrentDictionary<OperationId, long> issuedAt = new();
     private readonly ConcurrentDictionary<OperationId, Task> reconciliationTasks = new();
     private readonly ConcurrentDictionary<OperationId, RealOperationReconciliationDiagnostic> reconciliationDiagnostics = new();
     private int recoveryReady;
     private int admissionClosed;
     private IRealStorageEditObserver? editObserver;
     private Func<RealVerifiedPostState, Task>? postStateObserver;
-    private readonly ConcurrentDictionary<OperationId, RealVerifiedPostState> verifiedPostStates = new();
     private Func<AgentRealOperationStatusResponse, Task>? statusObserver;
     public void AttachStatusObserver(Func<AgentRealOperationStatusResponse, Task> observer) =>
         statusObserver = observer ?? throw new ArgumentNullException(nameof(observer));
@@ -73,7 +74,8 @@ public sealed partial class AgentRealOperationService : IRealOperationService
         IOperationAuthority? authority,
         TimeProvider? timeProvider,
         Func<TrustedRealSession, bool> isSessionStillArmed,
-        Func<bool> isAdministrator)
+        Func<bool> isAdministrator,
+        IProcessIncarnationVerifier? processVerifier = null)
     {
         this.plans = plans ?? throw new ArgumentNullException(nameof(plans));
         this.events = events ?? throw new ArgumentNullException(nameof(events));
@@ -83,6 +85,7 @@ public sealed partial class AgentRealOperationService : IRealOperationService
         this.authority = authority
             ?? new InMemoryOperationAuthority(new OperationPolicyEvaluator());
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.processVerifier = processVerifier ?? new WindowsProcessIncarnationVerifier();
         this.isAdministrator = isAdministrator
             ?? throw new ArgumentNullException(nameof(isAdministrator));
         this.isSessionStillArmed = isSessionStillArmed
@@ -323,8 +326,7 @@ public sealed partial class AgentRealOperationService : IRealOperationService
                 request.CorrelationId);
         }
         catch (Exception exception) when (IsExpectedFailure(exception)
-            || exception is System.Management.ManagementException
-                or System.Runtime.InteropServices.COMException or TimeoutException)
+            || exception is System.Runtime.InteropServices.COMException or TimeoutException)
         {
             const string code = "agent.real_resize.range_unavailable";
             var diagnostic = $"{exception.GetType().Name}: {exception.Message}";
@@ -604,21 +606,9 @@ public sealed partial class AgentRealOperationService : IRealOperationService
         return await StatusAsync(operation, request.CorrelationId, cancellationToken);
     }
 
-    public async Task<ApplicationResult<AgentResponse>> LoadEvidenceAsync(
+    public Task<ApplicationResult<AgentResponse>> LoadEvidenceAsync(
         LoadAgentRealOperationEvidenceRequest request, TrustedRealSession session,
-        CancellationToken cancellationToken)
-    {
-        if (request.Offset < 0 || request.Limit is < 1 or > 16)
-            return Reject(request.CorrelationId, "agent.real_operation.invalid_evidence_window");
-        var operation = await plans.GetAsync(request.OperationId, cancellationToken);
-        if (operation is null) return Reject(request.CorrelationId, "agent.real_operation.not_found");
-        var full = await StatusAsync(operation, request.CorrelationId, cancellationToken,
-            includeEvidence: true, offset: request.Offset, limit: request.Limit);
-        var response = (AgentRealOperationResponse)full.Value!;
-        var next = request.Offset + response.Steps.Count;
-        return ApplicationResult<AgentResponse>.Succeeded(new AgentRealOperationEvidenceResponse(
-            response, request.Offset, next < response.Plan.Steps.Count ? next : null), request.CorrelationId);
-    }
+        CancellationToken cancellationToken) => LoadEvidencePageAsync(request, cancellationToken);
 
     public async Task<ApplicationResult<AgentResponse>> StopFollowingStepsAsync(
         StopAgentRealOperationFollowingStepsRequest request,
@@ -774,9 +764,13 @@ public sealed partial class AgentRealOperationService : IRealOperationService
             reconciliationDiagnostics.TryRemove(operation.OperationId, out _);
         return ApplicationResult<AgentResponse>.Succeeded(new AgentRealOperationStatusResponse(operation.OperationId,
             operation.Revision, ToPublicState(operation.State), operation.Steps.Select(step => new RealOperationStepProgress(
-                step.StepId, ToPublicState(step.State), step.Code, null, null)).ToArray(),
+                step.StepId, ToPublicState(step.State), step.Code, null, null,
+                step.CreatedObjectId is null && step.CreatedOsDiskId is null ? null
+                    : new RealOperationResultIdentity(step.CreatedObjectId, step.CreatedOsDiskId))).ToArray(),
             operation.Code, operation.State == PersistedOperationState.OutcomeUnknown,
-            reconciliationDiagnostics.GetValueOrDefault(operation.OperationId)), correlationId);
+            reconciliationDiagnostics.GetValueOrDefault(operation.OperationId), operation.SystemId, operation.PlanHash,
+            operation.Targets, issuedAt.TryGetValue(operationId, out var started)
+                ? (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds : 0), correlationId);
     }
 
     private async Task<ApplicationResult<AgentResponse>> StatusAsync(
@@ -801,7 +795,8 @@ public sealed partial class AgentRealOperationService : IRealOperationService
             progress,
             summary.Code,
             operation.State == PersistedOperationState.OutcomeUnknown,
-            diagnostic);
+            diagnostic, issuedAt.TryGetValue(operation.Plan.OperationId, out var issued)
+                ? (long)System.Diagnostics.Stopwatch.GetElapsedTime(issued).TotalMilliseconds : 0);
         return ApplicationResult<AgentResponse>.Succeeded(response, correlationId);
     }
 
@@ -828,8 +823,14 @@ public sealed partial class AgentRealOperationService : IRealOperationService
                 var durable = await plans.GetAsync(operationId, CancellationToken.None).ConfigureAwait(false);
                 if (durable is not null)
                 {
-                    var full = await StatusAsync(durable, CorrelationId.New(), CancellationToken.None, includeEvidence: true);
-                    await observer.ObserveAsync((AgentRealOperationResponse)full.Value!, CancellationToken.None).ConfigureAwait(false);
+                    var status = await plans.ReadRealStatusAsync(operationId, CancellationToken.None).ConfigureAwait(false);
+                    var page = await plans.ReadEvidencePageAsync(operationId, 0, durable.Plan.Steps.Count,
+                        CancellationToken.None).ConfigureAwait(false);
+                    if (status is not null)
+                        await observer.ObserveAsync(new(durable.Plan, ToPublicState(status.State),
+                            page.Steps.Select(step => new RealOperationStepProgress(step.StepId, ToPublicState(step.State),
+                                page.Codes.GetValueOrDefault(step.StepId), null, step.EvidenceJson)).ToArray(),
+                            status.Code, status.State == PersistedOperationState.OutcomeUnknown), CancellationToken.None).ConfigureAwait(false);
                 }
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -970,6 +971,9 @@ public sealed partial class AgentRealOperationService : IRealOperationService
         finally
         {
             await NotifyEditObserverAsync(plan.OperationId).ConfigureAwait(false);
+            backend?.ReleaseOperation(plan.OperationId);
+            stopAfterCurrentStep.TryRemove(plan.OperationId, out _);
+            issuedAt.TryRemove(plan.OperationId, out _);
         }
     }
 
@@ -1096,7 +1100,14 @@ public sealed partial class AgentRealOperationService : IRealOperationService
     {
         var macros = plan.RealOperation!.Steps.Where(IsMaximumCapacityMacro).ToArray();
         if (macros.Length == 0)
+        {
+            foreach (var step in progress.Where(step => step.State is RealOperationStepState.CallIssued
+                         or RealOperationStepState.WaitingForProvider or RealOperationStepState.Verifying
+                         or RealOperationStepState.OutcomeUnknown))
+                if (UnfinishedHostCallReason(step.TargetEvidence, step.ResultEvidence) is { } reason)
+                    return new(RealOperationState.OutcomeUnknown, progress, reason, false);
             return await backend!.ReconcileAsync(plan, progress, CancellationToken.None);
+        }
         // Creation plans currently contain one macro; layer attempts are its
         // journal children, never mutable additions to the frozen plan/hash.
         if (macros.Length != 1 || plan.RealOperation.Steps.Count != 1 || progress.Count != 1
@@ -1104,6 +1115,10 @@ public sealed partial class AgentRealOperationService : IRealOperationService
             return new(RealOperationState.OutcomeUnknown, progress,
                 "operation.maximum.recovery_shape_unavailable", false);
         var attempts = await plans.ReadMaximumCapacityAttemptsAsync(plan.OperationId, macros[0].Id);
+        foreach (var attempt in attempts.Where(attempt => attempt.State is MaximumCapacityAttemptState.CallIssued
+                     or MaximumCapacityAttemptState.OutcomeUnknown))
+            if (UnfinishedHostCallReason(attempt.Attempt.TargetEvidenceJson, attempt.Result?.ResultEvidenceJson) is { } reason)
+                return new(RealOperationState.OutcomeUnknown, progress, reason, false);
         // A snapshot, not a writer: Query/startup/final reconciliation cannot
         // continue a capacity search or replay an issued child attempt.
         var result = await maximum.ReconcileMaximumCapacitySearchAsync(plan, macros[0], progress[0],
@@ -1230,14 +1245,26 @@ public sealed partial class AgentRealOperationService : IRealOperationService
         }
     }
 
-    private async Task RunStepsAsync(OperationPlan plan)
+    private async Task<RealVerifiedPostState?> RunStepsAsync(OperationPlan plan)
+    {
+        try { return await RunStepsCoreAsync(plan).ConfigureAwait(false); }
+        finally
+        {
+            backend?.ReleaseOperation(plan.OperationId);
+            stopAfterCurrentStep.TryRemove(plan.OperationId, out _);
+            issuedAt.TryRemove(plan.OperationId, out _);
+        }
+    }
+
+    private async Task<RealVerifiedPostState?> RunStepsCoreAsync(OperationPlan plan)
     {
         var operationId = plan.OperationId;
+        RealVerifiedPostState? lastPostState = null;
         if (!RealOperationValidator.IsValid(plan)
             || !StringComparer.Ordinal.Equals(
                 plan.PlanHash, OperationPlanHasher.Compute(plan)))
         {
-            return; // Accepted remains a durable barrier; no Windows call.
+            return null; // Accepted remains a durable barrier; no Windows call.
         }
         if (!await plans.TransitionAsync(
                 operationId, PersistedOperationState.Accepted,
@@ -1245,7 +1272,7 @@ public sealed partial class AgentRealOperationService : IRealOperationService
                 Event(operationId, ExecutionEventKind.Started,
                     "operation.running")))
         {
-            return;
+            return null;
         }
 
         var outputs = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1297,6 +1324,22 @@ public sealed partial class AgentRealOperationService : IRealOperationService
                 break;
             }
 
+            try
+            {
+                preflight = await backend!.ReserveStepCallAsync(plan, step, preflight, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                await plans.TransitionStepAsync(operationId, step.Id, PersistedOperationStepState.NotStarted,
+                    PersistedOperationStepState.Failed, null,
+                    JsonSerializer.Serialize(new WindowsNoEffectStepEvidence(true, "operation.host_unavailable",
+                        preflight.PhysicalMemberFingerprint, exception.Message)),
+                    Event(operationId, ExecutionEventKind.Failed, "operation.host_unavailable", step.Id));
+                break;
+            }
+            await using var reservedCall = preflight.CallContext;
+
             if (!await plans.TransitionStepAsync(
                     operationId, step.Id,
                     PersistedOperationStepState.NotStarted,
@@ -1329,6 +1372,7 @@ public sealed partial class AgentRealOperationService : IRealOperationService
                 break;
             }
 
+            issuedAt[operationId] = System.Diagnostics.Stopwatch.GetTimestamp();
             RealStepResult result;
             await NotifyEditObserverAsync(operationId);
             try
@@ -1393,7 +1437,7 @@ public sealed partial class AgentRealOperationService : IRealOperationService
 
             outputs[step.Id] = result.ResultEvidenceJson;
             if (result.VerifiedPostState is { } verifiedPostState)
-                verifiedPostStates[operationId] = verifiedPostState;
+                lastPostState = verifiedPostState;
             if (result.VerifiedPostState is { } postState && postStateObserver is { } publish)
             {
                 try { await publish(postState).ConfigureAwait(false); }
@@ -1472,5 +1516,6 @@ public sealed partial class AgentRealOperationService : IRealOperationService
                 Event(operationId, ExecutionEventKind.Failed,
                     "operation.reconciled_transition_conflict"));
         }
+        return lastPostState;
     }
 }

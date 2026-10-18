@@ -176,11 +176,17 @@ public sealed class RealStructureResultSynchronization
     private static string RequireVerifiedCreatedId(AgentRealOperationResponse response, StorageSystemDocument fresh, OutputMapping mapping)
     {
         var step = response.Steps.Single(item => item.StepId == mapping.StepId && item.State == RealOperationStepState.Verified);
+        if (step.ResultIdentity?.CreatedObjectId is { Length: > 0 } created)
+            return ValidateCreated(created, step.ResultIdentity.CreatedOsDiskId);
         using var evidence = JsonDocument.Parse(step.ResultEvidence ?? "{}");
         if (!evidence.RootElement.TryGetProperty("CreatedObjectId", out var value)
             || value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
             throw new InvalidDataException("The verified creation step has no exact output identity.");
-        var key = value.GetString()!;
+        return ValidateCreated(value.GetString()!, evidence.RootElement.TryGetProperty("CreatedOsDiskId", out var os)
+            && os.ValueKind == JsonValueKind.String ? os.GetString() : null);
+
+        string ValidateCreated(string key, string? createdOsDiskId)
+        {
         var expectedType = mapping.Kind switch { StorageObjectKind.StoragePool => FactObjectType.StoragePool,
             StorageObjectKind.VirtualDisk => FactObjectType.VirtualDisk, StorageObjectKind.StorageTier => FactObjectType.StorageTier,
             _ => throw new InvalidDataException("This creation output mapping kind is not supported.") };
@@ -198,8 +204,7 @@ public sealed class RealStructureResultSynchronization
         if (!exists) throw new InvalidDataException("The verified output has the wrong kind or parent.");
         if (mapping.Kind == StorageObjectKind.VirtualDisk)
         {
-            if (!evidence.RootElement.TryGetProperty("CreatedOsDiskId", out var osValue)
-                || osValue.ValueKind != JsonValueKind.String || osValue.GetString() is not { Length: > 0 } osId
+            if (createdOsDiskId is not { Length: > 0 } osId
                 || fresh.SourceFacts!.Objects.SingleOrDefault(item => item.Id == osId) is not { HasReliableIdentity: true }
                 || fresh.Snapshot.OsDisks.Count(item => item.VirtualDiskStableId == key) != 1
                 || !fresh.Snapshot.OsDisks.Any(item => item.StableId == osId && item.VirtualDiskStableId == key))
@@ -218,6 +223,7 @@ public sealed class RealStructureResultSynchronization
                 throw new InvalidDataException("The verified pool belongs to a different complete physical member set.");
         }
         return key;
+        }
     }
 
     private static void RemapCreatedPool(SimulationEditingSession session, string temporaryId, string realId)

@@ -1,8 +1,10 @@
 # WinPool 验证与验收
 
-2026-10-18：**当前代码V0.61；最新两份独立全量验收记录均为2499 passed／1 failed／4 skip，尚未全部闭环。** 唯一[V0.62活动Plan](Plan.md)已编制待批准，本次只读核对已有汇总及源码，未重新构建／测试／启动产品。三份验收的方法与边界见[Review索引](Review/README.md)，本地[汇总A](../artifacts/acceptance-20261018/automated-summary.json)／[汇总B](../artifacts/test-results/acceptance-20261018/acceptance-test-summary.json)可读。1项失败是旧私有字段源码断言；性能残项与最终测试／候选build绑定另列Plan，不能据此说UAC产品必坏。
+2026-10-18：**源码已推进V0.62／0.6.2.0，已批准计划进入W6本机验收。** 升版前App／Agent集成构建为0警告／0错误；最终完整门、实盘批次与候选验收尚未执行。原始构建、TRX与性能证据集中于[本次目录](../artifacts/test-results/v062/)；失败修复后按影响范围补验，局部通过不等于V0.62完成。
 
-V0.61的R1–R3修复及当次候选开发机验收继续作为历史有效证据：[修复验收](#v061-fixes)为706项受影响回归，累计2500是沿用旧结果的汇总，不替代上述后来完整门；[阶段计划](Archive/20261018-v061-completed/Plan.md)已归档。[当前候选](#v061-candidate)未公开发布，V0.62尚无构建／测试结果。
+实施前最新两份独立全量验收记录均为2499 passed／1 failed／4 skip。方法与边界见[Review索引](Review/README.md)，本地[汇总A](../artifacts/acceptance-20261018/automated-summary.json)／[汇总B](../artifacts/test-results/acceptance-20261018/acceptance-test-summary.json)可读。唯一失败是旧私有字段源码断言；其历史结论不代表本次新二进制已验证。
+
+V0.61的R1–R3修复及当次候选开发机验收继续作为历史有效证据：[修复验收](#v061-fixes)为706项受影响回归，累计2500是沿用旧结果的汇总，不替代上述后来完整门；[阶段计划](Archive/20261018-v061-completed/Plan.md)已归档。[V0.61候选](#v061-candidate)未公开发布，不作为V0.62候选。
 
 ## 最小充分验证
 

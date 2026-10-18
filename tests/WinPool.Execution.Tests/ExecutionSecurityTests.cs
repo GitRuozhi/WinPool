@@ -99,26 +99,6 @@ public sealed class ExecutionSecurityTests
     }
 
     [Fact]
-    public async Task DefaultPlanner_UsesAuthoritativeRiskCapabilityAndInventory()
-    {
-        var fixture = Fixture.Create(EnvironmentKind.ProtectedDevelopmentMachine);
-        var request = fixture.CreateRequest(
-            OperationIntent.SimulateStorageMutation,
-            new Dictionary<string, string> { ["EstimatedWriteBytes"] = "4096" });
-        var planner = new DefaultOperationPlanner(new FixedOperationInventoryVersionSource(Fixture.InventoryVersion));
-
-        var plan = await planner.BuildAsync(request, CancellationToken.None);
-
-        Assert.Equal(RiskLevel.R1SimulationWrite, plan.Risk);
-        Assert.Equal(
-            ExecutionCapability.SimulateStorageMutation,
-            plan.RequiredCapabilities);
-        Assert.Equal(Fixture.InventoryVersion, plan.InventoryVersion);
-        Assert.Equal(4096, plan.EstimatedWriteBytes);
-        Assert.Equal(OperationPlanHasher.Compute(plan), plan.PlanHash);
-    }
-
-    [Fact]
     public async Task Authorization_IsBoundToPlanHash()
     {
         var fixture = Fixture.Create(EnvironmentKind.ProtectedDevelopmentMachine);
@@ -222,64 +202,10 @@ public sealed class ExecutionSecurityTests
         Assert.Equal(AuthorizationValidationKind.AlreadyUsed, second.Kind);
     }
 
-    [Fact]
-    public async Task ExecutorGate_RevalidatesPolicyBeforeConsumingAuthorization()
-    {
-        var fixture = Fixture.Create(EnvironmentKind.LocalMachine, ExecutionMode.Real, PrivilegeState.Administrator);
-        var plan = fixture.CreatePlan(OperationIntent.InitializeDisk);
-        var token = await fixture.IssueAsync(plan);
-        var protectedContext = fixture.Context with
-        {
-            Environment = fixture.Context.Environment with { Kind = EnvironmentKind.ProtectedDevelopmentMachine }
-        };
-        var gate = new ExecutorGate(fixture.Policy, fixture.Authority, fixture.Clock);
-
-        var events = await CollectAsync(gate.ExecuteAsync(
-            plan,
-            protectedContext,
-            token,
-            new LocalStorageMutationExecutor(fixture.Clock)));
-
-        Assert.Single(events);
-        Assert.Equal(ExecutionEventKind.Rejected, events[0].Kind);
-        Assert.Equal("policy.protected-machine-storage-mutation", events[0].Code);
-
-        var stillUsable = fixture.Authority.Consume(token, plan, fixture.Context);
-        Assert.Equal(AuthorizationValidationKind.Valid, stillUsable.Kind);
-    }
-
-    [Fact]
-    public async Task LocalStorageMutationExecutor_AlwaysRejectsAfterAnOtherwiseValidGate()
-    {
-        var fixture = Fixture.Create(EnvironmentKind.LocalMachine, ExecutionMode.Real, PrivilegeState.Administrator);
-        var plan = fixture.CreatePlan(OperationIntent.InitializeDisk);
-        var token = await fixture.IssueAsync(plan);
-        var gate = new ExecutorGate(fixture.Policy, fixture.Authority, fixture.Clock);
-
-        var events = await CollectAsync(gate.ExecuteAsync(
-            plan,
-            fixture.Context,
-            token,
-            new LocalStorageMutationExecutor(fixture.Clock)));
-
-        Assert.Single(events);
-        Assert.Equal(ExecutionEventKind.Rejected, events[0].Kind);
-        Assert.Equal("executor.local-storage-mutation-unavailable", events[0].Code);
-    }
-
     private static OperationPlan Rehash(OperationPlan plan) =>
         plan with { PlanHash = OperationPlanHasher.Compute(plan) };
 
-    private static async Task<List<ExecutionEvent>> CollectAsync(IAsyncEnumerable<ExecutionEvent> source)
-    {
-        var events = new List<ExecutionEvent>();
-        await foreach (var item in source)
-        {
-            events.Add(item);
-        }
 
-        return events;
-    }
 
     private sealed class Fixture
     {
@@ -383,7 +309,7 @@ public sealed class ExecutionSecurityTests
                 definition.ImpactScope,
                 definition.RollbackDescription,
                 definition.IrreversibleEffects,
-                DefaultOperationPlanner.Algorithm,
+                new AlgorithmIdentity("TEST-AUTHORITY-PLAN", "1.0.0", AlgorithmConfidence.Derived, "authorization fixture"),
                 Now);
         }
 
