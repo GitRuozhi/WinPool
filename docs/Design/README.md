@@ -7,6 +7,7 @@
 | 方案 | 当前定位 | 重新排期前核对 |
 | --- | --- | --- |
 | [便携版与安装版交付方案](WinPool-Distribution-Plan.md) | 便携zip已随V0.61完成并验收；安装版仍未排期 | 两种交付方式功能一致；安装版再核对身份、签名与安装流程，不阻塞首稿 |
+| [PowerShell调用与开发模式备忘](WinPool-PowerShell-Future-Design.md) | 用户保留的未来方向，未排期；不属于V0.62或当前活动Plan | 多线程调用、PowerShell 7、开发模式和与pwsh对话；具体方案及权限边界届时再定 |
 
 已被后续界面实现取代的尺寸盘点、已完成的通知方案原样移至[文档归档](../Archive/20261017-v061-document-baseline/README.md)。旧待验范围保持原记录，不重新作为V0.61任务；当前控件／样式与规则源码入口见[专项参考](../Reference/README.md)。
 
