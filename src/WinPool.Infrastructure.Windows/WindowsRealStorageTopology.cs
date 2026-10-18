@@ -1026,6 +1026,7 @@ public sealed class WindowsRealStorageTopologyReader
         if (document.SystemId != scope.SystemId || document.SourceFacts is not { IsMerged: false, ScopedCollection: { Complete: true } collected }
             || collected.Scope.SystemId != scope.SystemId || collected.Scope.OperationId != scope.OperationId
             || collected.Scope.StepId != scope.StepId || collected.Scope.Generation != scope.Generation
+            || scope.DiscoverProviderCache && !collected.Scope.DiscoverProviderCache
             || !WindowsRealStorageReadProfile.Covers(collected.Scope.EvidenceProfile, scope.EvidenceProfile)
             || !collected.Scope.Targets.SequenceEqual(scope.Targets))
             throw new InvalidDataException("Real scoped preflight requires fresh complete evidence for the requested operation and targets.");

@@ -24,7 +24,8 @@ public sealed class WindowsPowerShellRunner : IReadOnlyInventoryCommandRunner, I
     {
         var started = Stopwatch.GetTimestamp();
         var result = await host.QueryAsync(WindowsPowerShellQuery.Inventory,
-            new { IncludeHardware = purpose == CollectionPurpose.Hardware, DiscoverProviderCache = discoverProviderCache,
+            new { IncludeHardware = purpose == CollectionPurpose.Hardware,
+                DiscoverProviderCache = discoverProviderCache || scope?.DiscoverProviderCache == true,
                 ScopeLocators = scope?.BeforeLocators, ComponentLocators = scope?.BeforeComponentLocators,
                 EvidenceFields = WindowsRealStorageReadProfile.ForId(scope?.EvidenceProfile)?.Fields }, token).ConfigureAwait(false);
         return new(0, result, "", Stopwatch.GetElapsedTime(started));

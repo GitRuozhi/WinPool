@@ -14,6 +14,8 @@ public sealed record StorageInventoryScope(SystemId SystemId, OperationId Operat
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? EvidenceProfile { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool DiscoverProviderCache { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<StorageInventoryLocator>? BeforeComponentLocators { get; init; }
     public string Key => OperationId.Value.ToString("N") + ":" + (StepId ?? "result");
@@ -34,6 +36,8 @@ public sealed record StorageInventoryScope(SystemId SystemId, OperationId Operat
                 throw new InvalidDataException("The inventory scope contains an invalid provider locator.");
         if (EvidenceProfile is not (null or "command-required-v1" or "command-required-resize-v1" or "command-metadata-v1" or "command-os-v1" or "command-os-resize-v1"))
             throw new InvalidDataException("The inventory evidence profile is unsupported.");
+        if (DiscoverProviderCache && Targets.Any(target => target.Kind != StorageObjectKind.PhysicalDisk))
+            throw new InvalidDataException("Provider-cache discovery requires exact physical member targets.");
         if (BeforeComponentLocators is { } component)
             foreach (var locator in component)
                 if (locator.Target.System != SystemId || !BeforeObjectIds.Contains(locator.Target.ProviderKey)

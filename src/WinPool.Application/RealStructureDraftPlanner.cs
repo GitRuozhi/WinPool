@@ -468,7 +468,8 @@ public static class RealStructureDraftPlanner
             blocks.Add(T("磁盘、分区或卷的独立更改不属于结构草稿；请使用磁盘分区页。", "Independent disk, partition or volume changes belong in the disk partition editor."));
         if (after.PhysicalDisks.Count != before.PhysicalDisks.Count
             || after.PhysicalDisks.Any(disk => before.PhysicalDisks.SingleOrDefault(old => old.StableId == disk.StableId) is not { } old
-                || (disk with { PoolStableId = old.PoolStableId, CanPool = old.CanPool, Usage = old.Usage }) != old
+                || (disk with { PoolStableId = old.PoolStableId, CanPool = old.CanPool,
+                    CannotPoolReason = old.CannotPoolReason, Usage = old.Usage }) != old
                 || PhysicalDiskUsage.Normalize(disk.Usage) != PhysicalDiskUsage.Normalize(old.Usage)
                     && !allowedUsageEdits.Contains(disk.StableId)
                     && !(disk.PoolStableId != old.PoolStableId

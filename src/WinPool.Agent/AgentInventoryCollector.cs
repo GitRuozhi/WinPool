@@ -157,7 +157,8 @@ internal sealed class AgentInventoryCollector(
                 : await provider.CollectLocalAsync(cancellationToken).ConfigureAwait(false);
         if (document.Kind != StorageSystemKind.Local || document.SourceFacts is not { IsSimulation: false, IsMerged: false } facts
             || facts.SystemId != document.SystemId || !StringComparer.OrdinalIgnoreCase.Equals(
-                document.Snapshot.Computer.Name, Environment.MachineName))
+                document.Snapshot.Computer.Name, Environment.MachineName)
+            || scope?.DiscoverProviderCache == true && facts.ScopedCollection?.Scope.DiscoverProviderCache != true)
             throw new InvalidDataException("The Windows collector returned inconsistent local raw facts.");
         return document with
         {
@@ -174,6 +175,7 @@ internal sealed class AgentInventoryCollector(
     private static bool Covers(CollectionPurpose existingPurpose, StorageInventoryScope? existing,
         CollectionPurpose purpose, StorageInventoryScope? requested) =>
         (existingPurpose == CollectionPurpose.Hardware || purpose == CollectionPurpose.Storage)
+        && (requested?.DiscoverProviderCache != true || existing?.DiscoverProviderCache == true)
         && (existing is null || requested is not null && existing.SystemId == requested.SystemId
             && WindowsRealStorageReadProfile.Covers(existing.EvidenceProfile, requested.EvidenceProfile)
             && existing.BeforeObjectIds.Intersect(requested.BeforeObjectIds, StringComparer.Ordinal).Count() == requested.BeforeObjectIds.Count
@@ -181,6 +183,7 @@ internal sealed class AgentInventoryCollector(
 
     private static bool CoversVerified(VerifiedBatch batch, StorageInventoryScope? scope)
     {
+        if (scope?.DiscoverProviderCache == true && batch.Scope?.DiscoverProviderCache != true) return false;
         if (batch.Scope is null) return true;
         if (scope is null || batch.Scope.SystemId != scope.SystemId
             || !WindowsRealStorageReadProfile.Covers(batch.Scope.EvidenceProfile, scope.EvidenceProfile)) return false;

@@ -84,6 +84,10 @@ public sealed record WindowsStorageCommandResult(
     /// <summary>The exact fixed host request returned its final frame; this does not verify the storage postcondition.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PowerShellHostCall? CompletedHostCall { get; init; }
+
+    /// <summary>Optional cmdlet-boundary diagnostics; never a storage or request-completion proof.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? WriteCmdletTimings { get; init; }
 }
 
 /// <summary>Storage method status is distinct from MI native status or HRESULT. Never infer capacity from translated text.</summary>

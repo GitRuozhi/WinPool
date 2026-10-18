@@ -15,6 +15,15 @@ internal static class WindowsRealStoragePowerShellScript
         $outputObject = $null
         $tieredCreationInput = $null
         $capabilityEvidence = $null
+        $writeTimings = [System.Collections.Generic.List[object]]::new()
+
+        function Add-WriteTiming([string]$cmdlet, [long]$started, [long]$returned, [DateTimeOffset]$startedAtUtc) {
+            $writeTimings.Add([ordered]@{
+                Cmdlet = $cmdlet; StartedTimestamp = $started; ReturnedTimestamp = $returned;
+                TimestampFrequency = [Diagnostics.Stopwatch]::Frequency;
+                StartedAtUtc = $startedAtUtc.ToString('o'); ReturnedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+            })
+        }
 
         function Assert-Exact($actual, $expected, $reason) {
             if ([string]::IsNullOrWhiteSpace([string]$expected) -or
@@ -354,7 +363,14 @@ internal static class WindowsRealStoragePowerShellScript
                     $disk = Exact-Disk $t
                     if (-not [bool]$c.Online -and ($disk.IsBoot -or $disk.IsSystem)) { throw 'protected-os-disk' }
                     $invoked = $true
-                    Set-Disk -InputObject $disk -IsOffline (-not [bool]$c.Online) -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Set-Disk -InputObject $disk -IsOffline (-not [bool]$c.Online) -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Set-Disk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $disk
                     break
                 }
@@ -363,14 +379,28 @@ internal static class WindowsRealStoragePowerShellScript
                     if ($disk.PartitionStyle -ne 'RAW' -or $disk.IsBoot -or $disk.IsSystem -or $disk.IsReadOnly -or $disk.IsOffline -or
                         @(Get-ExactDiskPartitions $disk).Count -ne 0) { throw 'disk-not-raw-empty' }
                     $invoked = $true
-                    $outputObject = Initialize-Disk -InputObject $disk -PartitionStyle GPT -PassThru -ErrorAction Stop
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        $outputObject = Initialize-Disk -InputObject $disk -PartitionStyle GPT -PassThru -ErrorAction Stop
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Initialize-Disk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     break
                 }
                 'ClearDisk' {
                     $disk = Exact-Disk $t
                     if ($disk.IsBoot -or $disk.IsSystem -or $disk.IsReadOnly -or $disk.IsOffline -or [bool]$c.RemoveOem) { throw 'disk-clear-protected' }
                     $invoked = $true
-                    Clear-Disk -InputObject $disk -RemoveData -Confirm:$false -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Clear-Disk -InputObject $disk -RemoveData -Confirm:$false -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Clear-Disk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $disk
                     break
                 }
@@ -393,14 +423,28 @@ internal static class WindowsRealStoragePowerShellScript
                         default { throw 'partition-role-unsupported' }
                     }
                     $invoked = $true
-                    $outputObject = New-Partition -InputObject $disk -Offset $offset -Size $size -GptType $gpt -ErrorAction Stop
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        $outputObject = New-Partition -InputObject $disk -Offset $offset -Size $size -GptType $gpt -ErrorAction Stop
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'New-Partition' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     break
                 }
                 'DeletePartition' {
                     $partition = Exact-Partition $t
                     if ($partition.IsBoot -or $partition.IsSystem) { throw 'protected-partition' }
                     $invoked = $true
-                    Remove-Partition -InputObject $partition -Confirm:$false -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Remove-Partition -InputObject $partition -Confirm:$false -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Remove-Partition' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $partition
                     break
                 }
@@ -423,7 +467,14 @@ internal static class WindowsRealStoragePowerShellScript
                     $range = Get-PartitionSupportedSize -InputObject $partition -ErrorAction Stop
                     if ($size -lt [uint64]$range.SizeMin -or $size -gt [uint64]$range.SizeMax) { throw 'partition-size-unsupported' }
                     $invoked = $true
-                    Resize-Partition -InputObject $partition -Size $size -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Resize-Partition -InputObject $partition -Size $size -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Resize-Partition' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $partition
                     break
                 }
@@ -450,7 +501,14 @@ internal static class WindowsRealStoragePowerShellScript
                     $formatArgs = @{ Partition=$partition; FileSystem=$fs; AllocationUnitSize=$cluster; Full=[bool]$c.Full; ErrorAction='Stop' }
                     if ($null -ne $c.Label) { $formatArgs.NewFileSystemLabel = [string]$c.Label }
                     $invoked = $true
-                    $outputObject = Format-Volume @formatArgs
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        $outputObject = Format-Volume @formatArgs
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Format-Volume' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     break
                 }
                 'SetDriveLetter' {
@@ -478,11 +536,32 @@ internal static class WindowsRealStoragePowerShellScript
                     }
                     $invoked = $true
                     if ($old.Length -eq 0) {
-                        Add-PartitionAccessPath -InputObject $partition -AccessPath ($new + ':') -ErrorAction Stop | Out-Null
+                        $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                        $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try {
+                            Add-PartitionAccessPath -InputObject $partition -AccessPath ($new + ':') -ErrorAction Stop | Out-Null
+                        } finally {
+                            $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                            try { Add-WriteTiming 'Add-PartitionAccessPath' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                        }
                     } elseif ($new.Length -eq 0) {
-                        Remove-PartitionAccessPath -InputObject $partition -AccessPath ($old + ':') -Confirm:$false -ErrorAction Stop | Out-Null
+                        $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                        $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try {
+                            Remove-PartitionAccessPath -InputObject $partition -AccessPath ($old + ':') -Confirm:$false -ErrorAction Stop | Out-Null
+                        } finally {
+                            $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                            try { Add-WriteTiming 'Remove-PartitionAccessPath' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                        }
                     } else {
-                        Set-Partition -InputObject $partition -NewDriveLetter ([char]$new) -ErrorAction Stop | Out-Null
+                        $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                        $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try {
+                            Set-Partition -InputObject $partition -NewDriveLetter ([char]$new) -ErrorAction Stop | Out-Null
+                        } finally {
+                            $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                            try { Add-WriteTiming 'Set-Partition' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                        }
                     }
                     $outputObject = $partition
                     break
@@ -490,7 +569,14 @@ internal static class WindowsRealStoragePowerShellScript
                 'RenameVolume' {
                     $volume = Exact-Volume $t
                     $invoked = $true
-                    Set-Volume -InputObject $volume -NewFileSystemLabel ([string]$c.Label) -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Set-Volume -InputObject $volume -NewFileSystemLabel ([string]$c.Label) -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Set-Volume' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $volume
                     break
                 }
@@ -509,7 +595,14 @@ internal static class WindowsRealStoragePowerShellScript
                     }
                     if (@($members | Where-Object { -not $_.CanPool }).Count -ne 0) { throw 'physical-disk-cannot-pool' }
                     $invoked = $true
-                    $outputObject = New-StoragePool -InputObject $subsystem -FriendlyName ([string]$c.Name) -PhysicalDisks $members -ErrorAction Stop
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        $outputObject = New-StoragePool -InputObject $subsystem -FriendlyName ([string]$c.Name) -PhysicalDisks $members -ErrorAction Stop
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'New-StoragePool' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     break
                 }
                 'SetPhysicalDiskUsage' {
@@ -524,7 +617,14 @@ internal static class WindowsRealStoragePowerShellScript
                     if ($usage -eq 'Hot Spare') { $usage = 'HotSpare' }
                     if ($usage -notin @('AutoSelect','HotSpare','Retired')) { throw 'usage-invalid' }
                     $invoked = $true
-                    Set-PhysicalDisk -InputObject $physical -Usage $usage -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Set-PhysicalDisk -InputObject $physical -Usage $usage -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Set-PhysicalDisk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $physical
                     break
                 }
@@ -533,14 +633,28 @@ internal static class WindowsRealStoragePowerShellScript
                     if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0 -or
                         @(Get-StorageTier -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'pool-still-has-children' }
                     $invoked = $true
-                    Remove-StoragePool -InputObject $pool -Confirm:$false -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Remove-StoragePool -InputObject $pool -Confirm:$false -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Remove-StoragePool' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $pool
                     break
                 }
                 'RenamePool' {
                     $pool = Exact-Pool $t
                     $invoked = $true
-                    Set-StoragePool -InputObject $pool -NewFriendlyName ([string]$c.Name) -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Set-StoragePool -InputObject $pool -NewFriendlyName ([string]$c.Name) -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Set-StoragePool' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $pool
                     break
                 }
@@ -552,7 +666,14 @@ internal static class WindowsRealStoragePowerShellScript
                     $arguments = Layout-Arguments $layout
                     if ([bool](Read-Property $t 'MaximumCapacityAttempt') -and [long]$c.SizeBytes % 1073741824 -ne 0) { throw 'maximum-candidate-grid-invalid' }
                     $invoked = $true
-                    $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -Size ([uint64]$c.SizeBytes) -ProvisioningType Fixed @arguments -ErrorAction Stop
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -Size ([uint64]$c.SizeBytes) -ProvisioningType Fixed @arguments -ErrorAction Stop
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'New-VirtualDisk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     break
                 }
                 'CreateTieredVirtualDisk' {
@@ -625,13 +746,27 @@ internal static class WindowsRealStoragePowerShellScript
                         if ($redundancy.Count -eq 1) { $sharedArguments.PhysicalDiskRedundancy = [uint16]$redundancy[0] }
                     }
                     $invoked = $true
-                    $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -StorageTiers $boundTemplates -StorageTierSizes $boundSizes -ProvisioningType Fixed @sharedArguments -ErrorAction Stop
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        $outputObject = New-VirtualDisk -InputObject $pool -FriendlyName ([string]$c.Name) -StorageTiers $boundTemplates -StorageTierSizes $boundSizes -ProvisioningType Fixed @sharedArguments -ErrorAction Stop
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'New-VirtualDisk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     break
                 }
                 'DeleteVirtualDisk' {
                     $vd = Exact-VirtualDisk $t
                     $invoked = $true
-                    Remove-VirtualDisk -InputObject $vd -Confirm:$false -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Remove-VirtualDisk -InputObject $vd -Confirm:$false -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Remove-VirtualDisk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $vd
                     break
                 }
@@ -640,14 +775,28 @@ internal static class WindowsRealStoragePowerShellScript
                     Require-MaximumGrow $vd ([long]$c.SizeBytes) $t
                     if (@(Get-StorageTier -VirtualDisk $vd -ErrorAction Stop).Count -ne 0) { throw 'ordinary-resize-has-tiers' }
                     $invoked = $true
-                    Resize-VirtualDisk -InputObject $vd -Size ([uint64]$c.SizeBytes) -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Resize-VirtualDisk -InputObject $vd -Size ([uint64]$c.SizeBytes) -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Resize-VirtualDisk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $vd
                     break
                 }
                 'RenameVirtualDisk' {
                     $vd = Exact-VirtualDisk $t
                     $invoked = $true
-                    Set-VirtualDisk -InputObject $vd -NewFriendlyName ([string]$c.Name) -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Set-VirtualDisk -InputObject $vd -NewFriendlyName ([string]$c.Name) -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Set-VirtualDisk' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $vd
                     break
                 }
@@ -661,7 +810,14 @@ internal static class WindowsRealStoragePowerShellScript
                         @(Get-StorageTier -StoragePool $pool -ErrorAction Stop | Where-Object { [string]$_.MediaType -eq $media }).Count -ne 0 -or
                         @(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'tier-layout-not-enabled' }
                     $invoked = $true
-                    $outputObject = New-StorageTier -InputObject $pool -FriendlyName ([string]$c.Name) -MediaType $media @arguments -ErrorAction Stop
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        $outputObject = New-StorageTier -InputObject $pool -FriendlyName ([string]$c.Name) -MediaType $media @arguments -ErrorAction Stop
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'New-StorageTier' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     break
                 }
                 'DeleteTier' {
@@ -673,7 +829,14 @@ internal static class WindowsRealStoragePowerShellScript
                     }) 'tier-pool-not-unique'
                     if (@(Get-VirtualDisk -StoragePool $pool -ErrorAction Stop).Count -ne 0) { throw 'remove-pool-virtual-disk-before-template' }
                     $invoked = $true
-                    Remove-StorageTier -InputObject $tier -Confirm:$false -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Remove-StorageTier -InputObject $tier -Confirm:$false -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Remove-StorageTier' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $tier
                     break
                 }
@@ -684,7 +847,14 @@ internal static class WindowsRealStoragePowerShellScript
                     $owner = Assert-One @(Get-VirtualDisk -StorageTier $tier -ErrorAction Stop) 'resize-tier-owner-not-unique'
                     Require-MaximumRawDisk $owner
                     $invoked = $true
-                    Resize-StorageTier -InputObject $tier -Size ([uint64]$c.SizeBytes) -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Resize-StorageTier -InputObject $tier -Size ([uint64]$c.SizeBytes) -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Resize-StorageTier' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $tier
                     break
                 }
@@ -692,7 +862,14 @@ internal static class WindowsRealStoragePowerShellScript
                     $tier = Exact-Tier $t
                     Require-TierCapability $t 'SupportsStorageTierFriendlyNameModification' ([ref]$capabilityEvidence)
                     $invoked = $true
-                    Set-StorageTier -InputObject $tier -NewFriendlyName ([string]$c.Name) -ErrorAction Stop | Out-Null
+                    $writeStartedAtUtc = [DateTimeOffset]::UtcNow
+                    $writeStarted = [Diagnostics.Stopwatch]::GetTimestamp()
+                    try {
+                        Set-StorageTier -InputObject $tier -NewFriendlyName ([string]$c.Name) -ErrorAction Stop | Out-Null
+                    } finally {
+                        $writeReturned = [Diagnostics.Stopwatch]::GetTimestamp()
+                        try { Add-WriteTiming 'Set-StorageTier' $writeStarted $writeReturned $writeStartedAtUtc } catch { }
+                    }
                     $outputObject = $tier
                     break
                 }
@@ -741,6 +918,9 @@ internal static class WindowsRealStoragePowerShellScript
                 TieredCreationInput = $tieredCreationInput; ProviderFailure = $providerFailure
             }
         }
+        try {
+            if ($writeTimings.Count -gt 0) { $result['WriteCmdletTimings'] = $writeTimings.ToArray() }
+        } catch { } # Optional diagnostics cannot replace a provider result.
         $result | ConvertTo-Json -Compress -Depth 8
         """;
 }

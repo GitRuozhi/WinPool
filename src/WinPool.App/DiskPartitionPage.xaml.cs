@@ -12,6 +12,7 @@ using WinPool_App.Controls;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
+using WinPool.Infrastructure.Windows;
 using SimulationEditKind = WinPool.Application.SimulationEditKind;
 using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
 
@@ -3000,7 +3001,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         if (ViewModel.IsRealOperationBusy || ViewModel.RealOperationSubmission.IsBlocked)
             return false;
 
+        var editStarted = Stopwatch.GetTimestamp();
+        var submittedSession = EditingSession;
+        var documentId = ViewModel.ActiveDocument.Id;
+        var revision = ViewModel.ActiveDocument.Revision;
         using var activity = BeginPageActivity(Text("正在应用分区修改", "Applying partition changes"));
+        StorageOperationTiming.Record("simulation.edit.feedback", editStarted,
+            stepId: documentId, scope: "partition-editor", generation: revision);
         WinPool.Application.ApplicationResult<WinPool.Application.SimulationEditReceipt> result;
         try
         {
@@ -3055,6 +3062,10 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             "disk-partition-editor",
             "partition.submit.completed");
         RefreshAll();
+        if (IsLoaded && ReferenceEquals(EditingSession, submittedSession)
+            && ViewModel.ActiveDocument.Id == documentId)
+            StorageOperationTiming.Record("simulation.edit.editor-applied", editStarted, result.Value.OperationId,
+                documentId, scope: "partition-editor", generation: result.Value.BeforeRevision);
         return true;
     }
 }

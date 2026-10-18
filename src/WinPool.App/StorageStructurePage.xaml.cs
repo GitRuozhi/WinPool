@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -8,6 +9,7 @@ using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
+using WinPool.Infrastructure.Windows;
 using SimulationEditKind = WinPool.Application.SimulationEditKind;
 using SimulationEditRequest = WinPool.Application.SimulationEditRequest;
 
@@ -798,6 +800,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private async Task CommitNameAsync(TextBox field)
     {
+        var editStarted = Stopwatch.GetTimestamp();
         if (_filling || !CanEditDraft)
         {
             return;
@@ -857,6 +860,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         var namingSession = EditingSession;
         var namingSystemId = namingSession.SystemId;
+        var namingDocumentId = ViewModel.ActiveDocument.Id;
+        var namingRevision = ViewModel.ActiveDocument.Revision;
+        SimulationEditReceipt? simulationReceipt = null;
         _renameInProgress = true;
         try
         {
@@ -896,13 +902,12 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 {
                     if (ViewModel.SystemCatalog.Systems.SingleOrDefault(document => document.SystemId == namingSystemId) is { } renamedSystem)
                         namingSession.AcceptRename(renamedSystem, targetId);
-                    if (!ReferenceEquals(EditingSession, namingSession) || ViewModel.SelectedSystem.SystemId != namingSystemId) return;
-                    RefreshTopology();
-                    UpdateButtonState();
                 }
                 return;
             }
             using var activity = BeginPageActivity(Text("正在提交名称修改", "Saving name change"));
+            StorageOperationTiming.Record("simulation.edit.feedback", editStarted,
+                stepId: namingDocumentId, scope: "structure-editor", generation: namingRevision);
             ApplicationResult<SimulationEditReceipt> result;
             try
             {
@@ -943,14 +948,18 @@ public sealed partial class StorageStructurePage : EditorPageBase
                 namingSession.AcceptRename(savedSystem, targetId);
             if (!ReferenceEquals(EditingSession, namingSession) || ViewModel.SelectedSystem.SystemId != namingSystemId) return;
             _currentPlan = null;
-            RefreshTopology();
-            UpdateButtonState();
+            simulationReceipt = result.Value;
         }
         finally
         {
             namingSession.RenameInProgress = false;
             RefreshTopology();
             UpdateButtonState();
+            // The bindings and editor state have been applied; deferred XAML rendering is not measured here.
+            if (simulationReceipt is not null && IsLoaded && ReferenceEquals(EditingSession, namingSession)
+                && ViewModel.SelectedSystem.SystemId == namingSystemId)
+                StorageOperationTiming.Record("simulation.edit.editor-applied", editStarted, simulationReceipt.OperationId,
+                    namingDocumentId, scope: "structure-editor", generation: simulationReceipt.BeforeRevision);
         }
     }
 
@@ -4524,6 +4533,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         if (!CanEditDraft || !IsCurrentSubmission()) return;
 
+        var editStarted = Stopwatch.GetTimestamp();
+        var documentId = ViewModel.ActiveDocument.Id;
+        var revision = ViewModel.ActiveDocument.Revision;
         var plan = EditingSession.Prepare(planned);
         if (plan.IsEmpty)
         {
@@ -4534,6 +4546,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         using var activity = BeginPageActivity(Text("正在应用结构修改", "Applying structural changes"));
+        StorageOperationTiming.Record("simulation.edit.feedback", editStarted,
+            stepId: documentId, scope: "structure-editor", generation: revision);
         var applied = await ViewModel.ApplySimulationPlanAsync(plan);
         if (!IsCurrentSubmission())
         {
@@ -4568,6 +4582,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Text("结构修改已应用到本地模拟内容，正在后台保存。", "Structural changes were applied locally and queued for background saving."),
             "storage-structure-editor",
             "structure.apply.completed");
+        if (applied.Value is not null && IsLoaded && IsCurrentSubmission())
+            StorageOperationTiming.Record("simulation.edit.editor-applied", editStarted, applied.Value.OperationId,
+                documentId, scope: "structure-editor", generation: applied.Value.BeforeRevision);
     }
 
     private Task HandleFailedApplyAsync(

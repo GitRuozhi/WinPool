@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using WinPool.Application;
 using WinPool.Domain;
 
@@ -38,6 +39,7 @@ public sealed class SimulationEditCoordinator(
         StorageSystemDocument document, SimulationDraftPlan plan, string commitId,
         bool singleEdit, CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         var correlation = CorrelationId.New();
         if (document.Kind != StorageSystemKind.Simulation)
             return Failure(ApplicationStatus.Rejected, correlation, "simulation.local-read-only", "Local storage systems are read-only.");
@@ -54,6 +56,9 @@ public sealed class SimulationEditCoordinator(
         if (singleEdit && (unit is null || unit.Kind is StorageUnitKind.SyntheticStoragePool or StorageUnitKind.SyntheticStorageTier))
             return Failure(ApplicationStatus.Rejected, correlation, "simulation.target-missing", "The selected simulation target no longer exists.");
 
+        var operationId = new OperationId(Guid.ParseExact(commitId, "N"));
+        StorageOperationTiming.Record("simulation.edit.accepted", started, operationId,
+            document.Id, scope: "simulation", generation: document.Revision);
         var commitStarted = false;
         try
         {
@@ -64,9 +69,21 @@ public sealed class SimulationEditCoordinator(
                 applied = new(true, preview, string.Empty,
                     plan.DisplayItems.SelectMany(item => item.CommandPreview).ToArray());
             else
-                applied = await Task.Run(() => singleEdit
-                    ? simulationEditor.Apply(document, plan.Steps[0])
-                    : simulationEditor.ApplyPlan(document, plan), cancellationToken);
+                applied = await Task.Run(() =>
+                {
+                    var reduceStarted = Stopwatch.GetTimestamp();
+                    try
+                    {
+                        return singleEdit
+                            ? simulationEditor.Apply(document, plan.Steps[0])
+                            : simulationEditor.ApplyPlan(document, plan);
+                    }
+                    finally
+                    {
+                        StorageOperationTiming.Record("simulation.edit.reduce", reduceStarted, operationId,
+                            document.Id, scope: "simulation", generation: document.Revision, captureCount: 1);
+                    }
+                }, cancellationToken);
             if (!applied.Succeeded)
                 return Failure(ApplicationStatus.Rejected, correlation, "simulation.plan-rejected", applied.Error);
             var current = currentDocument();
@@ -76,7 +93,16 @@ public sealed class SimulationEditCoordinator(
             var candidate = applied.Document with { Revision = checked(document.Revision + 1) };
             // Reject a non-exportable candidate before publishing local content. The canonical
             // envelope contract is shared with import/export and the durable repository.
-            await Task.Run(() => DocumentPayloadLimits.EncodeExport(candidate), cancellationToken);
+            await Task.Run(() =>
+            {
+                var validateStarted = Stopwatch.GetTimestamp();
+                try { return DocumentPayloadLimits.EncodeExport(candidate); }
+                finally
+                {
+                    StorageOperationTiming.Record("simulation.edit.validate-size", validateStarted, operationId,
+                        document.Id, scope: "simulation", generation: document.Revision);
+                }
+            }, cancellationToken);
             current = currentDocument();
             if (current.Id != document.Id || current.Revision != document.Revision
                 || current.InventoryVersion != document.InventoryVersion)
@@ -84,11 +110,13 @@ public sealed class SimulationEditCoordinator(
             var intent = new SimulationCommitIntent(document.Id, document.Revision, commitId, plan.Steps);
             commitStarted = true;
             await commitDocument(new(candidate, intent), cancellationToken);
+            StorageOperationTiming.Record("simulation.edit.local-ready", started, operationId,
+                document.Id, scope: "simulation", generation: document.Revision);
             var target = unit is null
                 ? new StorageObjectId(document.SystemId, StorageObjectKind.System, document.Snapshot.Computer.StableId)
                 : new StorageObjectId(document.SystemId, MapKind(unit.Kind), unit.StableId);
             return ApplicationResult<SimulationEditReceipt>.Succeeded(new(
-                new OperationId(Guid.ParseExact(commitId, "N")), intent.IntentHash,
+                operationId, intent.IntentHash,
                 document.SystemId, target, document.Revision, candidate.Revision, applied.Commands), correlation);
         }
         catch (OperationCanceledException)

@@ -186,6 +186,7 @@ public sealed partial class AgentRealOperationService
                 resumedLayout = result.Layout;
             }
             var baseline = await readStructureInventory(ct);
+            RequireFullStructureBaseline(baseline, canonical.SystemId);
             if (resumedLayout is not null)
             {
                 var progress = RealAutomaticLayoutProgress.Restore(resumedLayout);
@@ -200,6 +201,26 @@ public sealed partial class AgentRealOperationService
             if (canonical.DraftIntentHash != actualIntentHash)
                 return Reject(request.CorrelationId, "agent.structure.draft_changed",
                     "The live structural targets or parameters differ from the original draft. Refresh and review the draft before confirming.");
+            var poolabilityMembers = draft.Creations.Where(creation => creation.CreatePool)
+                .Select(creation => creation.PhysicalDiskIds.Select(id => new StorageObjectId(canonical.SystemId,
+                    StorageObjectKind.PhysicalDisk, id)).ToArray())
+                .Where(members => NeedsPoolabilityDiscovery(baseline, members)).SelectMany(members => members).Distinct().ToArray();
+            if (poolabilityMembers.Length > 0)
+            {
+                // The scoped observation refreshes provider eligibility only. Freeze a new
+                // complete raw machine baseline, never relabel the scoped result as full.
+                await DiscoverPoolabilityAsync(baseline, poolabilityMembers, new(request.JobId),
+                    "poolability-discovery:prepare", null, machine, ct);
+                baseline = await readStructureInventory(ct);
+                RequireFullStructureBaseline(baseline, canonical.SystemId);
+                editing = BindStructureSession(canonical, baseline);
+                draft = RealStructureDraftPlanner.Build(editing);
+                if (!draft.Preview.CanApply || canonical.DraftIntentHash != RealStructureJobGoal.ComputeDraftIntentHash(editing, draft))
+                    return Reject(request.CorrelationId, "agent.structure.draft_changed",
+                        "The live structural targets or parameters changed during provider-cache discovery. Refresh and review the draft.");
+                if (!HasReturnedPoolableMembers(baseline, poolabilityMembers))
+                    throw new InvalidDataException("The exact RAW members remain non-poolable after one provider-cache discovery.");
+            }
             _ = new RealStructureApplyAuthorization(draft, editing, session.ProductSessionId);
             foreach (var creation in draft.Creations.Where(item => item.CreatePool || item.CreateVirtualDisk || item.CreateTier))
                 foreach (var member in creation.PhysicalDiskIds)
@@ -333,11 +354,18 @@ public sealed partial class AgentRealOperationService
             code = exception.GetType().Name + ": " + exception.Message;
             if (!structureChildren.TryGetValue(job.JobId, out var child))
                 terminal = completed.Count == 0 ? RealOperationState.Failed : RealOperationState.PartiallyCompleted;
-            else if (await plans.GetAsync(child) is { State: PersistedOperationState.Prepared })
+            else if (await plans.GetAsync(child) is { } persistedChild)
             {
-                await plans.TransitionAsync(child, PersistedOperationState.Prepared, PersistedOperationState.Cancelled,
-                    Event(child, ExecutionEventKind.Cancelled, "operation.parent_stopped_before_accept"));
-                terminal = completed.Count == 0 ? RealOperationState.Failed : RealOperationState.PartiallyCompleted;
+                if (persistedChild.State == PersistedOperationState.Prepared)
+                    await plans.TransitionAsync(child, PersistedOperationState.Prepared, PersistedOperationState.Cancelled,
+                        Event(child, ExecutionEventKind.Cancelled, "operation.parent_stopped_before_accept"));
+                // A later read/preparation failure cannot turn a finished child
+                // write into Unknown. Durable pending output mapping below still
+                // retains Unknown when that finished result is not reconciled.
+                if (persistedChild.State is PersistedOperationState.Prepared or PersistedOperationState.Completed
+                    or PersistedOperationState.PartiallyCompleted or PersistedOperationState.Failed
+                    or PersistedOperationState.Cancelled or PersistedOperationState.Rejected)
+                    terminal = completed.Count == 0 ? RealOperationState.Failed : RealOperationState.PartiallyCompleted;
             }
         }
         finally
@@ -393,6 +421,8 @@ public sealed partial class AgentRealOperationService
         var authorization = new RealStructureApplyAuthorization(draft, session, trustedSession.ProductSessionId);
         var topology = new WindowsRealStorageTopology(current, job.MachineBinding, job.CreatedAt);
         var authorizedEvidence = new Dictionary<string, (StorageSystemDocument Document, string? Profile)>(StringComparer.Ordinal);
+        var verifiedClearedMembers = new HashSet<StorageObjectId>();
+        var poolabilityDiscoveries = new HashSet<string>(StringComparer.Ordinal);
         foreach (var members in authorization.PhysicalTargetSets)
         {
             var ids = members.Select(member => member.ProviderKey).ToHashSet(StringComparer.Ordinal);
@@ -632,6 +662,27 @@ public sealed partial class AgentRealOperationService
                         throw new InvalidDataException("The structural evidence refresh belongs to another operation or target closure.");
                 }
                 var oldClosure = EvidenceClosure(raw, members, previousEvidence.Profile);
+                if (proposal.Steps.Any(step => step.Command is CreatePoolCommand)
+                    && members.Any(verifiedClearedMembers.Contains) && NeedsPoolabilityDiscovery(raw, members)
+                    && poolabilityDiscoveries.Add(scopeKey))
+                {
+                    // Compare the ordinary read to the verified clear receipt before
+                    // refreshing, then compare again in that same old profile. Eligibility
+                    // may change; member identity, roles and verified RAW structure may not.
+                    var expected = EvidenceClosure(previousEvidence.Document, members, previousEvidence.Profile);
+                    if (oldClosure.Fingerprint != expected.Fingerprint
+                        || oldClosure.PhysicalMemberFingerprint != expected.PhysicalMemberFingerprint)
+                        throw new InvalidDataException("The verified structural members changed before provider-cache discovery.");
+                    var refreshed = await DiscoverPoolabilityAsync(raw, members, operationId,
+                        "poolability-discovery:verified-clear", WindowsRealStorageReadProfile.CoveringBoth(
+                            previousEvidence.Profile, nextProfile), job.MachineBinding, CancellationToken.None);
+                    var refreshedOld = EvidenceClosure(refreshed, members, previousEvidence.Profile);
+                    if (refreshedOld.Fingerprint != oldClosure.Fingerprint
+                        || refreshedOld.PhysicalMemberFingerprint != oldClosure.PhysicalMemberFingerprint)
+                        throw new InvalidDataException("The verified structural members changed during provider-cache discovery.");
+                    raw = refreshed;
+                    oldClosure = refreshedOld;
+                }
                 var newClosure = EvidenceClosure(raw, members, nextProfile);
                 authorization.RebindEvidenceProfile(proposal, previousEvidence.Profile, oldClosure.Fingerprint,
                     nextProfile, newClosure.Fingerprint, newClosure.PhysicalMemberFingerprint);
@@ -697,6 +748,10 @@ public sealed partial class AgentRealOperationService
                 if (post?.Document is not { SourceFacts.IsMerged: false } rawPostState)
                     throw new InvalidDataException("A verified structural stage must retain its raw post-state evidence.");
                 authorizedEvidence[scopeKey] = (rawPostState, nextProfile);
+                foreach (var clear in proposal.Steps.Select(step => step.Command).OfType<ClearDiskCommand>())
+                    if (clear.Disk.Existing is { } diskId && before.Snapshot.OsDisks.SingleOrDefault(disk => disk.StableId == diskId.ProviderKey)
+                        is { PhysicalDiskStableId: { } physical, VirtualDiskStableId: null })
+                        verifiedClearedMembers.Add(Id(StorageObjectKind.PhysicalDisk, physical));
                 completed.Add(description);
             }
             var remaining = StructureGoal(session, jobId);

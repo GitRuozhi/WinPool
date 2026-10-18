@@ -15,7 +15,7 @@ internal static class EmbeddedStorageInventoryScript
     public static string ForScope(StorageInventoryScope scope, bool discoverProviderCache = false)
     {
         scope.Validate();
-        return Create(CollectionPurpose.Storage, scope, discoverProviderCache);
+        return Create(CollectionPurpose.Storage, scope, discoverProviderCache || scope.DiscoverProviderCache);
     }
 
     private static string Create(CollectionPurpose purpose, StorageInventoryScope? scope, bool discoverProviderCache)

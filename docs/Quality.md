@@ -58,7 +58,11 @@ IPC中间JSON层重新转义导致正文SHA失配的问题已修复，保留原�
 
 完整产品的[MonitorPage实测](../artifacts/test-results/v062/monitor-page-measurement.json)使用20 Hz、两个勾选的有效序列：60秒测量窗中可见260次Poll，均值2.306 ms、最大10.440 ms，0次超过16 ms；158次同revision时图窗复制／重建均为0。隐藏277次Poll，图窗复制、渲染、图元增删均为0；统计到2,136 B其它托管分配，未称整个隐藏回调零分配。[App正常关闭重开](../artifacts/test-results/v062/monitor-page-measure-finished.json)保持Agent 25380及同一session，[持久检查点](../artifacts/test-results/v062/monitor-after-app-reopen.json)三个目标继续采样、drop=0。WDC清空造成的3.836秒编辑gap已正常结束，未冒充无中断采样；连续8小时尚未完成。
 
-后续真实HDD MAX已完成并验证Clear RAW，但创建池前被Windows物理provider返回的CanPool=false拦截；[部分完成记录](../artifacts/test-results/v062/hdd-max-repaired-partial.json)仅一个child、无Pending，未创建池／VD。完整刷新仍显示OS磁盘RAW零分区、物理provider几乎全部容量已分配且CannotPoolReason=7；正补受控provider-cache刷新，不放宽可入池或授权校验。WDC当前临时RAW，任务收口前仍须恢复约定末态。
+后续真实HDD MAX已完成并验证Clear RAW，但创建池前被Windows物理provider返回的CanPool=false拦截；[部分完成记录](../artifacts/test-results/v062/hdd-max-repaired-partial.json)仅一个child、无Pending，未创建池／VD。完整刷新仍显示OS磁盘RAW零分区、物理provider几乎全部容量已分配且CannotPoolReason=7。已实现仅准确RAW成员明确不可入池时的一次受控provider-cache刷新，保留身份／角色／几何与已验证清盘回执校验；正常可入池路径不增加刷新。补验发现并修复资格原因变化误判硬件编辑、已知子写完成后只读异常误标Unknown的问题。[Agent相关100项](../artifacts/test-results/v062/final/Agent-provider-discovery-03.trx)、[草稿与授权195项](../artifacts/test-results/v062/final/App-poolability-draft.trx)、[固定写脚本／采集90项](../artifacts/test-results/v062/final/Infrastructure-cmdlet-discovery-02.trx)通过。写脚本另记录24处实际写cmdlet的单调边界，只接纳匹配HostCall的完成回执；不把整份provider脚本耗时当作原生写入时间。此前失败记录保留，均按影响补验，不重跑完整门。实际设备复验待新构建；WDC当前临时RAW，任务收口前仍须恢复约定末态。
+
+[实际GUI的3 MiB文档导出／再导入](../artifacts/test-results/v062/gui-3m-export-reimport-verified.json)已完成；按来源身份匹配874个对象，完整比较字段及1092条关系，最终改名保留，原13份开发文档revision／SHA均未变。取消接近64 MiB导入时，[直接读取原活动控件](../artifacts/test-results/v062/gui-near-limit-cancel-feedback-07.json)确认约74.4 ms关闭；另一次约600 ms包含取消后重新搜索整棵UIA树，不混作产品处理耗时。结构页重复刷新已合并并补现有分段计时，[模拟协调器31项](../artifacts/test-results/v062/final/Infrastructure-local-editor.trx)通过；实际530 KB／3 MiB延迟仍待测量，不能用功能通过替代。
+
+第二批20 Hz监控[已正常停止](../artifacts/test-results/v062/monitor-after-normal-stop-observed.json)，约37.8分钟、三目标45249／45326／45326条有效样本、drop=0；保留WDC真实编辑缺口，不能与其它短批次拼为8小时。退出准备曾因App正在关闭而取消，确认提示后重试正常退出，不据此认定宿主死锁；最终稳定构建仍须重新执行8小时项。
 
 旧MAX历史144.454／102.418 s实际为Prepared job创建至终态，包含确认停留且不包含此前Prepare；缺少原生写调用开始／返回，不能据此精确计算本版70%非写开销／50%端到端降幅。对应历史读取／阶段原始数据仍保留，新的同口径性能比较待完成。
 

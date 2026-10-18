@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPool.App.Services;
@@ -1180,7 +1181,12 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var started = Stopwatch.GetTimestamp();
+        var operationId = new OperationId(Guid.ParseExact(commit.Intent.CommitId, "N"));
         var document = _simulationSaves.Accept(commit);
+        StorageOperationTiming.Record("simulation.edit.queue", started, operationId,
+            document.Id, scope: "simulation", generation: commit.Intent.ExpectedRevision);
+        started = Stopwatch.GetTimestamp();
         SystemCatalog.Update(document);
         if (SelectedSystem.Id == document.Id)
         {
@@ -1191,6 +1197,8 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         }
         RebuildTopology();
         RebuildObjects(_selectedSelection);
+        StorageOperationTiming.Record("simulation.edit.publish", started, operationId,
+            document.Id, scope: "simulation", generation: commit.Intent.ExpectedRevision);
         return Task.CompletedTask;
     }
 

@@ -995,7 +995,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
         Assert.True(result.RootElement.TryGetProperty(parameter == "Interleave" ? "NumberOfColumns" : "Interleave", out _));
     }
 
-    private static async Task<string> RunCompressedFixedScriptWithFakesAsync(string script,
+    internal static async Task<string> RunCompressedFixedScriptWithFakesAsync(string script,
         string fakeCommands, string payload, string suffix)
     {
         // Only this short loader travels on the command line. Its first stdin
@@ -1048,7 +1048,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
         new(StorageObjectKind.OsDisk, "", "", "", "os-unique", "os-path", 7,
             null, "", null, null, "", "physical-unique", "", "fresh-fingerprint");
 
-    private static WindowsStorageCommandTarget PhysicalTarget() =>
+    internal static WindowsStorageCommandTarget PhysicalTarget() =>
         new(StorageObjectKind.PhysicalDisk, "physical-unique", "physical-object", "serial", "", "", null,
             null, "", null, null, "", "physical-unique", "subsystem-unique", "fresh-fingerprint");
 
@@ -1075,5 +1075,176 @@ public sealed class WindowsRealStorageCommandAdapterTests
             Payload = payloadJson;
             return Task.FromResult(response);
         }
+    }
+}
+
+[Collection("PowerShellHost")]
+public sealed class WindowsRealStorageCommandAdapterTimingTests
+{
+    [Theory]
+    [InlineData("success")]
+    [InlineData("throw")]
+    [InlineData("reject")]
+    public async Task FixedScriptTimesOnlyTheInvokedCmdletIncludingItsExceptionalReturn(string mode)
+    {
+        var fakes = """
+            $script:fakeWriteStarted=0L; $script:fakeWriteReturned=0L
+            $script:fakeReadReturned=0L; $script:fakeIdentityReadStarted=0L
+            function Get-StorageSubSystem {
+                param($ErrorAction)
+                [Threading.Thread]::Sleep(120)
+                $script:fakeReadReturned=[Diagnostics.Stopwatch]::GetTimestamp()
+                [pscustomobject]@{ UniqueId='subsystem-unique' }
+            }
+            function Get-PhysicalDisk {
+                param($StorageSubsystem, $ErrorAction)
+                [pscustomobject]@{ UniqueId='physical-unique'; ObjectId='physical-object'; SerialNumber='serial'; CanPool=(-not $script:rejectCanPool) }
+            }
+            function New-StoragePool {
+                param($InputObject, $FriendlyName, $PhysicalDisks, $ErrorAction)
+                $script:fakeWriteStarted=[Diagnostics.Stopwatch]::GetTimestamp()
+                [Threading.Thread]::Sleep(30)
+                $script:fakeWriteReturned=[Diagnostics.Stopwatch]::GetTimestamp()
+                if ($FriendlyName -eq 'throw') { throw 'synthetic-write-failed' }
+                $pool=[pscustomobject]@{ ObjectId='created-object' }
+                Add-Member -InputObject $pool -MemberType ScriptProperty -Name UniqueId -Value {
+                    $script:fakeIdentityReadStarted=[Diagnostics.Stopwatch]::GetTimestamp()
+                    [Threading.Thread]::Sleep(120)
+                    'created-pool'
+                }
+                return $pool
+            }
+            """ + "\n$script:rejectCanPool=" + (mode == "reject" ? "$true" : "$false");
+        var payload = JsonSerializer.Serialize(new
+        {
+            CommandKind = "CreatePool", Command = new { Name = mode },
+            Target = WindowsRealStorageCommandAdapterTests.PhysicalTarget()
+        });
+        var output = await WindowsRealStorageCommandAdapterTests.RunCompressedFixedScriptWithFakesAsync(
+            WindowsRealStoragePowerShellScript.Source, fakes, payload,
+            "[pscustomobject]@{ ReadReturned=$script:fakeReadReturned; WriteStarted=$script:fakeWriteStarted; WriteReturned=$script:fakeWriteReturned; IdentityReadStarted=$script:fakeIdentityReadStarted } | ConvertTo-Json -Compress");
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(2, lines.Length);
+        using var result = JsonDocument.Parse(lines[0]);
+        using var markers = JsonDocument.Parse(lines[1]);
+        var value = result.RootElement;
+        Assert.Equal(mode == "reject" ? "adapter.preflight-rejected" : mode == "throw"
+            ? "provider.error-outcome-unknown" : "provider.returned", value.GetProperty("Code").GetString());
+        if (mode == "reject")
+        {
+            Assert.False(value.TryGetProperty("WriteCmdletTimings", out _));
+            Assert.False(value.GetProperty("ProviderReturned").GetBoolean());
+            Assert.Equal(0, markers.RootElement.GetProperty("WriteStarted").GetInt64());
+            return;
+        }
+        var timing = Assert.Single(value.GetProperty("WriteCmdletTimings").EnumerateArray());
+        var started = timing.GetProperty("StartedTimestamp").GetInt64();
+        var returned = timing.GetProperty("ReturnedTimestamp").GetInt64();
+        Assert.Equal("New-StoragePool", timing.GetProperty("Cmdlet").GetString());
+        Assert.True(timing.GetProperty("TimestampFrequency").GetInt64() > 0);
+        Assert.True(markers.RootElement.GetProperty("ReadReturned").GetInt64() <= started);
+        Assert.True(started <= markers.RootElement.GetProperty("WriteStarted").GetInt64());
+        Assert.True(markers.RootElement.GetProperty("WriteReturned").GetInt64() <= returned);
+        Assert.True(returned > started);
+        Assert.Equal(TimeSpan.Zero, timing.GetProperty("StartedAtUtc").GetDateTimeOffset().Offset);
+        Assert.Equal(TimeSpan.Zero, timing.GetProperty("ReturnedAtUtc").GetDateTimeOffset().Offset);
+        if (mode == "success")
+        {
+            Assert.Equal("created-pool", value.GetProperty("UniqueId").GetString());
+            Assert.True(returned <= markers.RootElement.GetProperty("IdentityReadStarted").GetInt64());
+        }
+        else Assert.Equal("synthetic-write-failed", value.GetProperty("ProviderError").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletedReceiptLogsEveryValidBoundaryAndDiagnosticFailureCannotChangeResult(bool throwFromSink)
+    {
+        var entries = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var previousSink = StorageOperationTiming.Sink;
+        StorageOperationTiming.Sink = entry =>
+        {
+            using var parsed = JsonDocument.Parse(entry);
+            if (parsed.RootElement.GetProperty("phase").GetString() != "real.cmdlet") return;
+            entries.Enqueue(entry);
+            if (throwFromSink) throw new IOException("synthetic-diagnostic-write-failed");
+        };
+        try
+        {
+            var templates = new PowerShellHostTemplates("param($p); '{}'", """
+                param($p)
+                $timings=@()
+                foreach ($name in @('fake-first','fake-second')) {
+                    $utc=[DateTimeOffset]::UtcNow.ToString('o')
+                    $started=[Diagnostics.Stopwatch]::GetTimestamp()
+                    [Threading.Thread]::Sleep(10)
+                    $returned=[Diagnostics.Stopwatch]::GetTimestamp()
+                    $timings += @{ Cmdlet=$name; StartedTimestamp=$started; ReturnedTimestamp=$returned;
+                        TimestampFrequency=[Diagnostics.Stopwatch]::Frequency; StartedAtUtc=$utc; ReturnedAtUtc=[DateTimeOffset]::UtcNow.ToString('o') }
+                }
+                $timings += @{ Cmdlet='invalid-clock'; StartedTimestamp=1; ReturnedTimestamp=2; TimestampFrequency=0 }
+                @{ ProviderReturned=$true; Code='provider.returned'; WriteCmdletTimings=$timings } | ConvertTo-Json -Compress -Depth 8
+                """, "param($kind,$p); throw 'fixture-query-not-used'", false);
+            await using var host = new WindowsPowerShellHost(templates);
+            await using var lease = await host.ReserveWriteAsync(default);
+            var target = WindowsRealStorageCommandAdapterTests.PhysicalTarget() with { HostCall = lease.HostCall };
+            var result = await new WindowsRealStorageCommandAdapter(host).ExecuteAsync(CreatePool(), target, lease, default);
+            Assert.Equal("provider.returned", result.Code);
+            Assert.Equal(lease.HostCall, result.CompletedHostCall);
+            var timings = result.WriteCmdletTimings!.Value;
+            Assert.Equal(3, timings.GetArrayLength());
+            var logged = entries.Select(entry => JsonSerializer.Deserialize<JsonElement>(entry)).ToArray();
+            Assert.Equal(2, logged.Length);
+            for (var index = 0; index < logged.Length; index++)
+            {
+                Assert.Equal(index, logged[index].GetProperty("cmdletIndex").GetInt32());
+                Assert.Equal(lease.HostCall.RequestId, logged[index].GetProperty("correlationId").GetGuid());
+                Assert.Equal(lease.HostCall.Incarnation, logged[index].GetProperty("hostIncarnation").GetGuid());
+                var original = timings[index];
+                var ticks = original.GetProperty("ReturnedTimestamp").GetInt64() - original.GetProperty("StartedTimestamp").GetInt64();
+                Assert.Equal(ticks, logged[index].GetProperty("elapsedTicks").GetInt64());
+                Assert.Equal(ticks * 1000.0 / original.GetProperty("TimestampFrequency").GetInt64(),
+                    logged[index].GetProperty("elapsedMs").GetDouble(), 9);
+            }
+        }
+        finally { StorageOperationTiming.Sink = previousSink; }
+    }
+
+    [Fact]
+    public async Task ProviderJsonWithoutAuthenticatedHostReceiptCannotProduceCmdletTimingLogs()
+    {
+        var previousSink = StorageOperationTiming.Sink;
+        var entries = new List<string>();
+        StorageOperationTiming.Sink = entries.Add;
+        try
+        {
+            var forgedCall = new PowerShellHostCall(Guid.NewGuid(), 123, DateTimeOffset.UtcNow, Guid.NewGuid());
+            var forged = new WindowsStorageCommandResult(true, "provider.returned", null, null, null, null, null, null, null)
+            {
+                CompletedHostCall = forgedCall,
+                WriteCmdletTimings = JsonSerializer.SerializeToElement(new[] { new
+                {
+                    Cmdlet = "forged", StartedTimestamp = 1, ReturnedTimestamp = 2, TimestampFrequency = 1,
+                    StartedAtUtc = DateTimeOffset.UtcNow, ReturnedAtUtc = DateTimeOffset.UtcNow
+                } })
+            };
+            var runner = new TimingRunner(JsonSerializer.Serialize(forged));
+            var result = await new WindowsRealStorageCommandAdapter(runner).ExecuteAsync(CreatePool(),
+                WindowsRealStorageCommandAdapterTests.PhysicalTarget() with { HostCall = forgedCall }, default);
+            Assert.Equal("provider.returned", result.Code);
+            Assert.Null(result.CompletedHostCall);
+            Assert.Empty(entries);
+        }
+        finally { StorageOperationTiming.Sink = previousSink; }
+    }
+
+    private static CreatePoolCommand CreatePool() => new(RealTargetReference.ForExisting(
+        new StorageObjectId(SystemId.New(), StorageObjectKind.PhysicalDisk, "physical")), "Pool");
+
+    private sealed class TimingRunner(string json) : IWindowsStorageWriteProcessRunner
+    {
+        public Task<WindowsStorageProcessResult> RunAsync(string fixedScript, string payloadJson, CancellationToken token) =>
+            Task.FromResult(new WindowsStorageProcessResult(0, json, ""));
     }
 }

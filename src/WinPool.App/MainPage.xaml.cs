@@ -1461,9 +1461,12 @@ public sealed partial class MainPage : Page
 
     private void CancelDocumentTransfer_Click(object sender, RoutedEventArgs e)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         _documentTransferCancelRequested = true;
         UpdateDocumentTransferActivity();
         _documentTransferCancellation?.Cancel();
+        StorageOperationTiming.Record("document.transfer.cancel.ui", started,
+            scope: _importingDocument ? "import" : "export");
     }
 
     private void UpdateDocumentTransferActivity()

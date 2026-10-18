@@ -85,6 +85,45 @@ public sealed class AgentRealStorageFactSourceTests
             > before.SourceFacts!.Sources.Max(x => x.CaptureGeneration));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OrdinaryRawBatchCannotSatisfyAnExplicitDiscoveryRequest(bool throughVerifiedMonitor)
+    {
+        await using var harness = await Harness.CreateAsync();
+        var system = (await harness.Identity.ResolveAsync(default)).SystemId;
+        var provider = new DiscoveryRecordingProvider(Document(system));
+        var collector = harness.Wrap(provider);
+        var generation = collector.BeginGeneration();
+        var ordinary = await collector.CollectAsync(CollectionPurpose.Storage, null, generation, default);
+        var target = new StorageObjectId(system, StorageObjectKind.PhysicalDisk, PhysicalId);
+        var scope = StorageInventoryScopeFactory.Create(ordinary.SourceFacts!, OperationId.New(), "discovery", [target])
+            with { DiscoverProviderCache = true };
+        var discovered = throughVerifiedMonitor
+            ? await collector.CollectForMonitorAsync(scope, default)
+            : await collector.CollectAsync(CollectionPurpose.Storage, scope, generation, default);
+        Assert.Equal(1, provider.FullCaptures);
+        Assert.Equal(1, provider.ScopedCaptures);
+        Assert.True(discovered.SourceFacts!.ScopedCollection!.Scope.DiscoverProviderCache);
+        Assert.Equal(scope.Targets, discovered.SourceFacts.ScopedCollection.Scope.Targets);
+        var reused = await collector.CollectForMonitorAsync(scope, default);
+        Assert.Equal(1, provider.ScopedCaptures);
+        Assert.True(reused.SourceFacts!.ScopedCollection!.Scope.DiscoverProviderCache);
+    }
+
+    [Fact]
+    public async Task ProviderMustReportThatTheExplicitDiscoveryWasPerformed()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var system = (await harness.Identity.ResolveAsync(default)).SystemId;
+        var document = Document(system);
+        var collector = harness.Wrap(new DiscoveryRecordingProvider(document, reportDiscovery: false));
+        var target = new StorageObjectId(system, StorageObjectKind.PhysicalDisk, PhysicalId);
+        var scope = StorageInventoryScopeFactory.Create(document.SourceFacts!, OperationId.New(), "discovery", [target])
+            with { DiscoverProviderCache = true };
+        await Assert.ThrowsAsync<InvalidDataException>(() => collector.CollectScopedAsync(scope, default));
+    }
+
     [Fact]
     public async Task InventoryAndFreshFactsSharePersistedIdentityWithoutMergingCachedFacts()
     {
@@ -314,6 +353,26 @@ public sealed class AgentRealStorageFactSourceTests
         {
             CaptureCount++;
             return Task.FromResult(capture());
+        }
+    }
+
+    private sealed class DiscoveryRecordingProvider(StorageSystemDocument document, bool reportDiscovery = true) : IHardwareInventoryProvider, IScopedHardwareInventoryProvider
+    {
+        public int FullCaptures { get; private set; }
+        public int ScopedCaptures { get; private set; }
+        public Task<StorageSystemDocument> CollectLocalAsync(CancellationToken cancellationToken)
+        {
+            FullCaptures++;
+            return Task.FromResult(document);
+        }
+        public Task<StorageSystemDocument> CollectScopedAsync(StorageInventoryScope scope, CancellationToken cancellationToken)
+        {
+            ScopedCaptures++;
+            Assert.True(scope.DiscoverProviderCache);
+            return Task.FromResult(document with { SourceFacts = document.SourceFacts! with
+            {
+                Collections = [], ScopedCollection = new(scope with { DiscoverProviderCache = reportDiscovery }, Now, Now, true)
+            } });
         }
     }
 

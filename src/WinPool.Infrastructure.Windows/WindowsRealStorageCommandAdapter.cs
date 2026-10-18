@@ -59,11 +59,16 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
         if (_runner is null && (lease is null || target.HostCall != lease.HostCall))
             return Rejected("adapter.durable-host-reservation-required");
 
-        WindowsStorageCommandResult WithCompletion(WindowsStorageCommandResult result) => result with
+        WindowsStorageCommandResult WithCompletion(WindowsStorageCommandResult result)
         {
-            // Completion comes from the validated protocol frame, never from provider JSON.
-            CompletedHostCall = _runner is null && lease?.RequestCompleted == true ? lease.HostCall : null
-        };
+            var completed = result with
+            {
+                // Completion comes from the validated protocol frame, never from provider JSON.
+                CompletedHostCall = _runner is null && lease?.RequestCompleted == true ? lease.HostCall : null
+            };
+            RecordWriteCmdletTimings(completed, target, kind);
+            return completed;
+        }
         var payload = JsonSerializer.Serialize(new { CommandKind = kind, Command = command, Target = target }, JsonOptions);
         WindowsStorageProcessResult process;
         try
@@ -119,6 +124,45 @@ public sealed class WindowsRealStorageCommandAdapter : IWindowsRealStorageComman
 
     private static WindowsStorageCommandResult Rejected(string code) =>
         new(false, code, null, null, null, null, null, null, null);
+
+    private static void RecordWriteCmdletTimings(WindowsStorageCommandResult result,
+        WindowsStorageCommandTarget target, string commandKind)
+    {
+        if (result.CompletedHostCall is not { } call || call != target.HostCall
+            || result.WriteCmdletTimings is not { ValueKind: JsonValueKind.Array } timings) return;
+        var index = 0;
+        foreach (var item in timings.EnumerateArray())
+        {
+            var cmdletIndex = index++;
+            try
+            {
+                if (item.ValueKind != JsonValueKind.Object
+                    || !item.TryGetProperty("Cmdlet", out var name) || name.ValueKind != JsonValueKind.String
+                    || string.IsNullOrWhiteSpace(name.GetString())
+                    || !item.TryGetProperty("StartedTimestamp", out var start) || !start.TryGetInt64(out var started)
+                    || !item.TryGetProperty("ReturnedTimestamp", out var end) || !end.TryGetInt64(out var returned)
+                    || !item.TryGetProperty("TimestampFrequency", out var clock) || !clock.TryGetInt64(out var frequency)
+                    || started < 0 || returned < started || frequency <= 0
+                    || !item.TryGetProperty("StartedAtUtc", out var startUtc) || !startUtc.TryGetDateTimeOffset(out var startedAtUtc)
+                    || !item.TryGetProperty("ReturnedAtUtc", out var endUtc) || !endUtc.TryGetDateTimeOffset(out var returnedAtUtc)) continue;
+                StorageOperationTiming.Sink(JsonSerializer.Serialize(new
+                {
+                    phase = "real.cmdlet", scope = commandKind, cmdlet = name.GetString(), cmdletIndex,
+                    startedAtUtc, returnedAtUtc, startedTimestamp = started, returnedTimestamp = returned,
+                    timestampFrequency = frequency, elapsedTicks = returned - started,
+                    elapsedMs = (returned - started) * 1000.0 / frequency,
+                    result.Code, hostIncarnation = call.Incarnation, correlationId = call.RequestId,
+                    hostProcessId = call.ProcessId, hostStartedAtUtc = call.StartedAtUtc,
+                    buildId = typeof(WindowsRealStorageCommandAdapter).Assembly.ManifestModule.ModuleVersionId,
+                    processId = Environment.ProcessId
+                }));
+            }
+            catch (Exception)
+            {
+                // Missing/invalid diagnostics stay unmeasured; never alter a provider result.
+            }
+        }
+    }
 
     private static WindowsStorageCommandResult Unknown(string reason, WindowsStorageProcessResult process) =>
         new(true, "adapter.response-outcome-unknown", null, null, null, null, null, null,
