@@ -14,6 +14,7 @@
 | --- | --- |
 | 结构 job 使用 UTC，时钟回退会漏终态 | 持久更新已用 `MAX(updated_utc_ms+1,$at)` 保证同 job 单调；保留并验证，撤销为该误判新增 revision 列的任务，见 W2-C／[实际持久实现][S46] |
 | 一个串行宿主同时完成所有查询及长写 | 短控制留在 .NET；provider 查询仍受单宿主串行限制。补发送槽、CallIssued／化身绑定、父进程死亡和退出准入，见 W1 |
+| “每个Agent一个宿主”不足以约束崩溃遗留；长期无输出的含义不明确 | 补本机全局最多一个产品宿主、原子创建准入，以及存活／退出／不可核实三态；无输出不能证明写已失败，见§4.1.1–4.1.3 |
 | 2 s 必须发起保存，同时每文档只有一个在途 | 2 s 是无在途时的最大调度等待；已有在途则记录到期，确认后立即接下一批。排队时间单列，不能称已保存，见 W3-A |
 | 64 MiB 文档、原子 intent、导出及事件未共用完整口径 | 以完整可导入 envelope 的规范编码计量；导出同编码；补全部正文入口、轻终态身份和有界分块，见 W4-B |
 | 退表、协议变化与构建守卫未一起落地 | 本版 IPC 15→16、核心 schema 20→21 各集中一次；同步旧 schema 验证／迁移、数据根切换和构建守卫，不增加 job revision 列，见 §3.3 |
@@ -153,18 +154,18 @@ Windows PowerShell 5.1 使用 .NET Framework；当前 Agent 使用 .NET 10。W1 
 
 实施：
 
-1. Agent 生命周期只拥有一个宿主，延迟启动或在启动读准备时启动；固定使用系统 64 位 Windows PowerShell 5.1 路径。Storage 模块、固定只读/写入模板加载一次。所有生产读取、scope 查询、存储写命令及后验探针走同一宿主；不保留每次启动的旧生产路径，不建池、多版本切换或任意脚本接口。
-2. 请求是封闭的命令种类＋typed 参数＋requestId；帧有实际字节上界。stdout 只承载协议，错误/诊断单独处理；每个请求有独立变量作用域，结果只输出一次。只复用模块与固定模板，每次观察仍真正读取 Windows 所需事实。
+1. 本机由WinPool产品管理的PowerShell宿主在正常运行、崩溃恢复、提权与根切换期间合计最多一个；同一时刻只执行一条宿主命令。按§4.1.1取得准入后延迟启动或在启动读准备时启动；固定使用系统64位Windows PowerShell 5.1路径。Storage模块、固定只读／写入模板加载一次。所有生产读取、scope查询、存储写命令及后验探针走同一宿主；不保留每次启动的旧生产路径，不建池、多版本切换或任意脚本接口。
+2. 请求是封闭的命令种类＋typed参数＋requestId；帧有实际字节上界。stdout只承载协议，错误／诊断单独处理；每个请求有独立变量作用域。调度到执行时发一次`started`帧，返回时发唯一`result`帧，均匹配宿主化身和requestId；`started`只证明宿主已接纳执行，不证明Windows写已成功或正在推进。只复用模块与固定模板，每次观察仍真正读取Windows所需事实。
 3. **必须同时改造脚本入口。**现有写脚本使用 `Console.In.ReadToEnd()`、每次 `Import-Module Storage`、自行 `Console.Out.WriteLine`，不能原样塞进长循环。改为接收已解码参数并返回 typed 结果，由唯一宿主帧层读写；不得用 EOF 判断一条请求结束或吞掉下一帧。初始化成功应有一次 ready/version 握手。
 4. .NET 控制状态、停止后续步骤、事件通知不排在 PowerShell 长命令队列后。宿主只串行执行需要 Windows provider 的工作；真实写 gate 与普通控制响应区分。
 5. 删除两套旧启动/压缩/编码/EOF 交互实现及只为它们存在的测试。嵌入模板的来源和允许命令由一个边界拥有，不每层全文扫描同一可信模板。请求参数的形状/范围仍在输入和真实执行边界验证。
-6. 宿主生命周期接入既有 Agent 退出、提权、数据根切换和崩溃恢复。没有执行中的写时才可安全回收；不为内存或超时建立定时重启任务。
+6. 宿主生命周期接入既有Agent退出、提权、数据根切换和崩溃恢复。当前宿主没有可能仍在执行的写时才可安全回收；不为内存或超时建立定时重启任务。
 
 接线范围须包括现有System.Management存储能力、partition／VD范围与StorageJob读取，将其实现迁到宿主的固定query；保留typed reader接口及纯规划。Registry机器绑定、进程化身和必要原生安全探测不伪称已由PowerShell执行，使用现有原生边界并明确剩余deadline／有限在途。单宿主正在执行长写时，新的provider读取排队或按预算返回忙；轻状态、停止后续步骤和取消等待由.NET直接响应，不承诺同一个runspace同时执行实时job查询。
 
 宿主协议固定为长度前缀＋UTF-8 typed JSON，握手返回protocol／incarnation／ready；每次结果匹配incarnation与requestId。新限额为请求4 MiB、原始结果64 MiB、待执行队列8项，W0核完整Hardware实际字节；它们与App文档上限是不同合同，超限明确失败，不截掉事实假装完整。stdout由唯一reader读帧，stderr持续排空且仅保留16 KiB诊断尾部；原runner没有这些收集限额，不能只移动事后截断函数。超限或坏帧发生于已发写时保留Unknown，不因回包损坏重发。
 
-读deadline取调用方剩余预算与60 s的较小值，覆盖排队、执行和解码。队列满立即返回busy，不能在队列外无限积压`WaitAsync`；排队读取消只移除该项。正在执行的只读超时且没有已发写时才回收宿主；写入不加强杀计时器。
+读deadline取调用方剩余预算与60 s的较小值，覆盖排队、执行和解码。队列满立即返回busy，不能在队列外无限积压`WaitAsync`；排队读取消只移除该项。正在执行的只读超时且当前宿主没有可能仍在执行的已发写时，才按§4.1.2回收；写入不加强杀计时器。
 
 写入协议必须保留的语义：
 
@@ -172,10 +173,51 @@ Windows PowerShell 5.1 使用 .NET Framework；当前 Agent 使用 .NET 10。W1 
 - 先占住宿主发送槽、取得ready化身，再在既有步骤`target_json`及CallIssued事件的同一事务存`HostCall`（incarnation、PID、进程启动时间、requestId）。复用`ExecutionRepositories.TransitionStepAsync`；MAX在现有attempt的目标证据中存同字段。计划／步骤ID沿原行键，不另建宿主表。记录后不得换宿主发送；记录后故障按Unknown保守处理。恢复核验复用`ProcessIncarnationVerifier`，不只认PID。
 - 写帧部分发送、宿主崩溃、丢输出等不确定边界进入 OutcomeUnknown，保留原 operation/job 身份和 journal，只读核对。
 - UI 断开、只读超时、取消等待、App 关闭不得杀死可能仍在执行写命令的宿主。停止请求阻止下一步，不能伪造当前写已取消。
-- 只有确定正在执行只读请求且不存在已发写时，读超时才允许终止/重建宿主；失败明确显示，不隐式切回旧启动器。
-- 正常退出保留现有准入语义：有活跃写时本次退出返回忙，写结束后才走关闭；不得把写宿主放进15 s退出步骤后强杀。父Agent异常死亡时，宿主在当前请求结束后遇EOF退出，不中途杀写。新Agent由现有CallIssued／HostCall核验旧宿主；仍存活或无法确认退出时保持写屏障，提权／根切换也不能开启第二写入口。旧无HostCall的记录继续按既有Unknown处理，不能把缺字段当作已无写入。宿主退出后仅只读解释结果，不续发未执行阶段。
+- 只有确定正在执行只读请求、当前宿主没有可能仍在执行的已发写时，读超时才允许终止／重建宿主；失败明确显示，不隐式切回旧启动器。
+- 正常退出保留现有准入语义：有活跃写时本次退出返回忙，写结束后才走关闭；不得把写宿主放进15 s退出步骤后强杀。父Agent异常死亡时，宿主在当前请求结束后遇EOF退出，不中途杀写。新Agent按§4.1.1核验全局占用及CallIssued／HostCall；旧宿主仍存活或无法核实占用时，不创建任何新宿主，连只读替身也禁止，提权／根切换不能例外。旧无HostCall的记录继续按既有Unknown处理，不能把缺字段当作已无写入。旧宿主确认退出后，新唯一宿主可以只读解释结果；写屏障仍按既有恢复规则处理，不续发未执行阶段。
 
-最小验证复用现有 runner/backend/Agent 测试，覆盖连续请求同一 PID、读取后写入后再读、模块一次、错误输出不破帧、局部变量不串请求、读超时重建、写后丢响应不重放。**验收不仅检查源码出现 Runspace 或 new Process 数量；要观察生产入口连续请求不产生新进程。**
+#### 4.1.1 全局数量与创建准入
+
+约束对象是WinPool创建的产品采集／存储命令宿主，不包括开发者终端、测试脚本进程和Windows自身provider服务。对WinPool产品宿主，本机全局上限为1，不按Agent、用户登录会话、版本、程序目录、数据根或权限级别分开计算。进程退出后可以按需重建；不创建第二个宿主接替仍活着的旧进程。
+
+采用一个固定命名的Win32 Job对象`Global\WinPool.PowerShellHost`实施数量约束；它是进程容器，与存储业务的`MSFT_StorageJob`不同，不引入服务、守护进程或新数据库表：
+
+1. 新建Job时设置`JOB_OBJECT_LIMIT_ACTIVE_PROCESS`、`ActiveProcessLimit=1`；不设置`KILL_ON_JOB_CLOSE`、进程／Job时间上限或breakaway。打开既有Job时先查询并核对这些约束，不能修改活动Job来绕过占用。宿主固定脚本不另起PowerShell、`Start-Job`或其他子进程，不新增`-AsJob`式脱离当前请求的调用。[M4]、[M7]
+2. 创建前查询Job成员：已有成员时只核对身份、显示等待旧宿主退出，不启动第二个进程；访问被拒、成员查询失败或约束不符时明确报宿主不可用，不换名称、会话或程序路径绕过。Job权限沿当前用户／系统／管理员的必要权限处理，不为恢复向Everyone开放控制。
+3. 唯一启动入口使用`CreateProcess`扩展启动属性`PROC_THREAD_ATTRIBUTE_JOB_LIST`，创建时即加入该Job；stdout／stdin／stderr仅传递需要的管道句柄。禁止先`Process.Start`再`AssignProcessToJobObject`，也不把“子进程启动后自己取Mutex”当成严格数量保证。这样父Agent在创建与登记之间死亡，也不会留下未受数量约束的宿主；并发创建由Job上限拒绝，失败明确报告。[M5]
+4. Job不会随父Agent句柄关闭自动杀写；旧成员仍活着时命名对象继续存在，新Agent重开同名对象并等待。成员确认归零后才可创建新的唯一宿主。权限／会话约束使原子加入失败时保持不可用，不建立另一条启动路径。正常提权／根切换先完成旧宿主退出，随后才启动新宿主。[M4]
+5. 首次由V0.61切换时，沿既有退出准入停止旧App／Agent并核实其遗留产品调用；旧版本进程不能靠新Job追溯纳管。身份或旧写状态无法核实时保留屏障，不按进程名批量终止，也不启动新宿主补足功能。
+
+#### 4.1.2 长期无输出的判断与处理
+
+Agent持有启动取得的精确进程句柄并监听退出；进程死亡以该进程句柄的退出信号为准。`WaitForExitAsync`的等待取消／异常不是退出证明。跨Agent恢复复用`ProcessIncarnationVerifier`的PID、完整路径和启动时间核验，但需提供**存活／已退出／不可核实**的明确结果；现有`TryRead()==null`同时包含无权访问和读取失败，不能据此清占用或写屏障。[S47]、[M6]
+
+| 可观察情况 | 可以确定的事实 | 固定处理 |
+| --- | --- | --- |
+| 空闲时无输出 | 没有待返回请求；不构成故障 | 保持宿主，不发送定时保活请求或定时重启 |
+| 有请求且进程存活，尚无result | 进程存在；无法仅凭此区分provider正常等待、阻塞或死锁 | 显示读取／已提交等待系统返回、已等待时长及最后已知阶段，不虚构进度百分比 |
+| ready初始化或只读请求超过调用方剩余预算与60 s的较小值 | 请求超预算，不等于已经证明进程死亡 | 原请求到期立即返回失败；该宿主没有可能仍在执行的已发写时，才在后台串行终止准确旧宿主，最多用5 s确认退出，不让原调用额外等待。退出未确认则保持占用与不可用；确认后仅在下一次显式读取需求到来时重建，不重放原请求或循环重启 |
+| 写帧已开始发送，60 s仍未返回 | 长时间没有完成回执，不能据超时认定写已失败 | 显示“等待系统返回，结果尚未确认”；不强杀、不重发、不续下一步，不创建只读替身。正常进度状态保留；通信丢失／回包不可解释时按原operation进入Unknown |
+| 通道断开或坏帧，但进程仍活着 | 通信失效，不能推定宿主已退或写已停止 | 未发写按只读回收规则处理；可能已发写则保留Unknown和写屏障，等待旧进程退出，不创建新宿主 |
+| 精确宿主进程已退出 | PowerShell宿主已死；不证明Windows后台写也已结束 | 未发写请求失败；可能已发写转Unknown。全局占用归零后可按需启动唯一新宿主做只读核对，禁止重放原命令；仍按既有恢复证据决定能否解除写屏障 |
+| 旧身份、进程退出或Job占用不可核实 | 当前证据不足 | 保持宿主不可用与适用写屏障，给出具体错误，不把未知当已退出 |
+
+CPU为0、没有stdout、心跳缺失都不能证明写已失败；即使另设心跳，也只能证明心跳线程／链路活着，不能证明cmdlet正在推进。本版不增加独立心跳线程、第二runspace或旁路WMI轮询来伪造这一判断。等待时长使用Agent本地单调计时和现有状态呈现，不为每秒刷新增加数据库写入或重复消息。
+
+回收条件针对当前宿主有无可能仍在执行的写。旧宿主已经退出后留下的durable Unknown，不会让新的只读宿主永远不可回收；该新宿主仍按只读超时规则处理，原业务Unknown和写屏障不因此清除。
+
+单宿主长写期间，模拟编辑／保存、已有监控会话、轻控制和缓存浏览继续按各自边界工作，实时存储刷新可以超时或返回忙；不把缓存标成fresh。已发写若永久不返回，则无法同时承诺自动恢复时限和不打断未知写入：保持保护状态并报告，由用户另行决定是否进行系统恢复，不自动强杀或重启Windows。人工终止／系统重启也不等于取消成功；恢复后先只读核对。宿主退出、一次没有StorageJob、一次未见目标均不能单独证明后台写已终止或允许重放。
+
+#### 4.1.3 实施顺序与最小验证
+
+按以下顺序接线，不留给执行者另选恢复架构：
+
+1. 在唯一宿主实现中加入Job安全句柄、原子创建和精确进程退出观察；Agent `Program`注入单一实例。先验证进程创建数量，不改业务写入语义。
+2. 接通ready／started／result帧和请求阶段，保留单reader；把三态身份核验接入恢复，禁止将读取失败转换成已退出。
+3. 接入现有CallIssued／HostCall耐久边界，然后迁移真实写；宿主进程退出与写结果核验分别处理，不能把Job成员归零当作业务写屏障已解除。
+4. 接通上述只读超时、通道故障、父Agent死亡、退出／提权／根切换分支，再删除旧runner。真实provider写不用于故意制造挂起；故障分支用现有可控替身和临时进程验证。
+
+最小验证复用现有runner／backend／Agent测试：连续请求同一PID、读→写→读、模块一次、错误输出不破帧、局部变量不串请求；补只读超时重建前旧进程已退出、写静默不强杀、写后丢响应不重放。数量边界集中验证三组：①父Agent在原子创建后、登记前死亡，旧宿主仍活时新Agent不能启动第二个；②长写／通道丢失／权限不可读时只读替身也不能启动；③旧宿主退出后正常、提权或根切换只建立一个新宿主，原Unknown仍需核对。原始Job成员数／进程化身与结果一起核对，不故意打断真实存储写。**验收观察实际生产入口和生命周期，不以源码含Runspace、Mutex或new Process字样代替。**
 
 ### 4.2 W2-A：一个事实批次，按用途投影
 
@@ -506,7 +548,7 @@ dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity
 ### 7.5 只有以下条件全部成立，才能写“V0.62 闭环”
 
 - [ ] D1–D5随本计划获批；D6外部验收由用户负责、D7一次完整检查后按影响补验已确认，没有扩展新增磁盘授权。
-- [ ] W1 所有生产读写共用常驻宿主，旧逐次启动链退出；故障边界保持不重放。
+- [ ] W1所有生产读写共用常驻宿主，旧逐次启动链退出；本机全局最多一个宿主，崩溃遗留／提权／根切换不例外；无输出、超时、存活不可核实及写后丢回执按§4.1处理，不强杀未知写或重放。
 - [ ] W2 同批事实／能力／范围、窄后验、MAX、临时对象释放落地；现有耐久job单调版本保持并验证。
 - [ ] W3 本地编辑/保存失败/flush、一份工作模型与局部 UI 更新完成。
 - [ ] W4 控制 HOL、统一大小与轻终态、监控复制/绘图、SQLite 死副本/连接/heartbeat 全部完成。
@@ -687,6 +729,7 @@ dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity
 | N6 | 常驻改造不能复用现有ReadToEnd/每次Import/自行stdout入口 | W1固定宿主帧与typed脚本函数；[S1]、[S2]、[S6] |
 | N7 | 模拟后台保存新增的在途删除/退出、持续输入、超帧原子intent边界 | W3/W4在同一改动内完成，不把由本版方案引出的已知问题留到0.63 |
 | N8 | 连接有界复用仍需轻控制独立额度；64MiB是编码而非对象内存上限 | W4-A/B明确调度、暂存、并发解析预算；不以表面改锁/抬上限验收 |
+| N9 | 每Agent单实例不能约束孤儿宿主；TryRead返回null不等于进程已退出，静默也不能证明写已失败 | W1 §4.1.1–4.1.3用固定全局Job／原子创建约束数量，以精确退出信号和三态核验恢复，写结果仍由既有只读对账证明；[S5]、[S47] |
 
 本表不是未来待办。闭环时每行只需链接到本版对应提交/已有测试或最终实机证据；不再为每个ID写独立报告。若发现同一根因的新表现，修入对应工作包。只有V0.62全部闭环之后的新检查发现，才使用预留版本号。
 
@@ -711,7 +754,7 @@ dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity
 | 工作包 | 当前源码/配置定位 |
 | --- | --- |
 | 历史 | [H1] 原基线；[H2] 当前受控树；[H3] 两版差异；[H4] 生产最后修改之后的纯文档差异 |
-| W1 | [S1] 读取运行器；[S2] 写运行器；[S6] 写脚本EOF入口；[S5] 实际生产组成 |
+| W1 | [S1] 读取运行器；[S2] 写运行器；[S6] 写脚本EOF入口；[S5] 实际生产组成／当前按SID及会话单实例；[S47] 进程化身核验及null的歧义 |
 | W2 | [S3] collector；[S7] member能力；[S42] range/support；[S8] binding；[S9] 全文比较；[S45] backend；[S4] operation生命周期；[S10] job版本；[S11] App等待 |
 | W3 | [S12] 分区页；[S13] 结构页；[S14] Workspace更新；[S15] 模拟提交；[S25] 逐step工作模型 |
 | W4 IPC | [S16] control等待锁；[S17] server/heartbeat；[S18] 导入64MiB；[S19] raw3MiB；[S24] frame4MiB；[S20] 终态/证据 |
@@ -719,6 +762,7 @@ dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity
 | W5 测试/死链 | [S30] Architecture44case；[S31] 偏好/主机访问；[S32] guard平台return；[S39] 旧executor测试；[S40] 旧planner/gate测试；[S41] parser测试；[S43] 旧规划族；[S44] 旧执行族 |
 | W5/W6 | [S33] 标签修复脚本；[S34] 打包与build身份；[S35] 版本规则；[S23] 授权/目录边界；[S36] 产品现状；[S37] 开发现状；[S38] 当前质量口径 |
 | 平台依据 | [M1] 微软PowerShell5.1与7运行时差别；[M2] .NET10支持系统表（本次核对日期2026-10-18，页面标2026-09-28更新）；[M3] Windows App SDK与.NET自包含分别配置 |
+| 宿主恢复依据 | [M4] Job生命周期与不自动杀进程；[M5] 创建时Job列表；[M6] 进程退出异步观察；[M7] 活动进程数量限制 |
 
 本计划把产品工作完整写在一个文件中；这些链接用于执行者定位和最后核对，不要求人类开发者重新逐篇阅读才能继续。
 
@@ -729,6 +773,10 @@ dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity
 [M1]: https://learn.microsoft.com/en-us/powershell/scripting/whats-new/differences-from-windows-powershell
 [M2]: https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md
 [M3]: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/self-contained-deploy/deploy-self-contained-apps
+[M4]: https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
+[M5]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute
+[M6]: https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforexitasync?view=net-10.0
+[M7]: https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_limit_information
 [F]: Review/WinPool-Full-Review-20261017.md
 [R]: Review/WinPool-Repository-Audit-20261017.md
 [T]: Review/WinPool-Takeover-Review-20261017.md
@@ -781,3 +829,4 @@ dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity
 [S44]: ../src/WinPool.Execution/OperationExecution.cs
 [S45]: ../src/WinPool.Infrastructure.Windows/WindowsRealStorageBackend.cs
 [S46]: ../src/WinPool.Infrastructure.Sqlite/OperationPlanRepository.StructureJobs.cs
+[S47]: ../src/WinPool.Agent/ProcessIncarnationVerifier.cs
