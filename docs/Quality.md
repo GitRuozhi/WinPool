@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-2026-10-18：**V0.61 候选验收完成。** 当前有效自动结果为 **2489 passed／4 explicit skip／0 个未解决失败**，包含一次完整门及其后必要的受影响项目／定向修复回归，不是最后一次整套全绿。最终构建、本机单写、两种MAX、GUI／数据／监控、硬件末态及实际候选解压验收均已有结果，见下文及[Plan](Plan.md)。
+2026-10-18：**V0.61 局部复验发现 3 个待修复问题，候选暂不满足收口条件。** 本次抽测 **46 passed／0 failed／0 skip**，另以合成探针确认 **1 个 P1、2 个 P2**，见[复验记录](#v061-recheck)。首次实现验收的 **2489 passed／4 explicit skip** 是一次完整门及必要的受影响回归汇总，保留为原范围的证据；不能据此称当前没有未解决问题。本次未重跑全套、GUI或设备验收。
 
 ## 最小充分验证
 
@@ -18,6 +18,22 @@
 
 ## 当前证据与缺口
 
+<a id="v061-recheck"></a>
+
+### V0.61 局部复验（2026-10-18）
+
+基线 `c65f09086e649d4a5e16dbb2f6b4f4325b4fae8e`。按用户要求只抽部分：Agent 13、Persistence 5、Infrastructure 18、App 2、Application 3、Agent.Client 5，合计 **46 passed／0 failed／0 skip**。覆盖结构作业耐久与单写、Unknown不重放、采集复用、模拟预览／提交一致性、回执丢失／原子性、监控批次与连接超时；逐项命令、TRX及日志见[运行清单](../artifacts/test-results/v061-recheck-20261018-113417/run.json)，总体结果见[summary.json](../artifacts/test-results/v061-recheck-20261018-113417/summary.json)。这些数量不累加到首次验收用例总数。
+
+补充探针使用现有合成fixture及生产服务，三个场景均确认问题，不能计作产品行为通过。保留[探针源码](../artifacts/test-results/v061-recheck-20261018-113417/probe/Program.cs)、[项目](../artifacts/test-results/v061-recheck-20261018-113417/probe/WinPool.RecheckProbe.csproj)及[结果](../artifacts/test-results/v061-recheck-20261018-113417/probe-results.json)；运行命令在汇总中。本次不修改产品／正式测试源码，未启动WinUI／Agent进程、未执行实盘操作。
+
+1. **R1／P1：结构准备会把用户草稿之外的新对象加入删除范围。** 用户基于旧快照仅删除池A；准备前，外部工具在既有、未编辑的池B新增一个受支持的未使用HDD层模板。请求没有原始草稿基线，Agent在[PrepareStructureJobAsync](../src/WinPool.Agent/AgentRealOperationService.StructureJobs.cs)读取fresh基线后以Working目标重新Bind／Build，把Working中不存在的新层解释为删除；App在[RealStructureEditorFlow](../src/WinPool.App/RealStructureEditorFlow.cs)仍从原draft生成确认内容。探针中App待删层为空，Agent待删层为`tier:b`、物理授权包含`physical:b`，Prepare成功且确认内容没有该层。执行器随后遍历`draft.RemovedTiers`生成删除阶段。本次只验证准备及授权范围，provider写入调用为0，**未实际删除任何对象**。后续必须绑定原始草稿意图，拒绝未获确认的新增删除目标，且界面确认与Agent冻结动作一致；不能仅增加一个基于fresh目标的内部安全检查。
+2. **R2／P2：重开／重连恢复的真实操作不会持续接收终态。** [WorkspaceRealOperations](../src/WinPool.App/ViewModels/WorkspaceRealOperations.cs)只执行一次`RealOperationRecovery.RefreshAsync`；唯一消费`AgentRealOperationStatusEvent`的[RealOperationStatusCache](../src/WinPool.App/Services/RealOperationStatusCache.cs)由发起操作的编辑页等待流程持有，恢复路径没有订阅。合成服务读到Running后，Agent完成并推送Succeeded，提交屏障仍保持；事件订阅数为0，显式再Refresh才解除。结论来自生产恢复服务复现及Workspace调用链核对，未运行完整WinUI场景。后续应由工作区接续恢复操作的事件，终态刷新相关事实后解除屏障，保留Unknown保护，不恢复周期轮询。
+3. **R3／P2：重连后迟到的监控状态会静默清空刚恢复的图表窗口。** [NamedPipeAgentConnection](../src/WinPool.Agent.Client/NamedPipeAgentConnection.cs)先订阅事件、发布当前snapshot，再读已排队事件；[MonitoringService](../src/WinPool.App/Services/MonitoringService.cs)没有区分旧state与新snapshot的先后。顺序“当前session的1–20样本快照→较早无session状态→当前session状态→第21样本”使窗口被清空；探针最终仅1个样本，补快照请求0、gap计数0。已证明的是实时缓存窗口缺失，未证明持久样本丢失。后续需让snapshot与state共享可比较的先后边界，拒绝较旧状态；真正换session时正确重置／补窗并报告缺口，不增加全快照轮询。
+
+候选包独立只读复核通过：[586个ZIP文件逐一内容校验、SHA-256、App／Agent的V0.61／0.6.1.0及资源／排除项](../artifacts/test-results/v061-recheck-20261018-113417/package-verification.json)均与首次包记录一致。本次没有重打包或重做启动验收，原包仍包含上述问题。W2／W4及W8整体收口待修复后做直接回归；不因本次复验重开无关工作包或要求再跑全量。
+
+### 既有审查与历史证据
+
 | 证据 | 可以证明什么 |
 | --- | --- |
 | [2026-10-17 仓库审查 §§3、11–12](Review/WinPool-Repository-Audit-20261017.md) | 首轮 2418 passed／34 failed／3 skip；两个守卫在停止进程后通过，修正 admission 口径后的汇总 2420／32／3 不是重跑全套；当时列出的30个恢复 fixture 和2个文本断言待修；本轮结果见下文 |
@@ -31,7 +47,7 @@
 <a id="v060-compact-actions"></a>
 2026-10-16 表单、紧凑动作和自动盘符历史结果见[原记录](Archive/20261017-v061-document-baseline/Quality-before.md#editor-320)。随后共享项名改为100 DIP，只做相关编译／GUI；当前源码尺寸归 `EditorFormMetrics`，不将前一轮80 DIP结果当成当前值。
 
-### V0.61 自动检查证据（2026-10-18）
+### V0.61 首次实现自动检查证据（2026-10-18）
 
 原始输出位于 [v061](../artifacts/test-results/v061/)。[完整门原始 TRX](../artifacts/test-results/v061/final/) 合计 **2452 passed／12 failed／4 skip**；其中 Infrastructure 因监控导出 fixture 挂起被 blame 中止，该轮不完整。原始失败与中止记录保留。随后 Infrastructure、Persistence、Agent.Client 完整项目回归通过，其余改动补充直接回归；未受影响的完整门结果继续有效。
 
