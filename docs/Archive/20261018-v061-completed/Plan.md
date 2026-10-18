@@ -1,12 +1,12 @@
 # WinPool V0.61：减负、性能与首稿测试包
 
-状态：**已完成；2026-10-18 的 R1–R3 修复及新候选验收均已收口。** 本次受影响5项目有效706 passed／0 failed／0 skip，净增11例；沿用未受影响证据后累计2500 passed／4 explicit skip，未重跑整套。完整Release构建0警告／0错误。修复与候选证据见[Quality](Quality.md#v061-fixes)。仍为V0.61，候选尚未发布、上传或发送。
+状态：**已完成；2026-10-18 的 R1–R3 修复及新候选验收均已收口。** 本次受影响5项目有效706 passed／0 failed／0 skip，净增11例；沿用未受影响证据后累计2500 passed／4 explicit skip，未重跑整套。完整Release构建0警告／0错误。修复与候选证据见[Quality](../../Quality.md#v061-fixes)。仍为V0.61，候选尚未发布、上传或发送。
 
 - 基线：2026-10-17，`main / d56b4b4ac2f847cfd720dead251e26baa7ff1ed7`；当时的代码与 `Directory.Build.props` 为 **V0.60**；本轮实现现已推进 **V0.61 / 0.6.1.0**。
 - 用户确定：**本轮文档和下一轮全部代码工作都属于 V0.61**，不拆成多个版本。代码修改收口后才将版本源推进 V0.61。
 - 优先级：**减负、减少冗余／防御性重复／过度工程 → 性能**。目标是在 V0.70 前交出第一稿公开测试版；本计划目标为 V0.61 便携候选包，不等待全部环境验证。
 - 当前仅开发者环境；跨 Windows／设备组合交给专门测试人员。本计划不等于上传、tag、Release 或发送测试包的指令。
-- 原[已完成 V0.60 Plan](Archive/20261017-v061-document-baseline/Plan-v060-completed.md)与用户提供的[V0.6x 原提案](Archive/20261017-v061-document-baseline/WinPool-V0.6x-Plan.md)原样归档。后者被本文件替代，未曾执行。
+- 原[已完成 V0.60 Plan](../20261017-v061-document-baseline/Plan-v060-completed.md)与用户提供的[V0.6x 原提案](../20261017-v061-document-baseline/WinPool-V0.6x-Plan.md)原样归档。后者被本文件替代，未曾执行。
 
 ## 1. 可行性结论与修订
 
@@ -24,7 +24,7 @@
 | 上个公开包升级／完整平台门 | 不适用当前阶段。使用现有受支持schema夹具和开发数据副本；外部测试覆盖环境差异，不以购置设备或完成所有组合阻塞首稿 |
 | 两轮修改、一次收口、一个Plan | 保留。删除按路径替换同步做；文档只维护变化事实，不另建审查台账 |
 
-诊断证据按需查：[仓库审查](Review/WinPool-Repository-Audit-20261017.md)、[全量检视](Review/WinPool-Full-Review-20261017.md)、[接手审查](Review/WinPool-Takeover-Review-20261017.md)、[VD耗时](Reference/Pool-VD-Timing-20261016.md)。执行者先读所属工作包和源码，不重新全文审查仓库。
+诊断证据按需查：[仓库审查](../../Review/WinPool-Repository-Audit-20261017.md)、[全量检视](../../Review/WinPool-Full-Review-20261017.md)、[接手审查](../../Review/WinPool-Takeover-Review-20261017.md)、[VD耗时](../../Reference/Pool-VD-Timing-20261016.md)。执行者先读所属工作包和源码，不重新全文审查仓库。
 
 ## 2. 固定范围与执行规则
 
@@ -33,7 +33,7 @@
 3. 输入、持久化读回、临写现场保留必要校验；进程内复用有效结果。准确身份、权限／角色、CallIssued耐久、CAS、Unknown不重放不能作为“防御性编程”删除。
 4. **本版不预建常驻PowerShell、控制请求多路分发或SQLite全库重构。** 原稿将其列为条件项；先消除已证实的重复，它们不是首稿前置。核心修改后若仍有独立瓶颈，在最终结果记一行具体计时和建议；扩大这些实现前由用户决定，不让执行者自行建立worker池、第二套连接或数据库框架。无消费者表示、重复PRAGMA的局部删并仍在W5内。
 5. 保留固定内嵌脚本、现有PowerShell读／写生命周期。读超时可取消，已发出的写入不能因套用只读取消策略被强杀或自动重发。
-6. 代码获批后，标准输出、WinPool开发数据和WDC操作沿用[AGENTS](../AGENTS.md)已有授权。两块Samsung禁止写，不使用自由形式存储命令；本轮不触碰这些运行状态。
+6. 代码获批后，标准输出、WinPool开发数据和WDC操作沿用[AGENTS](../../../AGENTS.md)已有授权。两块Samsung禁止写，不使用自由形式存储命令；本轮不触碰这些运行状态。
 7. App／Agent同包升级；协议破坏性调整在代码中统一推进一次IPC版本，不保留生产双协议。内部格式号与V0.61产品号不同。
 8. 不增功能家族，不改变MAX算法、自动布局、格式化范围、系统分区保护、隐私规则和草稿交互。遇到必须改这些语义或发现无法满足本计划的前提，先指出具体问题询问用户，继续无关工作。
 
@@ -76,7 +76,7 @@
 
 ### W1 采集控制流与唯一实现
 
-入口：[EmbeddedStorageInventoryScript](../src/WinPool.Infrastructure.Windows/EmbeddedStorageInventoryScript.cs)、[InventoryPipeline](../src/WinPool.Infrastructure.Windows/InventoryPipeline.cs)、[AgentInventoryCollector](../src/WinPool.Agent/AgentInventoryCollector.cs)、[AgentInventoryCoordinator](../src/WinPool.Agent/AgentInventoryCoordinator.cs)、[Agent组成](../src/WinPool.Agent/Program.cs)、[AgentLocalSystemIdentity](../src/WinPool.Agent/AgentLocalSystemIdentity.cs)。原稿的`EmbeddedScopedStorageInventoryScript`不存在；原`ScopedStorageInventoryScript`已并入固定模板并退役。
+入口：[EmbeddedStorageInventoryScript](../../../src/WinPool.Infrastructure.Windows/EmbeddedStorageInventoryScript.cs)、[InventoryPipeline](../../../src/WinPool.Infrastructure.Windows/InventoryPipeline.cs)、[AgentInventoryCollector](../../../src/WinPool.Agent/AgentInventoryCollector.cs)、[AgentInventoryCoordinator](../../../src/WinPool.Agent/AgentInventoryCoordinator.cs)、[Agent组成](../../../src/WinPool.Agent/Program.cs)、[AgentLocalSystemIdentity](../../../src/WinPool.Agent/AgentLocalSystemIdentity.cs)。原稿的`EmbeddedScopedStorageInventoryScript`不存在；原`ScopedStorageInventoryScript`已并入固定模板并退役。
 
 1. `ForPurpose`／普通reader显式采用无discovery读取；保持Hardware和scoped既有用途。把确需重新发现的受控变更后的discovery改为显式选项；不得仅延长60秒超时。
 2. 将discovery诊断与`Get-SourceSet MSFT_PhysicalDisk`枚举分开，发现失败仍枚举。不要把发现失败写成枚举失败使parser丢弃成功数据；需要新发现才能确认后态时，失败如实影响完整性。
@@ -89,7 +89,7 @@
 
 ### W2 真实单步、结构作业、MAX与恢复
 
-入口：[AgentRealOperationService](../src/WinPool.Agent/AgentRealOperationService.cs)、[RealStorageBackendContracts](../src/WinPool.Application/RealStorageBackendContracts.cs)、[OperationAuthorization](../src/WinPool.Execution/OperationAuthorization.cs)、[WindowsRealStorageBackend](../src/WinPool.Infrastructure.Windows/WindowsRealStorageBackend.cs)及其`MemberSets`／`MaximumCapacity`分文件、[WindowsRealOperationPlanner](../src/WinPool.Infrastructure.Windows/WindowsRealOperationPlanner.cs)、[RealStructureEditorFlow](../src/WinPool.App/RealStructureEditorFlow.cs)。
+入口：[AgentRealOperationService](../../../src/WinPool.Agent/AgentRealOperationService.cs)、[RealStorageBackendContracts](../../../src/WinPool.Application/RealStorageBackendContracts.cs)、[OperationAuthorization](../../../src/WinPool.Execution/OperationAuthorization.cs)、[WindowsRealStorageBackend](../../../src/WinPool.Infrastructure.Windows/WindowsRealStorageBackend.cs)及其`MemberSets`／`MaximumCapacity`分文件、[WindowsRealOperationPlanner](../../../src/WinPool.Infrastructure.Windows/WindowsRealOperationPlanner.cs)、[RealStructureEditorFlow](../../../src/WinPool.App/RealStructureEditorFlow.cs)。
 
 1. 先扩展现有`RealStepPreflight`／结果的进程内类型化事实传递。保留Application依赖方向；不要将Windows基础设施类型塞入上层，或为了复用把内部事实编码成JSON再解码。
 2. `AcceptAsync`只核实当前会话／机器绑定、冻结内容、确认期限和一次性令牌，再耐久接受。同步拆开`OperationAuthorization`中的冻结确认与实时`CurrentInventoryVersion/TargetFingerprint`检查：不能填旧值假装已作现场核验。真正现场检查只由下一步负责。
@@ -105,7 +105,7 @@
 
 ### W3 共享模拟规则与UI按修订更新
 
-入口：[SimulationDraftPlanner](../src/WinPool.Application/SimulationDraftPlanner.cs)、[SimulationEditingSession](../src/WinPool.Application/SimulationEditingSession.cs)、[StorageSystems](../src/WinPool.Application/StorageSystems.cs)、[SimulationEditCoordinator](../src/WinPool.Infrastructure.Windows/SimulationEditCoordinator.cs)、[StorageSystemRepository](../src/WinPool.Infrastructure.Windows/StorageSystemRepository.cs)、[SimulationDocumentRepository](../src/WinPool.Infrastructure.Sqlite/SimulationDocumentRepository.cs)、`StorageStructurePage.xaml.cs`、`DiskPartitionPage.xaml.cs`、`EditorPageBase.cs`、`WorkspaceViewModel.cs`。
+入口：[SimulationDraftPlanner](../../../src/WinPool.Application/SimulationDraftPlanner.cs)、[SimulationEditingSession](../../../src/WinPool.Application/SimulationEditingSession.cs)、[StorageSystems](../../../src/WinPool.Application/StorageSystems.cs)、[SimulationEditCoordinator](../../../src/WinPool.Infrastructure.Windows/SimulationEditCoordinator.cs)、[StorageSystemRepository](../../../src/WinPool.Infrastructure.Windows/StorageSystemRepository.cs)、[SimulationDocumentRepository](../../../src/WinPool.Infrastructure.Sqlite/SimulationDocumentRepository.cs)、`StorageStructurePage.xaml.cs`、`DiskPartitionPage.xaml.cs`、`EditorPageBase.cs`、`WorkspaceViewModel.cs`。
 
 1. 把草稿构建分成“生成typed edits → 补`EnrichPlanIntent`／`AppendPartitionIntents` → 单次完整预演”。当前Build、Precheck、Evaluate／Apply内Evaluate重复；先补齐最终意图再算一次，不直接删后一次而复用旧结果。
 2. 复用`ContentRevision`、`BaselineRevision`、`BindingGeneration`，预演键为documentId＋baseline revision＋binding generation＋content revision。字段输入、PoolIntents、MAX、自动布局、撤销／重做及重新绑定实际影响意图时使键失效；无变化不增号。只应用当前键的结果；Apply若没有对应成功结果先完成它，不能用前一revision继续。
@@ -120,7 +120,7 @@
 
 ### W4 IPC、监控、启动与生命周期
 
-入口：[NamedPipeAgentConnection](../src/WinPool.Agent.Client/NamedPipeAgentConnection.cs)、[AgentControlServer](../src/WinPool.Agent/AgentControlServer.cs)、[AgentEventServer](../src/WinPool.Agent/AgentEventServer.cs)、[AgentClientEventFanout](../src/WinPool.Agent.Client/AgentClientEventFanout.cs)、[DesktopAgentRuntime](../src/WinPool.Agent/DesktopAgentRuntime.cs)、[MonitoringSessionCoordinator](../src/WinPool.Monitoring/MonitoringSessionCoordinator.cs)、`MonitoringService.cs`、`MonitorAlertObserver.cs`、`MainWindow.xaml.cs`及W3仓储／catalog。
+入口：[NamedPipeAgentConnection](../../../src/WinPool.Agent.Client/NamedPipeAgentConnection.cs)、[AgentControlServer](../../../src/WinPool.Agent/AgentControlServer.cs)、[AgentEventServer](../../../src/WinPool.Agent/AgentEventServer.cs)、[AgentClientEventFanout](../../../src/WinPool.Agent.Client/AgentClientEventFanout.cs)、[DesktopAgentRuntime](../../../src/WinPool.Agent/DesktopAgentRuntime.cs)、[MonitoringSessionCoordinator](../../../src/WinPool.Monitoring/MonitoringSessionCoordinator.cs)、`MonitoringService.cs`、`MonitorAlertObserver.cs`、`MainWindow.xaml.cs`及W3仓储／catalog。
 
 1. 在连接拥有者统一处理控制／event pipe的独立5秒`TimeoutException`，转现有连接失败结果，由UI异步边界呈现一次未连接／未保存；不让它逃入XamlUnhandled，不多层catch或盲重试。启动、提权、退出沿现有lifecycle，等待可取消，退出后不迟到Ready。
 2. inventory正文选择**更新事件唯一承载**；手动请求只回documentId／revision／generation及成功失败receipt。App按revision应用一次；事件先后与receipt无关，手动通知由请求所属UI呈现一次。断流／缺失revision时通过现有load入口补读一次最新正文，失败保留旧文档；不保留常态双传。
@@ -164,7 +164,7 @@
 2. `RealAdmissionReadOnlyTests`环境变量未启用时改显式skip，参考已有`EnvironmentEnabledFactAttribute`；不在Fact内return假通过。现有ManualPerformance保持门控，不新建全仓分类工程。
 3. 测试诊断注入现有sink或临时根，不能写用户Diagnostics；归档异步断言等待既有完成任务／记账，保持有界期限。7za失败先查该实际进程／目录原因；守卫在标准进程停止的条件验证；完整性修复脚本只有确认硬编码根或隐藏失败才修相关点，不递归重查整棵研究目录ACL。
 4. W1–W4每包只跑对应现有测试类；必要次数断言限本轮真实重复：单写三次、Accept零次、一次revision一次预演、相同进度零重建、Query/List零恢复、批次不双应用。退役测试随旧实现退出，不为了维持历史总数保留死链。
-5. 代码稳定并已升V0.61后，在标准路径执行[Quality](Quality.md#后续可用命令)的一次完整自动门及最终Release构建。依赖未变、既有审计适用时不重复审计。已定位失败须关闭；skip／未测如实记录，不能以“测试版”掩盖主链失败。
+5. 代码稳定并已升V0.61后，在标准路径执行[Quality](../../Quality.md#后续可用命令)的一次完整自动门及最终Release构建。依赖未变、既有审计适用时不重复审计。已定位失败须关闭；skip／未测如实记录，不能以“测试版”掩盖主链失败。
 
 可直接复用的定向命令例子（仅获批代码后运行，按本包实际类过滤）：
 
@@ -179,9 +179,9 @@ dotnet test tests/WinPool.Persistence.Tests/WinPool.Persistence.Tests.csproj -c 
 
 ### W7 文档与工作方式（本轮已处理）
 
-- 唯一活动Plan为本文件；原方案／已完成计划、Quality长历史、旧README／Product／Development／CHANGELOG及已被替代设计原样[集中归档](Archive/20261017-v061-document-baseline/README.md)，不清测试证据、不恢复用户删除报告。
+- 唯一活动Plan为本文件；原方案／已完成计划、Quality长历史、旧README／Product／Development／CHANGELOG及已被替代设计原样[集中归档](../20261017-v061-document-baseline/README.md)，不清测试证据、不恢复用户删除报告。
 - README只讲使用；Product管产品，Development管技术／构建，Quality管方法／短状态与证据。精确尺寸／图标直接读共享源码，取消逐控件同步多份表的步骤；旧控件／规则／图标／样式表原样归档，当前代码V0.60与目标V0.61分开。
-- 非核心资料按用途整理：[Review](Review/README.md)只保留本轮三份审查并区分基线与方法；统一对象、专项调查及源码入口归[Reference](Reference/README.md)；旧阶段调查／静态复审／拓扑诊断和通知表[原样归档](Archive/20261017-noncore-docs/README.md)。不再维护单独DesignTables目录。
+- 非核心资料按用途整理：[Review](../../Review/README.md)只保留本轮三份审查并区分基线与方法；统一对象、专项调查及源码入口归[Reference](../../Reference/README.md)；旧阶段调查／静态复审／拓扑诊断和通知表[原样归档](../20261017-noncore-docs/README.md)。不再维护单独DesignTables目录。
 - 小改闭环为实现并删旧→相关验证→只更新变化事实→本地提交。一个执行方验证；无新全面报告、日报、附加审批门或每提交全套回归。
 - 委派只需消息中的目标、所有权、固定决定和验收；主代理负责共享合同及集成，不为用满并发拆分。本地main提交，发布仍按用户实际指令。
 
@@ -228,13 +228,13 @@ dotnet test tests/WinPool.Persistence.Tests/WinPool.Persistence.Tests.csproj -c 
 
 首次代码执行批准已于2026-10-18收到并完成：实现提交 `24b5e96`，打包目录识别修正 `12e0f97`，原收口记录 `c65f090`。首次最终构建0警告／0错误；有效自动回归2489 passed／4 explicit skip，包含完整门后必要的受影响修复回归，未重复整套。单写底层采集恰3次；候选Medium手动Storage provider约2.53 s，不编造与历史条件不同样本的提速比例。本次局部复验的46项通过及3个新问题另记Quality，不改写首次结果。
 
-当前候选源代码基线为 `d210a23b194b88108fb8e93757a36dd99df9e9c0`；包内如实标记打包时工作树有尚未提交的文档及既有 `Ref/`，运行文件均来自已验证树，未包含上述内容。候选、说明、校验值与实际解压验收入口见[Quality的交付记录](Quality.md#v061-candidate)。
+当前候选源代码基线为 `d210a23b194b88108fb8e93757a36dd99df9e9c0`；包内如实标记打包时工作树有尚未提交的文档及既有 `Ref/`，运行文件均来自已验证树，未包含上述内容。候选、说明、校验值与实际解压验收入口见[Quality的交付记录](../../Quality.md#v061-candidate)。
 
 首次验收结束时WDC已恢复在线GPT／16 MiB MSR／其余NTFS 64 KiB `WinPool_Test`／E:，两Samsung结构139项核对通过。本次只做结构准备后取消，未执行实盘写入；原13个模拟文档不变，10 Hz／持续监控开启／本机Monitor，App和Agent正常退出，无未终结结构作业。前后不同权限可共同读取的21个存储对象结构不变；Medium少读到一个EFI卷，其分区身份／几何不变，不冒充重做原139项完整核验。跨Windows、多成员／SSD／SCM／冗余／多层硬件和长时矩阵仍未覆盖；UAC安全桌面确认未自动化，不扩大实现范围或自行发布。
 
 ### 局部复验修复（已完成）
 
-以下获批步骤均已执行，结果见[Quality修复验收](Quality.md#v061-fixes)；原触发条件和合成探针见[复验记录](Quality.md#v061-recheck)。保持既有架构，未恢复轮询。以下保留执行要求，当前无待执行项。
+以下获批步骤均已执行，结果见[Quality修复验收](../../Quality.md#v061-fixes)；原触发条件和合成探针见[复验记录](../../Quality.md#v061-recheck)。保持既有架构，未恢复轮询。以下保留执行要求，当前无待执行项。
 
 1. **R1／W2：冻结原始意图与确认范围。** 在`AgentRealOperationServiceTests`复用合成双池场景：旧草稿只删除A，fresh在未编辑B新增未使用HDD层；先固定当前误接纳结果。修改`RealStructureJobGoal`、App提交及Agent准备边界，使删除只能来自原始草稿明确动作，不能由旧Working与新全局快照的差异自行扩大。准备时发现范围变化须明确冲突或重新预览确认；App展示的对象／动作须与Agent冻结内容一致。回归要求B及其成员不进入授权／删除阶段；拒绝路径零provider写入；无外部变化的原作业、重复jobId、恢复剩余目标仍成立。
 2. **R2／W2、W4：接续恢复操作的终态。** 在现有App恢复测试补“初次读取Running／Unknown→连接保持健康→收到终态事件”，让Workspace持有恢复操作的订阅，复用`RealOperationStatusCache`，按operationId／planHash／耐久revision处理状态。终态沿现有路径更新事实和不确定标记后解除提交屏障；取消／关闭时释放订阅，Unknown不自动重放。回归要求无需人工Refresh即可解除已核验终态的屏障，重复／旧事件不产生额外写入或错误解除。

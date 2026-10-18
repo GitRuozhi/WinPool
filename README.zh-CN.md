@@ -4,7 +4,7 @@
 
 WinPool 是 Windows 桌面存储管理软件，可查看存储拓扑、编辑模拟系统、监控设备，并通过受控流程执行已支持的本机存储操作。
 
-**V0.61 便携测试候选已完成**，包含采集、真实执行、模拟提交和监控链的简化。目标是在 V0.70 之前交付第一稿公开测试版，供不同环境的专门测试人员验证；目前工作和证据来自开发者环境，候选尚未公开发布。当前无活动计划，[V0.61 完成计划](docs/Archive/20261018-v061-completed/Plan.md)已归档。实际版本由 [Directory.Build.props](Directory.Build.props) 定义，当前候选包及已验证范围见[Quality](docs/Quality.md)。
+**当前产品版本为V0.61，已有便携候选；后续验收仍发现性能与验证缺口。** [V0.62活动计划](docs/Plan.md)已编制，待批准，目标是完成已知改造与首稿公开测试交付；目前尚未实施，也未公开发布。[V0.61阶段记录](docs/Archive/20261018-v061-completed/Plan.md)已归档。实际版本由[Directory.Build.props](Directory.Build.props)定义，候选与实际验证范围见[Quality](docs/Quality.md)。
 
 ## 使用范围
 
