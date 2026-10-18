@@ -110,6 +110,8 @@ public sealed class WindowsPowerShellHost : IAsyncDisposable
                 }
                 catch (Exception error) when (error is not OutOfMemoryException)
                 {
+                    if (work is QueryWork && session is { PossibleWrite: false } failedRead)
+                        failedRead.RecordReadFailure(error);
                     work.Fail(error);
                     // Returning the expired request does not wait for host termination.
                     // No replacement can be created until this serial cleanup proves exit.
@@ -258,6 +260,28 @@ public sealed class WindowsPowerShellHost : IAsyncDisposable
         private readonly object errorGate = new();
         private string errorTail = "";
         public string ErrorTail { get { lock (errorGate) return errorTail; } }
+
+        internal void RecordReadFailure(Exception error)
+        {
+            if (request == Guid.Empty || request == CompletedRequestId || commandKind == "Write") return;
+            try
+            {
+                StorageOperationTiming.Sink(JsonSerializer.Serialize(new
+                {
+                    phase = "host.read.failure", scope = commandKind,
+                    hostIncarnation = Incarnation, correlationId = request,
+                    hostProcessId = Process.Id, hostStartedAtUtc = Process.StartedAtUtc,
+                    requestStarted = started, errorType = error.GetType().FullName,
+                    // This is the existing bounded, separately drained stderr tail. It is diagnostic,
+                    // never a completion receipt or proof that the native query stopped.
+                    recentStderrTail = ErrorTail,
+                    buildId = typeof(WindowsPowerShellHost).Assembly.ManifestModule.ModuleVersionId,
+                    processId = Environment.ProcessId
+                }));
+            }
+            catch (Exception diagnosticError) when (diagnosticError is not OutOfMemoryException)
+            { /* Best-effort diagnostics cannot change read failure or host cleanup. */ }
+        }
 
         public async Task<string> ExecuteAsync(string kind, object parameters, Guid requestId, CancellationToken token)
         {

@@ -18,6 +18,7 @@ public sealed class WindowsPowerShellHostTests(Xunit.Abstractions.ITestOutputHel
         param($p)
         if ($null -ne (Get-Variable requestLocal -Scope Local -ErrorAction SilentlyContinue)) { throw 'request-local-leaked' }
         $requestLocal=1
+        [Console]::Error.WriteLine(('fixture-inventory:' + [string]$p.Value))
         if($p.DelayMilliseconds) { Start-Sleep -Milliseconds ([int]$p.DelayMilliseconds) }
         [Console]::Error.Write(('diagnostic-'*3000))
         @{ ProcessId=$PID; Value=[string]$p.Value } | ConvertTo-Json -Compress
@@ -48,16 +49,37 @@ public sealed class WindowsPowerShellHostTests(Xunit.Abstractions.ITestOutputHel
     [Fact]
     public async Task ReadDeadlineReturnsThenOldHostExitsBeforeExplicitReplacement()
     {
-        await using var host = new WindowsPowerShellHost(Templates);
-        var first = await ReadAsync(host, "warm");
-        using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
-        var elapsed = Stopwatch.StartNew();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.QueryAsync(WindowsPowerShellQuery.Inventory,
-            new { Value = "timed-out", DelayMilliseconds = 5000 }, deadline.Token));
-        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(3));
-        var replacement = await ReadAsync(host, "replacement");
-        Assert.NotEqual(first, replacement);
-        Assert.True(Exited(first));
+        var diagnostics = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var originalSink = StorageOperationTiming.Sink;
+        StorageOperationTiming.Sink = diagnostics.Enqueue;
+        try
+        {
+            await using var host = new WindowsPowerShellHost(Templates);
+            var first = await ReadAsync(host, "warm");
+            using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+            var elapsed = Stopwatch.StartNew();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.QueryAsync(WindowsPowerShellQuery.Inventory,
+                new { Value = "timed-out", DelayMilliseconds = 5000 }, deadline.Token));
+            Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(3));
+            var replacement = await ReadAsync(host, "replacement");
+            Assert.NotEqual(first, replacement);
+            Assert.True(Exited(first));
+            var failures = diagnostics.Select(value => JsonDocument.Parse(value)).ToArray();
+            try
+            {
+                var failure = Assert.Single(failures, value => value.RootElement.GetProperty("phase").GetString() == "host.read.failure").RootElement;
+                Assert.Equal("Inventory", failure.GetProperty("scope").GetString());
+                Assert.Equal(first, failure.GetProperty("hostProcessId").GetInt32());
+                Assert.NotEqual(Guid.Empty, failure.GetProperty("correlationId").GetGuid());
+                Assert.NotEqual(Guid.Empty, failure.GetProperty("hostIncarnation").GetGuid());
+                Assert.True(failure.GetProperty("requestStarted").GetBoolean());
+                var tail = failure.GetProperty("recentStderrTail").GetString()!;
+                Assert.Contains("fixture-inventory:timed-out", tail);
+                Assert.True(System.Text.Encoding.UTF8.GetByteCount(tail) <= 16 * 1024);
+            }
+            finally { foreach (var failure in failures) failure.Dispose(); }
+        }
+        finally { StorageOperationTiming.Sink = originalSink; }
     }
 
     [Fact]

@@ -48,6 +48,13 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $collectionClock = [Diagnostics.Stopwatch]::StartNew()
 $collectionTimings = [ordered]@{}
 
+function Write-WinPoolInventoryStage([string]$stage, [string]$class = '', [string]$related = '') {
+    if ($null -eq $WinPoolEvidenceFields) { return }
+    # Diagnostics use the separately drained stderr pipe, never the framed result stream.
+    try { [Console]::Error.WriteLine('winpool.inventory|' + $stage + '|' + $class + '|' + $related) } catch { }
+}
+Write-WinPoolInventoryStage 'begin'
+
 
 $sourceObservations = [System.Collections.Generic.List[object]]::new()
 $sourceQueryFailures = [System.Collections.Generic.List[object]]::new()
@@ -125,7 +132,9 @@ function Get-Safe {
     $timingKey = if ($TimingName -ne '') { $TimingName } elseif ($classMatch.Success) { $classMatch.Value } else { '' }
     $queryClock = [Diagnostics.Stopwatch]::StartNew()
     try {
+        Write-WinPoolInventoryStage 'safe-query.begin' $timingKey
         $value = & $Query
+        Write-WinPoolInventoryStage 'safe-query.returned' $timingKey
         $queryClock.Stop()
         if ($classMatch.Success) {
             [void]$sourceQuerySuccesses.Add([ordered]@{ ClassName=$classMatch.Value; Namespace=$queryNamespace })
@@ -257,7 +266,9 @@ function Add-WinPoolScopeObject($item) {
             throw 'scope-provider-identity-ambiguous'
         }
         $WinPoolScopeObjects[$key] = $item
+        Write-WinPoolInventoryStage 'association.begin' 'MSFT_StoragePool' 'MSFT_StorageSubSystem'
         $parents = @(Get-CimAssociatedInstance -InputObject $item -ResultClassName MSFT_StorageSubSystem -ErrorAction Stop)
+        Write-WinPoolInventoryStage 'association.returned' 'MSFT_StoragePool' 'MSFT_StorageSubSystem'
         $WinPoolScopeQueried['MSFT_StorageSubSystem'] = $true
         $WinPoolScopeAssociations[$key + '|MSFT_StorageSubSystem'] = @($parents)
         if ($parents.Count -ne 1) { throw 'scope-primordial-subsystem-parent-unavailable' }
@@ -291,7 +302,9 @@ function Find-WinPoolScopeIdentity([string]$class, [string]$property, [string]$v
             -not ($class -eq 'MSFT_PhysicalDisk' -and $_ -in @('IsBoot','IsSystem','IsPageFile','IsCrashDump')) -and
             -not ($class -eq 'MSFT_Partition' -and $_ -eq 'Type') })
     }
+    Write-WinPoolInventoryStage 'identity.begin' $class $property
     $matches = @(Get-CimInstance @query)
+    Write-WinPoolInventoryStage 'identity.returned' $class $property
     $WinPoolScopeQueried[$class] = $true
     if ($matches.Count -gt 1) { throw 'scope-selector-not-unique' }
     foreach ($match in $matches) {
@@ -301,6 +314,7 @@ function Find-WinPoolScopeIdentity([string]$class, [string]$property, [string]$v
 }
 function Initialize-WinPoolScope {
 if ($null -eq $WinPoolScopeLocators) { return }
+Write-WinPoolInventoryStage 'closure.begin'
 try {
     foreach ($locator in @($WinPoolScopeLocators)) { Find-WinPoolScopeIdentity $locator.ClassName $locator.IdentityProperty $locator.IdentityValue }
     while ($WinPoolScopePending.Count -gt 0) {
@@ -318,7 +332,9 @@ try {
         }
         $associations = @{}
         foreach ($resultClass in $related) {
+            Write-WinPoolInventoryStage 'association.begin' $class $resultClass
             $associations[$resultClass] = @(Get-CimAssociatedInstance -InputObject $item -ResultClassName $resultClass -ErrorAction Stop)
+            Write-WinPoolInventoryStage 'association.returned' $class $resultClass
             $WinPoolScopeQueried[$resultClass] = $true
             $WinPoolScopeAssociations[(Get-WinPoolScopeKey $item) + '|' + $resultClass] = @($associations[$resultClass])
             foreach ($associated in $associations[$resultClass]) {
@@ -349,8 +365,10 @@ try {
             $tierVirtualDisks = @($associations['MSFT_VirtualDisk'])
             if ($tierPools.Count -gt 1 -or $tierVirtualDisks.Count -gt 1) { throw 'scope-tier-pool-parent-unavailable' }
             foreach ($tierVirtualDisk in $tierVirtualDisks) {
+                Write-WinPoolInventoryStage 'association.begin' 'MSFT_VirtualDisk' 'MSFT_StoragePool'
                 $virtualDiskPools = @(Get-CimAssociatedInstance -InputObject $tierVirtualDisk -ResultClassName MSFT_StoragePool -ErrorAction Stop |
                     Where-Object { -not $_.IsPrimordial })
+                Write-WinPoolInventoryStage 'association.returned' 'MSFT_VirtualDisk' 'MSFT_StoragePool'
                 if ($virtualDiskPools.Count -ne 1) { throw 'scope-tier-vdisk-pool-parent-unavailable' }
                 foreach ($parent in $virtualDiskPools) { Add-WinPoolScopeObject $parent }
                 $tierPools += $virtualDiskPools
@@ -400,6 +418,7 @@ try {
         [void]$sourceQueryFailures.Add([ordered]@{ ClassName=$class; Namespace=$WinPoolScopeNamespace; ReasonCode=('ScopeClosureIncomplete:' + [string]$_.Exception.Message) })
     }
 }
+Write-WinPoolInventoryStage 'closure.ended'
 }
 function Get-WinPoolScopeClass([string]$class) {
     return @($WinPoolScopeObjects.Values | Where-Object { [string]$_.CimClass.CimClassName -eq $class })
@@ -424,12 +443,16 @@ function Get-WinPoolStorageClass([string]$class) {
     }
 }
 
+Write-WinPoolInventoryStage 'class.begin' 'Win32_OperatingSystem'
 $operatingSystem = if ($null -ne $WinPoolEvidenceFields) {
     Get-CimInstance -ClassName Win32_OperatingSystem -Property Caption,Version,BuildNumber,LastBootUpTime -ErrorAction Stop
 } else { Get-CimInstance -ClassName Win32_OperatingSystem }
+Write-WinPoolInventoryStage 'class.returned' 'Win32_OperatingSystem'
+Write-WinPoolInventoryStage 'class.begin' 'Win32_ComputerSystem'
 $computerSystem = if ($null -ne $WinPoolEvidenceFields) {
     Get-CimInstance -ClassName Win32_ComputerSystem -Property Name -ErrorAction Stop
 } else { Get-CimInstance -ClassName Win32_ComputerSystem }
+Write-WinPoolInventoryStage 'class.returned' 'Win32_ComputerSystem'
 $subsystemObjects = @(if ($WinPoolDiscoverProviderCache -or $null -eq $WinPoolScopeLocators) {
     Get-SourceSet 'MSFT_StorageSubSystem' { Get-StorageSubSystem -ErrorAction Stop }
 })
@@ -462,6 +485,7 @@ if ($WinPoolDiscoverProviderCache) {
 
     private const string StorageReads = """
 Initialize-WinPoolScope
+Write-WinPoolInventoryStage 'storage-projection.begin'
 if ($null -ne $WinPoolScopeLocators) {
     $subsystemObjects = @(Get-SourceSet 'MSFT_StorageSubSystem' { Get-WinPoolScopeClass 'MSFT_StorageSubSystem' })
 }
@@ -1074,6 +1098,8 @@ $warnings = foreach ($tier in $storageTiers) {
     }
 }
 
+Write-WinPoolInventoryStage 'storage-projection.ended'
+Write-WinPoolInventoryStage 'roles.begin'
 $winNt = Get-Safe { Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction Stop }
 Add-NativeObservation 'Registry.CurrentVersion' 'machine' ([ordered]@{ DisplayVersion=$winNt.DisplayVersion; ReleaseId=$winNt.ReleaseId; UBR=$winNt.UBR })
 $pageFileSettings = foreach ($setting in @(Get-SafeList { @(Get-CimInstance -ClassName Win32_PageFileSetting -ErrorAction Stop) })) {
@@ -1125,6 +1151,7 @@ foreach ($disk in $diskObjects) {
 }
 
 $collectionTimings['rolesAndSupplements'] = $collectionClock.Elapsed.TotalMilliseconds
+Write-WinPoolInventoryStage 'roles.ended'
 if ($WinPoolIncludeHardware) {
 # ---------- Hardware inventory (read-only KS native collectors) ----------
 
@@ -1211,6 +1238,7 @@ Add-NativeObservation 'Windows.Session' 'machine' ([ordered]@{ InstalledUICultur
 }
 
 $collectionTimings['completeBeforeEncoding'] = $collectionClock.Elapsed.TotalMilliseconds
+Write-WinPoolInventoryStage 'encoding.begin'
 [ordered]@{
     ScannedAt = $scannedAt.ToString('o')
     Computer = [ordered]@{
@@ -1239,6 +1267,7 @@ $collectionTimings['completeBeforeEncoding'] = $collectionClock.Elapsed.TotalMil
     CollectionPurpose = if ($WinPoolIncludeHardware) { 'Hardware' } else { 'Storage' }
     Warnings = @($warnings)
 } | ConvertTo-Json -Depth 12 -Compress
+Write-WinPoolInventoryStage 'encoding.returned'
 
 
 
