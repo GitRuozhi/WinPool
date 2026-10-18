@@ -23,5 +23,6 @@
     <Project Path="tests/WinPool.Ipc.Tests/WinPool.Ipc.Tests.csproj" />
     <Project Path="tests/WinPool.Monitoring.Tests/WinPool.Monitoring.Tests.csproj" />
     <Project Path="tests/WinPool.Persistence.Tests/WinPool.Persistence.Tests.csproj" />
+    <Project Path="tests/WinPool.PowerShellHost.Fixture/WinPool.PowerShellHost.Fixture.csproj" />
   </Folder>
 </Solution>
