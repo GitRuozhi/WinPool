@@ -7,6 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\..\src\WinPool.App\Services\DocumentExportFile.cs" Link="DocumentExportFile.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\MonitoringService.cs" Link="MonitoringService.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\MonitorIssueStateTracker.cs" Link="MonitorIssueStateTracker.cs" />
     <Compile Include="..\..\src\WinPool.App\Services\DataLocationSwitchRuntime.cs" Link="DataLocationSwitchRuntime.cs" />

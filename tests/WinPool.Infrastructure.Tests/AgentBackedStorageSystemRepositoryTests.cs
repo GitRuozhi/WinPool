@@ -6,6 +6,21 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class AgentBackedStorageSystemRepositoryTests
 {
     [Fact]
+    public async Task InitialSaveCancellationIsDistinctFromAnUnconfirmedAgentSave()
+    {
+        var document = Document(StorageSystemKind.Simulation);
+        var cancelled = new RecordingConnection { SaveStatus = ApplicationStatus.Cancelled };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new AgentBackedStorageSystemRepository(cancelled).SaveSimulationAsync(document));
+        var unknown = new RecordingConnection { SaveStatus = ApplicationStatus.OutcomeUnknown };
+        var exception = await Assert.ThrowsAsync<SimulationDocumentSaveOutcomeUnknownException>(() =>
+            new AgentBackedStorageSystemRepository(unknown).SaveSimulationAsync(document));
+        Assert.Equal(document.Id, exception.DocumentId);
+        Assert.Equal(SimulationDocumentCodec.Encode(document).Sha256, exception.Sha256);
+        Assert.IsType<SaveAgentSimulationDocumentRequest>(Assert.Single(unknown.Requests));
+    }
+
+    [Fact]
     public async Task CatalogLoadsOnlyMetadataUntilTheSelectedDocumentIsRequested()
     {
         var connection = new RecordingConnection();
@@ -164,6 +179,7 @@ public sealed class AgentBackedStorageSystemRepositoryTests
         private LocalInventoryDocumentPayload? localInventory;
         public List<AgentRequest> Requests { get; } = [];
         public ApplicationMessage? CaptureFailure { get; set; }
+        public ApplicationStatus? SaveStatus { get; set; }
 
         public Task<ApplicationResult<AgentHandshake>> ConnectAsync(
             CancellationToken cancellationToken) =>
@@ -182,6 +198,8 @@ public sealed class AgentBackedStorageSystemRepositoryTests
             CancellationToken cancellationToken)
         {
             Requests.Add(request);
+            if (request is SaveAgentSimulationDocumentRequest && SaveStatus is { } status)
+                return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(status, request.CorrelationId));
             if (request is CaptureAgentManageInventoryRequest && CaptureFailure is { } failure)
             {
                 return Task.FromResult(ApplicationResult<AgentResponse>.FromStatus(

@@ -84,7 +84,7 @@ public sealed partial class WindowsRealStorageBackendTests
         };
         var accepted = await fixture.Backend.PreflightStepAsync(plan, step, new Dictionary<string, string>(), default);
         Assert.Equal(plan.RealOperation.TargetFingerprint, accepted.TargetFingerprint);
-        fixture.FactsTransform = item => item.Id != PhysicalId ? item : item with
+        fixture.FactsTransform = item => item.Id != DiskId ? item : item with
         {
             Fields = item.Fields.Select(field => field.Name != "IsSystem" ? field
                 : field with { Value = null, ReadState = FieldReadState.Failed, ReasonCode = "UnreadableProtection" }).ToImmutableArray()

@@ -25,6 +25,13 @@ public sealed class SimulationCommitFailureException()
 {
 }
 
+public sealed class SimulationDocumentSaveOutcomeUnknownException(string documentId, string sha256)
+    : IOException("The simulation document save outcome has not been confirmed.")
+{
+    public string DocumentId { get; } = documentId;
+    public string Sha256 { get; } = sha256;
+}
+
 public static class SimulationDocumentCodec
 {
     private const int MaximumDocumentBytes = DocumentPayloadLimits.MaximumDocumentBytes;
@@ -288,13 +295,19 @@ public sealed class AgentBackedStorageSystemRepository(IAgentConnection connecti
         {
             var payload = await DocumentPayloadLimits.RunLargeAsync(() => SimulationDocumentCodec.Encode(document), cancellationToken);
             hashes.TryGetValue(document.Id, out var expected);
-            var response = await SendAsync(
+            var result = await connection.SendAsync(
                 new SaveAgentSimulationDocumentRequest(
                     payload,
                     expected,
                     CorrelationId.New()),
                 cancellationToken);
-            UpdateHash(response, document.Id);
+            if (result.Status == ApplicationStatus.Cancelled)
+                throw new OperationCanceledException("The simulation save was cancelled before it was sent.", cancellationToken);
+            if (result.Status == ApplicationStatus.OutcomeUnknown)
+                throw new SimulationDocumentSaveOutcomeUnknownException(document.Id, payload.Sha256);
+            if (!result.IsSuccess || result.Value is null)
+                throw new InvalidOperationException(result.Messages.FirstOrDefault()?.Code ?? "The Agent simulation save failed.");
+            UpdateHash(result.Value, document.Id);
         }
         finally
         {

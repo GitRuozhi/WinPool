@@ -74,7 +74,7 @@ public sealed class DesktopExportService : IExportService, IStorageSystemImportE
             try { return DocumentPayloadLimits.EncodeExport(document); }
             finally { DocumentPayloadLimits.LargeParseGate.Release(); }
         }, cancellationToken).WaitAsync(cancellationToken);
-        await File.WriteAllTextAsync(file.Path, canonical, cancellationToken);
+        await DocumentExportFile.WriteAsync(file.Path, canonical, cancellationToken);
         return file.Path;
     }
 

@@ -153,6 +153,12 @@
                     HorizontalScrollBarVisibility="Disabled"
                     VerticalScrollBarVisibility="Auto">
                     <StackPanel MinWidth="180" Spacing="8">
+                        <StackPanel x:Name="ImportExportActivity" Spacing="8" Visibility="Collapsed">
+                            <ProgressRing Width="24" Height="24" IsActive="True" HorizontalAlignment="Left" />
+                            <TextBlock x:Name="ImportExportStatusText" TextWrapping="Wrap" />
+                            <Button x:Name="ImportExportCancelButton" Click="CancelDocumentTransfer_Click"
+                                    HorizontalAlignment="Stretch" />
+                        </StackPanel>
                         <StackPanel x:Name="CommandButtonsPanel" Spacing="8" />
                     </StackPanel>
                 </ScrollViewer>

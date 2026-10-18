@@ -10,18 +10,6 @@ namespace WinPool.Infrastructure.Tests;
 public sealed class WinPoolFactCaptureTests
 {
     [Theory]
-    [InlineData(CollectionPurpose.Storage)]
-    [InlineData(CollectionPurpose.Hardware)]
-    public void FixedCollectorPreservesExactAssociationRulesForBothPurposes(CollectionPurpose purpose)
-    {
-        var source = EmbeddedStorageInventoryScript.ForPurpose(purpose);
-        Assert.DoesNotContain("\r", source);
-        Assert.Contains("VirtualDiskToCurrentOsDiskAssociationNotUnique", source);
-        Assert.Contains("PhysicalDiskCurrentIdentityNotUnique", source);
-        Assert.Contains("PhysicalDiskAssociationKey = $deviceParents.PhysicalDiskAssociationKey", source);
-    }
-
-    [Theory]
     [InlineData("DeviceNumberFallback", true, true, "16", "", "uid:virtual", 0)]
     [InlineData("DeviceNumberFallback", true, true, "11", "", "uid:virtual", 0)]
     [InlineData("ProviderUniqueId", true, true, "16", "", "uid:virtual", 1)]
@@ -92,13 +80,47 @@ public sealed class WinPoolFactCaptureTests
         Assert.Contains("VirtualDiskToCurrentOsDiskAssociationNotUnique", script);
     }
 
-    [Fact]
-    public void FixedCollectorRecordsPoolMemberAndVirtualDiskAssociationFailures()
+    [Theory]
+    [InlineData(CollectionPurpose.Storage)]
+    [InlineData(CollectionPurpose.Hardware)]
+    public async Task FixedCollectorRecordsPoolMemberAndVirtualDiskAssociationFailures(CollectionPurpose purpose)
     {
-        var script = EmbeddedStorageInventoryScript.ForPurpose(CollectionPurpose.Storage);
-        Assert.Contains("Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop", script);
-        Assert.Contains("Get-SourceSet 'MSFT_Disk' { Get-Disk -VirtualDisk $virtual -ErrorAction Stop }", script);
-        Assert.DoesNotContain("foreach ($mappedDisk in @(Get-Disk -VirtualDisk $virtual))", script);
+        var script = EmbeddedStorageInventoryScript.ForPurpose(purpose);
+        var helperStart = script.IndexOf("function Get-SourceSet", StringComparison.Ordinal);
+        var helperEnd = script.IndexOf("$scannedAt =", helperStart, StringComparison.Ordinal);
+        var lines = script.Replace("\r", "", StringComparison.Ordinal).Split('\n');
+        var poolLine = lines.Single(line => line.TrimStart().StartsWith("$members = @(Get-SourceSet 'MSFT_PhysicalDisk'", StringComparison.Ordinal));
+        var poolQuery = poolLine[(poolLine.IndexOf("@(", StringComparison.Ordinal) + 2)..^1];
+        var virtualLine = lines.Single(line => line.Contains("foreach ($mappedDisk in @(Get-SourceSet 'MSFT_Disk'", StringComparison.Ordinal));
+        var virtualQuery = virtualLine[(virtualLine.IndexOf("@(", StringComparison.Ordinal) + 2)..virtualLine.LastIndexOf(")) {", StringComparison.Ordinal)];
+        var harness = """
+            $ErrorActionPreference='Stop'
+            $ProgressPreference='SilentlyContinue'
+            $WinPoolScopeLocators=$null
+            $sourceQueryFailures=[System.Collections.Generic.List[object]]::new()
+            $sourceQuerySuccesses=[System.Collections.Generic.List[object]]::new()
+            $pool=[pscustomobject]@{IsPrimordial=$false}
+            $virtual=[pscustomobject]@{UniqueId='exact-virtual'}
+            function Add-SourceObservation { param($item) throw 'failed-query-must-not-publish-an-observation' }
+            function Get-PhysicalDisk { param($StoragePool,$ErrorAction) throw 'fixture-member-association-failed' }
+            function Get-Disk { param($VirtualDisk,$ErrorAction) throw 'fixture-virtual-association-failed' }
+            """ + "\n" + script[helperStart..helperEnd]
+            + "\n$members=@(" + poolQuery + ")\n$mapped=@(" + virtualQuery + ")\n"
+            + "[ordered]@{Members=$members.Count;Mapped=$mapped.Count;SourceQueryFailures=@($sourceQueryFailures.ToArray());SourceQuerySuccesses=@($sourceQuerySuccesses.ToArray())}|ConvertTo-Json -Depth 6 -Compress";
+        using var result = await RunHelperAsync(harness);
+        Assert.Equal(0, result.RootElement.GetProperty("Members").GetInt32());
+        Assert.Equal(0, result.RootElement.GetProperty("Mapped").GetInt32());
+        Assert.Empty(result.RootElement.GetProperty("SourceQuerySuccesses").EnumerateArray());
+        var failures = result.RootElement.GetProperty("SourceQueryFailures").EnumerateArray().ToArray();
+        Assert.Equal(2, failures.Length);
+        Assert.Contains(failures, failure => failure.GetProperty("ClassName").GetString() == "MSFT_PhysicalDisk"
+            && failure.GetProperty("ReasonCode").GetString()!.Contains("fixture-member-association-failed", StringComparison.Ordinal));
+        Assert.Contains(failures, failure => failure.GetProperty("ClassName").GetString() == "MSFT_Disk"
+            && failure.GetProperty("ReasonCode").GetString()!.Contains("fixture-virtual-association-failed", StringComparison.Ordinal));
+        var facts = WinPoolFactCapture.Read(result.RootElement, StorageSnapshot.Empty("test"), SystemId.New(), purpose);
+        Assert.All(facts.Sources, source => Assert.Equal(FieldReadState.Failed, source.ReadState));
+        Assert.Empty(facts.Relationships);
+        Assert.Equal(FieldReadState.Failed, Assert.Single(facts.Collections).State);
     }
 
     [Fact]

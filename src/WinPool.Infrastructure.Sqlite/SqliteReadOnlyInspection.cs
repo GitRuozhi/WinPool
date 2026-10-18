@@ -39,7 +39,7 @@ internal sealed class SqliteReadOnlyInspection(SqliteConnection connection, stri
         }
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = temporaryDirectory is null ? $"file:{databasePath.Replace('\\', '/')}?immutable=1" : source,
+            DataSource = temporaryDirectory is null ? new Uri(Path.GetFullPath(databasePath)).AbsoluteUri + "?immutable=1" : source,
             Mode = SqliteOpenMode.ReadOnly, Cache = SqliteCacheMode.Private, Pooling = false, ForeignKeys = true,
             DefaultTimeout = 5
         }.ToString());

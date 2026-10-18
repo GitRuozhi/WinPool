@@ -821,12 +821,12 @@ dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity
 [S36]: Product.md
 [S37]: Development.md
 [S38]: Quality.md
-[S39]: ../tests/WinPool.Execution.Tests/SafeOperationExecutorTests.cs
+[S39]: https://github.com/GitRuozhi/WinPool/blob/2fb84ddc3e7c6929a6feb2cf7c73058fe90f9368/tests/WinPool.Execution.Tests/SafeOperationExecutorTests.cs
 [S40]: ../tests/WinPool.Execution.Tests/ExecutionSecurityTests.cs
 [S41]: ../tests/WinPool.App.Tests/RealVirtualDiskCreationCapacityResolverTests.cs
 [S42]: ../src/WinPool.Infrastructure.Windows/WindowsRealOperationPlanner.cs
-[S43]: ../src/WinPool.Execution/OperationPlanning.cs
-[S44]: ../src/WinPool.Execution/OperationExecution.cs
+[S43]: https://github.com/GitRuozhi/WinPool/blob/2fb84ddc3e7c6929a6feb2cf7c73058fe90f9368/src/WinPool.Execution/OperationPlanning.cs
+[S44]: https://github.com/GitRuozhi/WinPool/blob/2fb84ddc3e7c6929a6feb2cf7c73058fe90f9368/src/WinPool.Execution/OperationExecution.cs
 [S45]: ../src/WinPool.Infrastructure.Windows/WindowsRealStorageBackend.cs
 [S46]: ../src/WinPool.Infrastructure.Sqlite/OperationPlanRepository.StructureJobs.cs
 [S47]: ../src/WinPool.Agent/ProcessIncarnationVerifier.cs

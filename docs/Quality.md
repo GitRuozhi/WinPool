@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-2026-10-18：**源码已推进V0.62／0.6.2.0，已批准计划进入W6本机验收。** 升版前App／Agent集成构建为0警告／0错误；最终完整门、实盘批次与候选验收尚未执行。原始构建、TRX与性能证据集中于[本次目录](../artifacts/test-results/v062/)；失败修复后按影响范围补验，局部通过不等于V0.62完成。
+2026-10-18：**源码已推进V0.62／0.6.2.0，已批准计划进入W6本机验收。** 一次完整自动门已执行，原始结果为2517项：2464通过、53失败、0跳过。53项均在Infrastructure，修复后按影响范围补验；不能把补验次数累加成完整门用例数。实盘批次、8小时监控及实际候选验收仍未完成。原始构建、TRX与性能证据集中于[本次目录](../artifacts/test-results/v062/)，局部通过不等于V0.62完成。
 
 实施前最新两份独立全量验收记录均为2499 passed／1 failed／4 skip。方法与边界见[Review索引](Review/README.md)，本地[汇总A](../artifacts/acceptance-20261018/automated-summary.json)／[汇总B](../artifacts/test-results/acceptance-20261018/acceptance-test-summary.json)可读。唯一失败是旧私有字段源码断言；其历史结论不代表本次新二进制已验证。
 
@@ -23,6 +23,24 @@ V0.61的R1–R3修复及当次候选开发机验收继续作为历史有效证�
 不再以文档固定句子、文件数量、XAML 子串或无语义 wrapper 的存在作为产品验收。保留真实依赖方向、单写入方、准确目标、固定命令、事务、Unknown 不重放等行为检查。修 fixture 不能放松生产校验；删除旧实现时将有价值行为用例迁到实际所有者，其余同退役。
 
 ## 当前证据与缺口
+
+### V0.62 本机验收进行中
+
+[原始完整门清单](../artifacts/test-results/v062/final/complete-gate-runs.json)覆盖11个保留测试项目；Infrastructure按宿主与其它用例互斥拆成两次进程运行，以免共享全局宿主互相干扰。App、Agent、连接层、架构、Application、Domain、Execution、IPC、Monitoring及Persistence均通过；Infrastructure原始为966通过、53失败。修复包括窄事实profile对应的测试证据、PowerShell测试外层的进度流处理，以及生产目标比较中排除独立校验的HostCall传输标识；真实存储身份与参数仍完整比较。[相关补验](../artifacts/test-results/v062/final/Infrastructure-repairs.trx)为624通过、0失败、1门控跳过，含带真实宿主调用标识的正向执行、只读恢复及目标篡改拒绝。该跳过用例在原始完整门已实际通过。
+
+[Release构建](../artifacts/test-results/v062/final/Release-build-02.log)及[修复构建](../artifacts/test-results/v062/final/repair-build.log)均为0警告、0错误。修复构建身份含未提交受控修改，不能称为clean `4229118`；最终候选将另绑定稳定源码与文件hash。
+
+只读SQLite检查将数据库绝对路径编码成file URI，避免`#`或`%`被误作片段／转义而打开错误文件。[路径及迁移补验62项](../artifacts/test-results/v062/final/Persistence-uri-migration-repairs.trx)全部通过，包括真实路径、解码诱饵库、写入拒绝及源文件集合／hash不变；未受影响的GiB测量沿用原始完整门，不重复运行。
+
+Persistence的[197项完整结果](../artifacts/test-results/v062/final/WinPool.Persistence.Tests.trx)包含三项已开启的实际测量：
+
+| 测量 | 输入／样本 | 归档大小 | 实测耗时 |
+| --- | ---: | ---: | ---: |
+| 1 GiB直接归档 | 1,102,270,464 B／2,810,000 | 56,030,301 B | 压缩149.638 s |
+| 生产轮转生命周期 | 封存1,102,274,560 B／2,810,001 | 56,121,804 B | 生命周期170.576 s |
+| 7z参数比较 | 129,351,680 B／330,000 | 64m／2线程7,272,628 B；128m／4线程7,273,814 B | 15.520／15.767 s |
+
+生产参数为`-mx=9 -m0=lzma2 -md=64m -ms=on -mmt=2`，比较中峰值内存718,884,864 B，对照1,304,961,024 B，少44.91%，保留当前参数。前两项校验解压哈希，第三项执行`7z t`；TRX未记录哈希字面值。这些测量不替代8小时20 Hz实际监控。
 
 <a id="v061-fixes"></a>
 

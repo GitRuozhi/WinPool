@@ -40,6 +40,17 @@ public sealed record WindowsStorageCommandTarget(
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PowerShellHostCall? HostCall { get; init; }
+
+    // HostCall binds dispatch/host completion. It is not a storage identity and
+    // is checked separately by the adapter and Agent lifecycle guards.
+    internal static bool SameStorageTarget(WindowsStorageCommandTarget left, WindowsStorageCommandTarget right)
+    {
+        static bool SameItems<T>(IReadOnlyList<T>? a, IReadOnlyList<T>? b) =>
+            a is null ? b is null : b is not null && a.SequenceEqual(b);
+        return SameItems(left.PhysicalMembers, right.PhysicalMembers) && SameItems(left.TierInputs, right.TierInputs)
+            && (left with { HostCall = null, PhysicalMembers = null, TierInputs = null })
+                == (right with { HostCall = null, PhysicalMembers = null, TierInputs = null });
+    }
 }
 
 public sealed record WindowsStoragePhysicalMemberTarget(string StableId, string UniqueId, string ObjectId, string SerialNumber);

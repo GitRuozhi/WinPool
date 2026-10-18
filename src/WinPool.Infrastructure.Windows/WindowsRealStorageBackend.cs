@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
+using static WinPool.Infrastructure.Windows.WindowsStorageCommandTarget;
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -484,7 +485,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
         var partition = topology.Snapshot.Partitions.Single(item => item.StableId == current.Id);
         var currentTarget = WindowsRealStorageTargetBuilder.Build(topology,
             RealTargetReference.ForExisting(id), new Dictionary<string, string>()) with { CreatedInThisPlan = true };
-        if (currentTarget != target || parentDisk.System != topology.SystemId
+        if (!SameStorageTarget(currentTarget, target) || parentDisk.System != topology.SystemId
             || parentDisk.Kind != StorageObjectKind.OsDisk
             || partition.OsDiskStableId != parentDisk.ProviderKey
             || partition.Offset != creator.OffsetBytes || partition.Size != creator.SizeBytes
@@ -746,7 +747,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                 return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
             currentTarget = currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint,
                 RelatedUniqueId = Text(currentTier, "UniqueId"), RelatedObjectId = Text(currentTier, "ObjectId") };
-            if (target != currentTarget || !TieredCreationCapabilityMatches(step, target, provider, closure.PhysicalDiskId))
+            if (!SameStorageTarget(target, currentTarget) || !TieredCreationCapabilityMatches(step, target, provider, closure.PhysicalDiskId))
                 return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
             // The exact pool-level constraint template remains observable. It supplies
             // current identity/layout evidence, not a synthetic pre-creation inventory.
@@ -812,7 +813,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             var currentTarget = WindowsRealStorageTargetBuilder.Build(current, command.Pool, new Dictionary<string, string>())
                 with { ExpectedFingerprint = target.ExpectedFingerprint,
                     RelatedUniqueId = Text(templateObject, "UniqueId"), RelatedObjectId = Text(templateObject, "ObjectId") };
-            if (currentTarget != target || !TieredCreationCapabilityMatches(frozen.Steps[0], target, provider, closure.PhysicalDiskId)) return null;
+            if (!SameStorageTarget(currentTarget, target) || !TieredCreationCapabilityMatches(frozen.Steps[0], target, provider, closure.PhysicalDiskId)) return null;
             var pool = current.Snapshot.StoragePools.Single(item => item.StableId == command.Pool.Existing!.Value.ProviderKey);
             var template = current.Snapshot.StorageTiers.Single(item => item.StableId == templateObject.Id);
             var vdObject = FindExact(current, StorageObjectKind.VirtualDisk, provider.UniqueId!, provider.ObjectId!, string.Empty);
@@ -931,7 +932,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             var currentTarget = WindowsRealStorageTargetBuilder.Build(current, command.Pool, new Dictionary<string, string>())
                 with { ExpectedFingerprint = target.ExpectedFingerprint,
                     RelatedUniqueId = Text(currentTier, "UniqueId"), RelatedObjectId = Text(currentTier, "ObjectId") };
-            return currentTarget == target;
+            return SameStorageTarget(currentTarget, target);
         }
         var automaticHdd = command.CreationMechanism == TieredVirtualDiskCreationMechanism.WindowsAutomaticHdd;
         var expectedInput = new WindowsTieredCreationInput(automaticHdd ? null : target.RelatedUniqueId, automaticHdd ? null : target.RelatedObjectId,
@@ -1087,7 +1088,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                 return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
             var currentTarget = WindowsRealStorageTargetBuilder.Build(topology,
                 command.PhysicalDisk, new Dictionary<string, string>());
-            if (target != (currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint }))
+            if (!SameStorageTarget(target, currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint }))
                 return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
 
             var created = FindExact(topology, StorageObjectKind.StoragePool,
@@ -1191,7 +1192,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             if (string.IsNullOrEmpty(target.PhysicalMemberObjectId))
                 currentTarget = currentTarget with { PhysicalMemberObjectId = string.Empty };
             if (topology.RequireObject(existing).Id != existing.ProviderKey
-                || target != (currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint }))
+                || !SameStorageTarget(target, currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint }))
                 return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
             var observed = ObserveInitializedGpt(topology, target);
             if (observed?.GptInitialization?.ProviderMsrStableId is null)
@@ -1253,7 +1254,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                     || closure.Objects.Any(item => item.ObjectType is FactObjectType.Partition or FactObjectType.Volume)) return false;
                 var vdObject = FindExact(current, StorageObjectKind.VirtualDisk, target.UniqueId, target.ObjectId, string.Empty);
                 if (vdObject is null || vdObject.Id != existing.ProviderKey
-                    || WindowsRealStorageTargetBuilder.Build(current, command.VirtualDisk, new Dictionary<string, string>()) != target) return false;
+                    || !SameStorageTarget(WindowsRealStorageTargetBuilder.Build(current, command.VirtualDisk, new Dictionary<string, string>()), target)) return false;
                 var vd = current.Snapshot.VirtualDisks.Single(item => item.StableId == vdObject.Id);
                 var pool = current.Snapshot.StoragePools.Single(item => item.StableId == vd.PoolStableId);
                 var tiers = current.Snapshot.StorageTiers.Where(item => item.PoolStableId == pool.StableId).ToArray();
@@ -1388,7 +1389,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
                 command.Disk, new Dictionary<string, string>());
             var disk = topology.Snapshot.OsDisks.Single(item => item.StableId == currentObject.Id);
             if (currentObject.Id != existing.ProviderKey
-                || target != (currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint })
+                || !SameStorageTarget(target, currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint })
                 || !disk.PartitionStyle.Equals("GPT", StringComparison.OrdinalIgnoreCase)
                 || disk.IsOffline != !command.Online
                 || !Guid.TryParse(Text(currentObject, "Guid"), out var observedDiskGuid)
@@ -1490,7 +1491,7 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             var currentTarget = WindowsRealStorageTargetBuilder.Build(topology,
                 command.Volume, new Dictionary<string, string>());
             if (currentObject.Id != existing.ProviderKey
-                || target != (currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint })
+                || !SameStorageTarget(target, currentTarget with { ExpectedFingerprint = target.ExpectedFingerprint })
                 || VerifyAfter(command, target, provider, topology, topology) is null)
                 return Unknown(persistedSteps, "real.reconciliation_step_outcome_unknown");
 

@@ -209,7 +209,7 @@ public sealed class WindowsRealPlanSafetyTests
         Assert.Equal(clusterBytes, Assert.IsType<FormatVolumeCommand>(formatStep.Command).ClusterBytes);
         Assert.Contains("pending-exact-created-volume", formatStep.SupportEvidence);
         fixture.SetCreatedRawDataVolume();
-        var outputs = new Dictionary<string, string> { ["create"] = await fixture.VerifiedEvidence("partition:new") };
+        var outputs = new Dictionary<string, string> { ["create"] = await fixture.VerifiedEvidence(plan, "partition:new") };
         var preflight = await fixture.Backend.PreflightStepAsync(plan, formatStep, outputs, CancellationToken.None);
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(preflight.TargetEvidenceJson)!;
         Assert.Equal("volume:raw", target.RelatedUniqueId);
@@ -280,7 +280,13 @@ public sealed class WindowsRealPlanSafetyTests
             new StorageObjectId(SystemId.New(), StorageObjectKind.Partition, "partition:data")));
 
         fixture.PartitionSizes.OnRead = fixture.SetRawDisk;
-        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadResizeRange(partition));
+        var advisory = await fixture.ReadResizeRange(partition);
+        Assert.Equal(partition, advisory.Partition);
+        fixture.PartitionSizes.OnRead = null;
+        // A range cannot reserve future provider state. The actual prepare boundary
+        // must observe that this partition disappeared after the advisory read.
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Prepare(fixture.Proposal(OperationIntent.ResizePartition,
+            [partition], [Step("resize", new ResizePartitionCommand(RealTargetReference.ForExisting(partition), 160L << 20))], "Resized")));
         Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
@@ -330,7 +336,12 @@ public sealed class WindowsRealPlanSafetyTests
         Assert.Equal(9, target.DiskNumber);
         Assert.Equal(0, fixture.Adapter.CallCount);
         fixture.PartitionSizes.OnRead = () => fixture.SetGptPartitions();
-        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.ReadResizeRange(partition));
+        _ = await fixture.ReadResizeRange(partition);
+        Assert.Equal(2, fixture.PartitionSizes.LastTarget!.PhysicalMembers!.Count);
+        fixture.PartitionSizes.OnRead = null;
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan, plan.RealOperation.Steps.Single(),
+            new Dictionary<string, string>(), CancellationToken.None));
+        Assert.Equal(0, fixture.Adapter.CallCount);
     }
 
     [Fact]
@@ -516,7 +527,7 @@ public sealed class WindowsRealPlanSafetyTests
             new Dictionary<string, string>(), CancellationToken.None);
 
         fixture.SetRawDisk();
-        var verified = await fixture.VerifiedEvidence(NewlyCreatedObjectId: null);
+        var verified = await fixture.VerifiedEvidence(plan, NewlyCreatedObjectId: null);
         var next = await fixture.Backend.PreflightStepAsync(plan, plan.RealOperation.Steps[1],
             new Dictionary<string, string> { ["remove"] = verified }, CancellationToken.None);
         var target = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(next.TargetEvidenceJson);
@@ -563,14 +574,14 @@ public sealed class WindowsRealPlanSafetyTests
         var plan = await fixture.Prepare(proposal);
         Assert.Equal(0, fixture.Sizes.ReadCount); // The new pool is not queried before it exists.
         fixture.SetNewPool();
-        var verified = await fixture.VerifiedEvidence(NewPoolId);
+        var verified = await fixture.VerifiedEvidence(plan, NewPoolId);
         var step = plan.RealOperation!.Steps[1];
         _ = await fixture.Backend.PreflightStepAsync(plan, step,
             new Dictionary<string, string> { ["pool"] = verified }, CancellationToken.None);
         Assert.Equal(1, fixture.Sizes.ReadCount);
         Assert.Equal(0, fixture.Adapter.CallCount);
 
-        var wrongIdentity = await fixture.VerifiedEvidence("pool:other");
+        var wrongIdentity = await fixture.VerifiedEvidence(plan, "pool:other");
         await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Backend.PreflightStepAsync(plan,
             step, new Dictionary<string, string> { ["pool"] = wrongIdentity }, CancellationToken.None));
         Assert.Equal(0, fixture.Adapter.CallCount);
@@ -1015,9 +1026,9 @@ public sealed class WindowsRealPlanSafetyTests
                 new TrustedRealSession(SessionId.New(), "synthetic-product", "synthetic-process",
                     1234, Now.AddMinutes(-1), @"C:\Synthetic\WinPool.Agent.exe", true), CancellationToken.None);
 
-        public async Task<string> VerifiedEvidence(string? NewlyCreatedObjectId)
+        public async Task<string> VerifiedEvidence(OperationPlan plan, string? NewlyCreatedObjectId)
         {
-            var topology = await reader.CaptureAsync(CancellationToken.None);
+            var topology = await reader.CaptureAsync(CancellationToken.None, plan.RealOperation!.EvidenceProfile);
             var closure = topology.RequireSinglePhysicalClosure([Id(StorageObjectKind.PhysicalDisk, PhysicalId)]);
             return JsonSerializer.Serialize(new WindowsVerifiedStepEvidence(
                 closure.Fingerprint, closure.PhysicalMemberFingerprint,

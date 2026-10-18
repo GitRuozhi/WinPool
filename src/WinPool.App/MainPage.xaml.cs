@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 using WinPool.App.ViewModels;
 using WinPool.App.Services;
 using WinPool.Application;
+using WinPool.Infrastructure.Windows;
 using WinPool_App.Controls;
 
 namespace WinPool_App;
@@ -66,6 +67,8 @@ public sealed partial class MainPage : Page
     private readonly Dictionary<Border, TableCellContext> _tableCellContexts = [];
     private string? _hoveredColumnKey;
     private string _renderedSignature = string.Empty;
+    private CancellationTokenSource? _documentTransferCancellation;
+    private bool _importingDocument, _documentTransferCancelRequested;
 
     public WorkspaceViewModel ViewModel { get; private set; } = null!;
 
@@ -74,6 +77,7 @@ public sealed partial class MainPage : Page
         InitializeComponent();
         LabelColumnDefinition.MaxWidth = LabelColumnMaxWidth;
         Loaded += MainPage_Loaded;
+        Unloaded += (_, _) => _documentTransferCancellation?.Cancel();
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -91,6 +95,7 @@ public sealed partial class MainPage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
+        _documentTransferCancellation?.Cancel();
         ViewModel.WorkspaceSelectionChanged -= ViewModel_WorkspaceSelectionChanged;
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.NodeContextMenuRequested = null;
@@ -1293,6 +1298,8 @@ public sealed partial class MainPage : Page
             return;
         }
         CommandButtonsPanel.Children.Clear();
+        UpdateDocumentTransferActivity();
+        if (_documentTransferCancellation is not null) return;
         var specs = BuildActionPanelSpecs();
         foreach (var spec in specs)
         {
@@ -1326,7 +1333,7 @@ public sealed partial class MainPage : Page
             {
                 Text = spec.Text,
                 Icon = new FontIcon { FontSize = 14, Glyph = spec.Glyph },
-                IsEnabled = spec.Enabled
+                IsEnabled = spec.Enabled && _documentTransferCancellation is null
             };
             item.Click += async (_, _) => await RunCommandAsync(spec.Action);
             flyout.Items.Add(item);
@@ -1360,7 +1367,7 @@ public sealed partial class MainPage : Page
                 }
             },
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            IsEnabled = enabled
+            IsEnabled = enabled && _documentTransferCancellation is null
         };
         button.SetValue(AutomationProperties.NameProperty, text);
         ContextHelp.Set(button, purpose);
@@ -1406,26 +1413,66 @@ public sealed partial class MainPage : Page
         await ViewModel.ScanAsync();
     }
 
-    private async Task ExportAsync()
+    private Task ExportAsync() => RunDocumentTransferAsync(importing: false);
+    private Task ImportAsync() => RunDocumentTransferAsync(importing: true);
+
+    private async Task RunDocumentTransferAsync(bool importing)
     {
-        if (await ViewModel.ExportActiveSystemAsync() is not null)
+        if (_documentTransferCancellation is not null) return;
+        using var cancellation = new CancellationTokenSource();
+        _documentTransferCancellation = cancellation;
+        _importingDocument = importing;
+        _documentTransferCancelRequested = false;
+        BuildCommandButtons();
+        var l = ViewModel.Localization;
+        try
         {
-            PublishWorkspaceInfo(
-                Text("导出模拟系统", "Export simulated system"),
-                Text("模拟系统已导出。", "The simulated system was exported."),
-                "workspace.export.completed");
+            var completed = importing
+                ? await ViewModel.ImportSystemAsync(cancellation.Token)
+                : await ViewModel.ExportActiveSystemAsync(cancellation.Token) is not null;
+            if (completed)
+                PublishWorkspaceInfo(l[importing ? "DocumentImportTitle" : "DocumentExportTitle"],
+                    l[importing ? "DocumentImportCompleted" : "DocumentExportCompleted"],
+                    importing ? "workspace.import.completed" : "workspace.export.completed");
+        }
+        catch (SimulationDocumentSaveOutcomeUnknownException exception)
+        {
+            var message = string.Format(l["DocumentImportOutcomeUnknown"], exception.DocumentId);
+            ViewModel.NotificationService.Publish(GlobalNotificationSeverity.Warning, l["DocumentImportTitle"], message,
+                "workspace-operation", new GlobalNotificationOptions
+                {
+                    OccurrenceKey = "workspace.import.outcome_unknown:" + exception.DocumentId,
+                    Code = "workspace.import.outcome_unknown", Target = exception.DocumentId,
+                    Detail = $"{message}{Environment.NewLine}SHA256: {exception.Sha256}"
+                });
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            PublishWorkspaceInfo(l[importing ? "DocumentImportTitle" : "DocumentExportTitle"],
+                l[importing ? "DocumentImportCancelled" : "DocumentExportCancelled"],
+                importing ? "workspace.import.cancelled" : "workspace.export.cancelled");
+        }
+        finally
+        {
+            _documentTransferCancellation = null;
+            BuildCommandButtons();
         }
     }
 
-    private async Task ImportAsync()
+    private void CancelDocumentTransfer_Click(object sender, RoutedEventArgs e)
     {
-        if (await ViewModel.ImportSystemAsync())
-        {
-            PublishWorkspaceInfo(
-                Text("导入模拟系统", "Import simulated system"),
-                Text("模拟系统已导入。", "The simulated system was imported."),
-                "workspace.import.completed");
-        }
+        _documentTransferCancelRequested = true;
+        UpdateDocumentTransferActivity();
+        _documentTransferCancellation?.Cancel();
+    }
+
+    private void UpdateDocumentTransferActivity()
+    {
+        ImportExportActivity.Visibility = _documentTransferCancellation is null ? Visibility.Collapsed : Visibility.Visible;
+        ImportExportCancelButton.Content = ViewModel.Localization["Cancel"];
+        ImportExportCancelButton.IsEnabled = !_documentTransferCancelRequested;
+        ImportExportStatusText.Text = ViewModel.Localization[_documentTransferCancelRequested
+            ? "DocumentTransferCancelling" : _importingDocument ? "DocumentImportRunning" : "DocumentExportRunning"];
     }
 
     private Task NavigateStructureAsync()

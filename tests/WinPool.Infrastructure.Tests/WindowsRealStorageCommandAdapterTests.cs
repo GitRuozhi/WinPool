@@ -684,7 +684,7 @@ public sealed class WindowsRealStorageCommandAdapterTests
     public async Task CompressedFixedTieredCreationRetainsLiveEvidenceAcrossChildScope(
         string shape, bool invoked, string? diagnostic)
     {
-        // Exercise the complete production fixed script through its production
+        // Exercise the complete production fixed script through the test-only
         // compressed child-scope loader. All reachable storage functions are
         // local fakes, including Import-Module; no Windows storage API is loaded.
         var fakeCommands = """
@@ -1003,7 +1003,11 @@ public sealed class WindowsRealStorageCommandAdapterTests
         // the unchanged typed JSON read by the production script. No script
         // file or Windows storage module is loaded by this local fake harness.
         var invocation = script.StartsWith("param($request)", StringComparison.Ordinal) ? " ([Console]::In.ReadToEnd() | ConvertFrom-Json)" : "";
-        var fixtureScript = fakeCommands + "\n& {\n" + script + "\n}" + invocation + "\n" + suffix;
+        // Fakes deserialize their input before entering the production scope.
+        // Suppress module-auto-load progress before that first Utility command,
+        // while retaining the strict empty-stderr assertion below.
+        var fixtureScript = "$ProgressPreference='SilentlyContinue'\n" + fakeCommands
+            + "\n& {\n" + script + "\n}" + invocation + "\n" + suffix;
         var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory,
             "WindowsPowerShell", "v1.0", "powershell.exe"))
         {

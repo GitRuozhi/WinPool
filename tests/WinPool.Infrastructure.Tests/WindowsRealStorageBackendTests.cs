@@ -716,7 +716,7 @@ public sealed partial class WindowsRealStorageBackendTests
         var plan = await fixture.Backend.PrepareAsync(new RealOperationIntentRequest(OperationIntent.CreatePartition,
             disk.System, [disk], [create, format], "New formatted EFI"), fixture.Session, OperationId.New(), CancellationToken.None);
         fixture.SnapshotTransform = snapshot => EfiSnapshot(snapshot);
-        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None, plan.RealOperation!.EvidenceProfile);
         var closure = topology.RequireSinglePhysicalClosure([disk]);
         var created = new WindowsVerifiedStepEvidence(closure.Fingerprint, closure.PhysicalMemberFingerprint,
             "partition:efi", "provider.returned");
@@ -790,7 +790,7 @@ public sealed partial class WindowsRealStorageBackendTests
         var plan = await fixture.PrepareAsync(twoSteps: true);
         var steps = plan.RealOperation!.Steps;
         fixture.SetOffline(true);
-        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None, plan.RealOperation.EvidenceProfile);
         var closure = topology.RequireSinglePhysicalClosure([fixture.Id(StorageObjectKind.OsDisk, DiskId)]);
         var verifiedJson = JsonSerializer.Serialize(new WindowsVerifiedStepEvidence(
             closure.Fingerprint, closure.PhysicalMemberFingerprint, null, "provider.returned"));
@@ -829,7 +829,7 @@ public sealed partial class WindowsRealStorageBackendTests
         var plan = await fixture.PrepareAsync(twoSteps: true);
         var steps = plan.RealOperation!.Steps;
         fixture.SetOffline(true);
-        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None, plan.RealOperation.EvidenceProfile);
         var closure = topology.RequireSinglePhysicalClosure(
             [fixture.Id(StorageObjectKind.OsDisk, DiskId)]);
         var verifiedJson = JsonSerializer.Serialize(new WindowsVerifiedStepEvidence(
@@ -868,7 +868,7 @@ public sealed partial class WindowsRealStorageBackendTests
         var fixture = new Fixture();
         var plan = await fixture.PrepareAsync();
         fixture.SetOffline(true);
-        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None);
+        var topology = await fixture.Reader.CaptureAsync(CancellationToken.None, plan.RealOperation!.EvidenceProfile);
         var closure = topology.RequireSinglePhysicalClosure(
             [fixture.Id(StorageObjectKind.OsDisk, DiskId)]);
         var evidence = JsonSerializer.Serialize(new WindowsVerifiedStepEvidence(
@@ -1969,6 +1969,9 @@ public sealed partial class WindowsRealStorageBackendTests
 
     [Theory]
     [InlineData("current", true)]
+    [InlineData("host-metadata", true)]
+    [InlineData("host-wrong-target", false)]
+    [InlineData("host-wrong-member-list", false)]
     [InlineData("legacy-missing-parent", true)]
     [InlineData("foreign-plan", false)]
     [InlineData("foreign-step", false)]
@@ -2001,6 +2004,11 @@ public sealed partial class WindowsRealStorageBackendTests
             { PlanHash = plan.PlanHash, StepId = step.Id };
         switch (scenario)
         {
+            case "host-metadata": target = target with { HostCall = new(Guid.NewGuid(), 1234, DateTimeOffset.UtcNow, Guid.NewGuid()) }; break;
+            case "host-wrong-target": target = target with { HostCall = new(Guid.NewGuid(), 1234, DateTimeOffset.UtcNow, Guid.NewGuid()), ObjectId = "another-provider-object" }; break;
+            case "host-wrong-member-list": target = target with
+                { HostCall = new(Guid.NewGuid(), 1234, DateTimeOffset.UtcNow, Guid.NewGuid()),
+                    PhysicalMembers = target.PhysicalMembers!.Select(member => member with { SerialNumber = member.SerialNumber + "-changed" }).ToArray() }; break;
             case "legacy-missing-parent": receipt = receipt with { PlanHash = null, StepId = null }; target = target with { ParentUniqueId = "" }; break;
             case "foreign-plan": receipt = receipt with { PlanHash = "another-plan" }; break;
             case "foreign-step": receipt = receipt with { StepId = "another-step" }; break;
@@ -3074,7 +3082,8 @@ public sealed partial class WindowsRealStorageBackendTests
 
         public Fixture(bool secondDisk = false, bool sharedOrdinaryPool = false, bool expirePostCallWindow = false,
             IWindowsRealStorageCapabilityReader? tierCapabilities = null, bool scopedCaptures = false,
-            IWindowsStorageJobReader? storageJobs = null, bool maximumCapacityClock = false, TimeProvider? backendClock = null)
+            IWindowsStorageJobReader? storageJobs = null, bool maximumCapacityClock = false, TimeProvider? backendClock = null,
+            IWindowsRealStorageCommandAdapter? commandAdapter = null)
         {
             this.secondDisk = secondDisk;
             this.sharedOrdinaryPool = sharedOrdinaryPool;
@@ -3091,7 +3100,7 @@ public sealed partial class WindowsRealStorageBackendTests
             var planner = new WindowsRealOperationPlanner(
                 Reader, new ForbiddenPartitionSizeReader(), new AdministratorPrivilege(),
                 new FixedTimeProvider(Now), Safety, capabilities: tierCapabilities ?? new SyntheticPoolCapabilities());
-            Backend = new WindowsRealStorageBackend(Adapter, planner, Reader,
+            Backend = new WindowsRealStorageBackend(commandAdapter ?? Adapter, planner, Reader,
                 backendClock ?? (postCallTime is not null ? postCallTime
                     : maximumCapacityClock ? new ElapsedTimeProvider(Now) : new FixedTimeProvider(Now)), storageJobs);
         }

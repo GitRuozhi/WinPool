@@ -2,6 +2,7 @@ using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
+using static WinPool.Infrastructure.Windows.WindowsStorageCommandTarget;
 
 namespace WinPool.Infrastructure.Windows;
 
@@ -193,7 +194,7 @@ public sealed partial class WindowsRealStorageBackend
             if (recorded is { ParentUniqueId.Length: 0 } && frozenStep.Command is SetPhysicalDiskUsageCommand
                 && noCall.Code == "adapter.closed-command-or-target-required" && noCall.PlanHash is null)
                 recorded = recorded with { ParentUniqueId = current.ParentUniqueId };
-            if (recorded is null || JsonSerializer.Serialize(recorded) != JsonSerializer.Serialize(current))
+            if (recorded is null || !SameStorageTarget(recorded, current))
                 return Unknown(progress, "real.reconciliation_no_call_target_invalid");
             _ = await planner.ValidateMultiMaximumSafetyAsync(topology, closure, frozenStep.Command, ct).ConfigureAwait(false);
             var reconciled = progress.Select((item, index) => index < prefixLength ? item : index == prefixLength
