@@ -5,6 +5,11 @@ namespace WinPool.App.Services;
 /// <summary>The observer and capture reply may deliver the same committed batch in either order.</summary>
 public static class RealScopedInventoryRefreshPolicy
 {
+    public static bool IsCurrentCompleteBatch(StorageSystemCatalog catalog,
+        StorageSystemDocument response, StorageInventoryScope requested) =>
+        catalog.Systems.FirstOrDefault(document => document.IsLocal && document.SystemId == requested.SystemId) is { } local
+        && IsCurrentCompleteBatch(local, response, requested);
+
     public static async Task<bool> GuardInvalidDataAsync(Func<Task<bool>> refresh,
         Action<InvalidDataException> reportFailure)
     {

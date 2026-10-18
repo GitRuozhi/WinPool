@@ -1896,6 +1896,7 @@ public sealed partial class MainWindow : Window
             // The editor pages bind the active system snapshot on navigation.
             // Defer until the ComboBox has closed. Same-system commits also
             // raise this event; only an actual identity change needs navigation.
+            var queued = System.Diagnostics.Stopwatch.GetTimestamp();
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (_closePreparationStarted || _windowClosed)
@@ -1904,7 +1905,13 @@ public sealed partial class MainWindow : Window
                 }
 
                 UpdateActiveSystemName();
+                var changedEditorSystem = (SelectedShellItem?.Page is ShellPageKind.StorageStructure or ShellPageKind.DiskPartition)
+                    && !_editorInventoryRefresh.IsSameSystem(ViewModel.SelectedSystem);
                 RefreshSelectedSystemEditor();
+                if (changedEditorSystem)
+                    StorageOperationTiming.Record("workspace.system-switch.editor-applied", queued,
+                        stepId: ViewModel.ActiveDocument.Id, scope: SelectedShellItem!.Page.ToString(),
+                        generation: ViewModel.ActiveDocument.Revision);
             });
             PersistWorkspaceState();
         }

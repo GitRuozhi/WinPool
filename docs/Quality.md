@@ -68,6 +68,10 @@ IPC中间JSON层重新转义导致正文SHA失配的问题已修复，保留原�
 
 [3 MiB实际连续10次改名](../artifacts/test-results/v062/gui-3m-rename-measurements-02.json)中，反馈最大17.612 ms、本地候选发布最大762.231 ms；编辑页绑定最大1179.404 ms，不等于延迟绘制完成。改名后的Workspace／编辑页仍各构造完整VM；现已对严格相同baseline与纯Rename链复用节点并更新全部snapshot上下文，排序／结构变化保持重建；纯选择复用根。[协调器与保存40项](../artifacts/test-results/v062/final/Infrastructure-name-reuse.trx)通过，优化后的实际GUI仍待测量。新建[MAX旧基线保守下界](../artifacts/test-results/v062/max-baseline-bounds.json)仅从准确child关联的非重叠阶段推导，后续以新墙钟／非写上界验证，不能把旧job含人工时长当精确基准。
 
+上述原始CIM修复已在实盘完成[显式只读对账](../artifacts/test-results/v062/wdc-jobstate-rechecked.json)：已取得两轮未变闭包及终态作业，未创建VD、Pending已清。App随后因恢复刷新后用当前模拟项而非本机目录项校验，仍保留界面屏障；现修正本机目录校验，并在恢复草稿之前调用既有完整恢复闭环，[恢复／同步62项](../artifacts/test-results/v062/final/App-local-recovery-catalog.trx)通过。实际界面解除阻塞待新构建，不压遮罩或绕过真实校验。
+
+[节点复用后的10次改名](../artifacts/test-results/v062/gui-simulation-renames-3m-reuse-01.json)中，发布最大13.239 ms、本地候选最大624.722 ms、编辑页绑定最大706.481 ms；10次均未构造新的完整根VM，实际显示与后台保存继续正常。该批使用GUI可访问性动作，尚有上述旧恢复遮罩，鼠标选择测试未进入处理器，未记通过；完整鼠标交互及已加载系统切换需在解除阻塞后验证。
+
 旧MAX历史144.454／102.418 s实际为Prepared job创建至终态，包含确认停留且不包含此前Prepare；缺少原生写调用开始／返回，不能据此精确计算本版70%非写开销／50%端到端降幅。对应历史读取／阶段原始数据仍保留，新的同口径性能比较待完成。
 
 <a id="v061-fixes"></a>

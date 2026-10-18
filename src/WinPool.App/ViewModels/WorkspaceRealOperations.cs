@@ -165,7 +165,7 @@ public sealed partial class WorkspaceViewModel
             ApplyLocalInventory(document);
             if (!complete)
                 throw new InvalidDataException(document.SourceFacts?.ScopedCollection?.ReasonCode ?? "The related inventory is incomplete.");
-            if (!RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(ActiveDocument, document, scope))
+            if (!RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(SystemCatalog, document, scope))
                 return false;
             if (SelectedSystem.IsLocal)
             {

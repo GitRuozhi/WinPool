@@ -198,6 +198,8 @@ public partial class EditorPageBase
                 session.RealApplyMessage = Text("原结构作业仍待核对；剩余目标已保留。", "The previous structural job still needs reconciliation; its remaining goal is retained.");
                 return false;
             }
+            ViewModel.ObserveStructureJob(status);
+            await ViewModel.RecoverRealOperationsAsync();
             if (!await ViewModel.ReadPublishedRealInventoryAsync())
                 throw new IOException("The verified inventory for the remaining structural goal is unavailable.");
             if (session.SystemId != ViewModel.ActiveDocument.SystemId
@@ -205,10 +207,9 @@ public partial class EditorPageBase
                 throw new InvalidOperationException("The bound draft changed while its saved goal was being read; it was preserved.");
             session.RealApplyMessage = string.Join(Environment.NewLine, status.Completed.Append(
                 Text("剩余目标已恢复；请检查后再次点击应用并确认。", "The remaining goal is restored. Review it, then apply and confirm again.")));
-            ViewModel.ObserveStructureJob(status);
             return true;
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException or TimeoutException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or TimeoutException)
         {
             session.RealApplyMessage = Text("剩余目标已保留：", "Remaining goal retained: ") + exception.Message;
             return false;

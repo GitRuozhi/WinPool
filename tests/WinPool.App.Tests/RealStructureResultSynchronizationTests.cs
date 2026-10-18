@@ -12,6 +12,53 @@ namespace WinPool.App.Tests;
 /// <summary>Exercises the production frozen-stage owner and recovery ordering, not a second draft consumer.</summary>
 public sealed class RealStructureResultSynchronizationTests
 {
+    [Fact]
+    public async Task CachedFrozenRecoveryMapsTheLocalDraftAndReleasesTheExactBarrierWhileASimulationIsSelected()
+    {
+        var f = new Fixture();
+        f.Register();
+        var unknown = f.Frozen with { State = RealOperationState.OutcomeUnknown, RequiresReconciliation = true };
+        Assert.True(f.Submission.Observe(unknown));
+        f.Results.ObserveUnresolved(unknown);
+        var batch = f.Fresh with { SourceFacts = f.Fresh.SourceFacts! with { ObservationId = Guid.NewGuid() } };
+        var scope = batch.SourceFacts!.ScopedCollection!.Scope;
+        var catalog = new StorageSystemCatalog();
+        catalog.ReplaceLocal(f.Document);
+        var selected = batch.AsImportedSimulation("Selected simulation");
+        catalog.AddSimulation(selected);
+        var connection = new RecordingConnection(_ => throw new InvalidOperationException("Recovery must not issue a write or load historical evidence."));
+        var cache = RealOperationStatusCache.For(connection);
+        cache.Remember(unknown);
+        var terminal = Assert.IsType<AgentRealOperationResponse>(await cache.ResolveAsync(LightStatus(f.Terminal, 2), default));
+        var notified = false;
+
+        Assert.True(await f.Results.RecoverAsync(terminal, () =>
+        {
+            Assert.True(f.Submission.IsBlocked);
+            Assert.True(f.Session.OutcomeUnknown);
+            Assert.True(catalog.TryReplaceLocalReport(batch));
+            Assert.False(RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(selected, batch, scope));
+            return Task.FromResult(RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(catalog, batch, scope));
+        }, () => catalog.Systems.Single(document => document.IsLocal), (_, refreshed) =>
+        {
+            notified = true;
+            Assert.True(refreshed);
+            Assert.False(f.Session.OutcomeUnknown);
+            Assert.False(f.Session.RealResultSynchronizationPending);
+            Assert.Equal("vd:verified", f.Session.PoolIntents[Fixture.PoolId].VerifiedVirtualDiskId);
+            Assert.True(f.Submission.IsBlocked); // Draft mapping and notification precede release.
+            return true;
+        }, status => Assert.True(f.Submission.Observe(status)), default));
+
+        Assert.True(notified);
+        Assert.False(f.Submission.IsBlocked);
+        Assert.False(f.Session.OutcomeUnknown);
+        Assert.False(f.Session.RealResultSynchronizationPending);
+        Assert.Same(selected, catalog.Find(selected.Id));
+        Assert.False(selected.IsLocal);
+        Assert.Empty(connection.Requests);
+    }
+
     [Theory]
     [InlineData(RealOperationState.Running)]
     [InlineData(RealOperationState.OutcomeUnknown)]

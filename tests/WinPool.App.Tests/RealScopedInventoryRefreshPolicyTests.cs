@@ -51,6 +51,67 @@ public sealed class RealScopedInventoryRefreshPolicyTests
         Assert.True(RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(catalog.Systems.Single(), reply, requested));
     }
 
+    [Fact]
+    public void RecoveryUsesTheLocalCatalogBatchWhileASimulationRemainsSelected()
+    {
+        var (batch, requested) = Batch();
+        var simulation = batch.AsImportedSimulation("Selected simulation");
+        var catalog = new StorageSystemCatalog();
+        catalog.ReplaceLocal(batch with { UpdatedAt = batch.UpdatedAt.AddSeconds(-1) });
+        catalog.AddSimulation(simulation);
+        var selected = catalog.Find(simulation.Id)!;
+        var submission = new RealOperationSubmissionState();
+        var hash = new string('a', 64);
+        var unknown = new AgentRealOperationStatusResponse(requested.OperationId, 1,
+            RealOperationState.OutcomeUnknown, [], "needs-review", true,
+            SystemId: batch.SystemId, PlanHash: hash, Targets: requested.Targets);
+        Assert.True(submission.Observe(unknown));
+        var terminal = unknown with { Revision = 2, State = RealOperationState.Failed, RequiresReconciliation = false };
+
+        // The selected simulation never becomes the write proof.
+        Assert.True(catalog.TryReplaceLocalReport(batch));
+        var response = RoundTrip(batch);
+        Assert.False(RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(selected, response, requested));
+        Assert.True(RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(catalog, response, requested));
+        Assert.True(submission.Observe(terminal));
+        Assert.False(submission.IsBlocked);
+        Assert.Null(submission.OperationId);
+        Assert.Same(selected, catalog.Find(simulation.Id));
+        Assert.False(selected.IsLocal);
+        Assert.Equal(simulation.SystemId, selected.SystemId);
+    }
+
+    [Theory]
+    [InlineData("missing-local")]
+    [InlineData("other-system")]
+    [InlineData("other-operation")]
+    [InlineData("incomplete")]
+    public void LocalCatalogRecoveryRetainsTheExactBarrierWithoutMatchingCompleteEvidence(string defect)
+    {
+        var (batch, requested) = Batch();
+        var catalog = new StorageSystemCatalog();
+        catalog.AddSimulation(batch.AsImportedSimulation("Selected simulation"));
+        var local = defect switch
+        {
+            "other-system" => batch with { SystemId = SystemId.New() },
+            "other-operation" => batch with { SourceFacts = batch.SourceFacts! with
+                { ScopedCollection = batch.SourceFacts!.ScopedCollection! with
+                    { Scope = requested with { OperationId = OperationId.New() } } } },
+            "incomplete" => batch with { SourceFacts = batch.SourceFacts! with
+                { ScopedCollection = batch.SourceFacts!.ScopedCollection! with { Complete = false, ReasonCode = "failed" } } },
+            _ => batch
+        };
+        if (defect != "missing-local") catalog.ReplaceLocal(local);
+        var submission = new RealOperationSubmissionState();
+        var unknown = new AgentRealOperationStatusResponse(requested.OperationId, 1,
+            RealOperationState.OutcomeUnknown, [], null, true,
+            SystemId: batch.SystemId, PlanHash: new string('a', 64), Targets: requested.Targets);
+        Assert.True(submission.Observe(unknown));
+        Assert.False(RealScopedInventoryRefreshPolicy.IsCurrentCompleteBatch(catalog, batch, requested));
+        Assert.True(submission.IsBlocked);
+        Assert.Equal(requested.OperationId, submission.OperationId);
+    }
+
     [Theory]
     [InlineData("different-operation")]
     [InlineData("different-step")]
