@@ -78,6 +78,14 @@ IPC中间JSON层重新转义导致正文SHA失配的问题已修复，保留原�
 
 旧MAX历史144.454／102.418 s实际为Prepared job创建至终态，包含确认停留且不包含此前Prepare；缺少原生写调用开始／返回，不能据此精确计算本版70%非写开销／50%端到端降幅。对应历史读取／阶段原始数据仍保留，新的同口径性能比较待完成。
 
+完整显示恢复修复已在[实际剩余草稿](../artifacts/test-results/v062/wdc-display-repair-durable-02.json)生效：3个物理磁盘、2个OS磁盘、6个分区及5个卷均保留。[Agent回归](../artifacts/test-results/v062/final/Agent-recovery-display-01.trx)85通过／3失败；两项旧fixture补同次scope标记、一项将无语义成员顺序按集合比较后，[仅补3项](../artifacts/test-results/v062/final/Agent-recovery-display-02.trx)全部通过。另[事实合并13项](../artifacts/test-results/v062/final/Application-recovery-display-01.trx)、[持久化19项](../artifacts/test-results/v062/final/Persistence-recovery-display-01.trx)、[草稿恢复／编辑策略20项](../artifacts/test-results/v062/final/App-navigation-cache-01.trx)通过；这些App单测不编译页面，不能替代实际GUI。
+
+实盘恢复随后已验证创建MAX VD，但初始化前的`command-os-v1`只读采集及对账各超时约60秒，[当前结果](../artifacts/test-results/v062/wdc-repaired-goal-progress-04.json)保留Unknown／Pending。初始化child未进入PreparingCall／CallIssued，持久证据明确NoWindowsCall；exact-member恢复不接受该Agent前置失败的合同缺口正在修复。当前WDC为池及VD承载盘，尚未初始化／格式化，不是约定E:末态。正常宿主超时回收没有重放写入；具体CIM挂点仍待定位。
+
+新的[530 KB文档10次改名](../artifacts/test-results/v062/gui-simulation-renames-530k-activity-02.json)首动作也满足预算：反馈最大17.501 ms、本地候选最大75.717 ms、编辑页绑定最大124.407 ms。[活动分段](../artifacts/test-results/v062/gui-530k-activity-phases-02.json)通知最大0.410 ms、页面状态更新最大15.601 ms；不能据此抹去旧长批次的超时。[编辑树缓存切换](../artifacts/test-results/v062/gui-loaded-switch-cache-02.json)已不重建根，但连续往返仍越来越慢；[仅查询selector的复测](../artifacts/test-results/v062/gui-loaded-switch-cache-selector-only-03.json)最大1491.769 ms，[App私有内存](../artifacts/test-results/v062/gui-navigation-growth-before-fix-processes.json)达2.60 GB。已找到卸载控件未解除VM及x:Bind订阅的实际泄漏，修复后须重新验证时长与内存，当前不记通过。
+
+“待实施动作”直接打开ContentDialog曾与确认框冲突，导致App退出；当次Prepared job无child、未发写，见[记录](../artifacts/test-results/v062/wdc-display-repair-crash-prepared.json)。已改用既有DialogCoordinator并防同一面板重复挂载，[实际串行弹窗](../artifacts/test-results/v062/pending-dialog-queue-opened-01-ui.txt)正常。为重建UI结束的[20 Hz短批](../artifacts/test-results/v062/monitor-stable-session-stopped-ui-fix-04.json)约3.5分钟，两目标各4230样本、drop=0；仍不能当8小时通过。
+
 <a id="v061-fixes"></a>
 
 ### R1–R3 修复验收（2026-10-18）
