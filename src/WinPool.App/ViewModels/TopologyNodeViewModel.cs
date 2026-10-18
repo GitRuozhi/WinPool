@@ -23,7 +23,9 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
 {
     private readonly WorkspaceViewModel _owner;
 
-    private readonly StorageSnapshot _snapshot;
+    private StorageSnapshot _snapshot;
+
+    private ManageTopologyNodeView _sourceNode;
 
     private readonly string _occurrenceKey;
 
@@ -41,6 +43,7 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
     {
         _owner = owner;
         _snapshot = snapshot;
+        _sourceNode = node;
         _occurrenceKey = node.OccurrenceKey;
         _edit = edit;
         IsLayoutRoot = isLayoutRoot;
@@ -233,13 +236,13 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         return (string.Empty, false);
     }
 
-    public StorageUnitRef Unit { get; }
+    public StorageUnitRef Unit { get; private set; }
 
     public WinPool.Domain.StorageObjectId ObjectId { get; }
 
     public ManageObjectRole Role { get; }
 
-    public string Summary { get; }
+    public string Summary { get; private set; }
 
     public string TypeLabel { get; }
 
@@ -573,6 +576,53 @@ public sealed partial class TopologyNodeViewModel : ObservableObject
         {
             child.RefreshSelection();
         }
+    }
+
+    /// <summary>Reuse a known rename-only lineage; changed ordering or structure keeps the normal rebuild path.</summary>
+    internal bool TryApplyRename(ManageTopologyNodeView node, StorageSnapshot before, StorageSnapshot after)
+    {
+        if (!MatchesRename(node, before)) return false;
+        ApplyRename(node, after);
+        return true;
+    }
+
+    private bool MatchesRename(ManageTopologyNodeView node, StorageSnapshot before)
+    {
+        if (!ReferenceEquals(_snapshot, before) || ObjectId != node.Id || Role != node.Role
+            || _occurrenceKey != node.OccurrenceKey || _sourceNode.SyntheticName != node.SyntheticName
+            || Children.Count != node.Children.Count || _sourceNode.IsStableIdentity != node.IsStableIdentity
+            || _sourceNode.IsReference != node.IsReference || _sourceNode.IsSelectable != node.IsSelectable
+            || _sourceNode.ChildrenLayout != node.ChildrenLayout || _sourceNode.LayoutWeight != node.LayoutWeight
+            || _sourceNode.NoWrapChildren != node.NoWrapChildren || _sourceNode.DistributeByCapacity != node.DistributeByCapacity
+            || _sourceNode.ShowsEditStatus != node.ShowsEditStatus || _sourceNode.HasStoredData != node.HasStoredData
+            || _sourceNode.CannotLeave != node.CannotLeave || _sourceNode.AdaptiveHeaderEnabled != node.AdaptiveHeaderEnabled
+            || !(_sourceNode.CapacityWeights ?? []).SequenceEqual(node.CapacityWeights ?? [])) return false;
+        for (var index = 0; index < Children.Count; index++)
+            if (!Children[index].MatchesRename(node.Children[index], before)) return false;
+        return true;
+    }
+
+    private void ApplyRename(ManageTopologyNodeView node, StorageSnapshot after)
+    {
+        // Every retained node receives the latest interaction context, including unchanged descendants.
+        _snapshot = after;
+        var renamed = Unit with { DisplayName = node.DisplayName };
+        var name = LocalizeName(renamed, _owner);
+        if (Unit.DisplayName != name)
+        {
+            Unit = renamed with { DisplayName = name };
+            OnPropertyChanged(nameof(Unit));
+            OnPropertyChanged(nameof(ExpandAutomationName));
+        }
+        if (_sourceNode.Summary != node.Summary)
+        {
+            Summary = LocalizeSummary(node, _owner, after, isEditingSurface: _edit is not null);
+            OnPropertyChanged(nameof(Summary));
+            OnPropertyChanged(nameof(SingleLineHeaderText));
+        }
+        _sourceNode = node;
+        for (var index = 0; index < Children.Count; index++)
+            Children[index].ApplyRename(node.Children[index], after);
     }
 
     public void RefreshLayout()

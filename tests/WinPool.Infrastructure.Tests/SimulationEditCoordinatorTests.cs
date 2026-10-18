@@ -35,6 +35,7 @@ public sealed class SimulationEditCoordinatorTests
     public async Task TypedEditIsReducedAndCommittedWithoutAnExecutionPlan()
     {
         var active = CreateDocument(StorageSystemKind.Simulation);
+        var baseline = active;
         StorageSystemDocument? committed = null;
         SimulationEditCommit? structuredCommit = null;
         var coordinator = new SimulationEditCoordinator(
@@ -58,6 +59,7 @@ public sealed class SimulationEditCoordinatorTests
         Assert.True(result.IsSuccess);
         Assert.NotNull(committed);
         Assert.NotNull(structuredCommit);
+        Assert.Same(baseline, structuredCommit.BaselineDocument);
         Assert.Equal(result.Value!.PlanHash, structuredCommit.Intent.IntentHash);
         Assert.Single(structuredCommit.Intent.Edits);
         Assert.Equal(

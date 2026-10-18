@@ -26,7 +26,9 @@ public sealed class WindowsStorageJobReader : IWindowsStorageJobReader
         var json = await host.QueryAsync(WindowsPowerShellQuery.StorageJobs, new { }, cancellationToken).ConfigureAwait(false);
         var result = JsonSerializer.Deserialize<WindowsStorageJobAbsenceEvidence>(json, WindowsPowerShellHost.JsonOptions)
             ?? throw new InvalidDataException("The storage-job query returned no observation.");
-        if (result.Jobs.Any(job => string.IsNullOrWhiteSpace(job.UniqueId) || string.IsNullOrWhiteSpace(job.ObjectId)))
+        if (result.ObservedAtUtc == default || result.Jobs is null)
+            throw new InvalidDataException("The storage-job query returned an incomplete observation.");
+        if (result.Jobs.Any(job => job is null || string.IsNullOrWhiteSpace(job.UniqueId) || string.IsNullOrWhiteSpace(job.ObjectId)))
             throw new InvalidDataException("A storage job identity is unavailable.");
         return result;
     }

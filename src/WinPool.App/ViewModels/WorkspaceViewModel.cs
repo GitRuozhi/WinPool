@@ -433,7 +433,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             SetSelectionState(null, null);
             BuildDetails();
             SelectComparisonColumn();
-            RefreshTopologySelection();
             NotifySelectionState();
             RaiseWorkspaceSelectionChanged();
             return;
@@ -444,7 +443,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             SetSelectionState(null, null);
             BuildDetails();
             SelectComparisonColumn();
-            RefreshTopologySelection();
             NotifySelectionState();
             RaiseWorkspaceSelectionChanged();
             return;
@@ -461,7 +459,6 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         _categorySelections[(selection.Id.System, selection.Category)] = selection;
         BuildDetails();
         SelectComparisonColumn();
-        RefreshTopologySelection();
         ExpandSelectedTopologyPath();
         NotifySelectionState();
         RaiseWorkspaceSelectionChanged();
@@ -1183,6 +1180,14 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         cancellationToken.ThrowIfCancellationRequested();
         var started = Stopwatch.GetTimestamp();
         var operationId = new OperationId(Guid.ParseExact(commit.Intent.CommitId, "N"));
+        var renameBaseline = commit.BaselineDocument is { Kind: StorageSystemKind.Simulation, SourceFacts: { } beforeFacts } baseline
+            && ReferenceEquals(SystemCatalog.Find(baseline.Id), baseline)
+            && commit.Document.Id == baseline.Id && commit.Intent.DocumentId == baseline.Id
+            && commit.Document.SystemId == baseline.SystemId && commit.Document.Kind == baseline.Kind
+            && commit.Intent.ExpectedRevision == baseline.Revision && commit.Document.Revision == baseline.Revision + 1
+            && commit.Intent.Edits.Count > 0 && commit.Intent.Edits.All(edit => edit.Kind == SimulationEditKind.Rename)
+            && commit.Document.SourceFacts is { } afterFacts && afterFacts.SystemId == beforeFacts.SystemId
+            && afterFacts.Revision == beforeFacts.Revision + commit.Intent.Edits.Count ? baseline : null;
         var document = _simulationSaves.Accept(commit);
         StorageOperationTiming.Record("simulation.edit.queue", started, operationId,
             document.Id, scope: "simulation", generation: commit.Intent.ExpectedRevision);
@@ -1195,10 +1200,10 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             OnPropertyChanged(nameof(ActiveDocument));
             OnPropertyChanged(nameof(ActiveSnapshot));
         }
-        RebuildTopology();
+        var topologyBuilds = RebuildTopology(renameBaseline);
         RebuildObjects(_selectedSelection);
         StorageOperationTiming.Record("simulation.edit.publish", started, operationId,
-            document.Id, scope: "simulation", generation: commit.Intent.ExpectedRevision);
+            document.Id, scope: "simulation", generation: commit.Intent.ExpectedRevision, captureCount: topologyBuilds);
         return Task.CompletedTask;
     }
 
@@ -1769,8 +1774,9 @@ public sealed partial class WorkspaceViewModel : ObservableObject
             _selectedTopologyTarget,
             new ManageObjectTarget(objectId, role));
 
-    private void RebuildTopology()
+    private int RebuildTopology(StorageSystemDocument? renameBaseline = null)
     {
+        var topologyBuilds = 0;
         var systems = SystemCatalog.Systems.ToArray();
         var live = systems.Select(system => system.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var id in _topologyRoots.Keys.Where(id => !live.Contains(id)).ToArray())
@@ -1780,11 +1786,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         for (var index = 0; index < systems.Length; index++)
         {
             var system = systems[index];
-            if (!_topologyRoots.TryGetValue(system.Id, out var cached)
+            var hasCached = _topologyRoots.TryGetValue(system.Id, out var cached);
+            if (!hasCached
                 || !ReferenceEquals(cached.Facts, system.SourceFacts) || cached.Name != system.DisplayName
                 || cached.Language != Localization.EffectiveLanguage)
             {
-                cached = (system.SourceFacts, system.DisplayName, Localization.EffectiveLanguage, CreateTopologyRoot(system));
+                var reuse = hasCached && renameBaseline?.Id == system.Id
+                    && ReferenceEquals(cached.Facts, renameBaseline.SourceFacts)
+                    && cached.Name == system.DisplayName && cached.Language == Localization.EffectiveLanguage
+                    && cached.Root.TryApplyRename(CreateTopologyRootView(system), renameBaseline.Snapshot, system.Snapshot);
+                if (!reuse) topologyBuilds++;
+                cached = (system.SourceFacts, system.DisplayName, Localization.EffectiveLanguage,
+                    reuse ? cached.Root : CreateTopologyRoot(system));
                 _topologyRoots[system.Id] = cached;
             }
             if (index >= TopologySystems.Count) TopologySystems.Add(cached.Root);
@@ -1793,6 +1806,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         while (TopologySystems.Count > systems.Length) TopologySystems.RemoveAt(TopologySystems.Count - 1);
         ApplySystemRootExpansion();
         RefreshTopologySelection();
+        return topologyBuilds;
     }
 
     private ManageSystemProjection ProjectionFor(StorageSystemDocument document)
@@ -1807,20 +1821,18 @@ public sealed partial class WorkspaceViewModel : ObservableObject
     }
 
     private TopologyNodeViewModel CreateTopologyRoot(StorageSystemDocument document)
+        => new(CreateTopologyRootView(document), this, document.Snapshot, isLayoutRoot: true);
+
+    private ManageTopologyNodeView CreateTopologyRootView(StorageSystemDocument document)
     {
         var projected = ProjectionFor(document);
         var prefix = document.IsLocal
             ? (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
             : (Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-        var root = projected.Root with
+        return projected.Root with
         {
             DisplayName = $"{prefix} {projected.DisplayName}"
         };
-        return new TopologyNodeViewModel(
-            root,
-            this,
-            document.Snapshot,
-            isLayoutRoot: true);
     }
 
     private void RebuildObjects(ManageSelectionKey? preferredSelection)
@@ -2149,6 +2161,7 @@ public sealed partial class WorkspaceViewModel : ObservableObject
 
     private bool SwitchSystem(string? systemId, ManageSelectionKey? preferredSelection = null)
     {
+        var started = Stopwatch.GetTimestamp();
         // Synchronous selections also invalidate an older outstanding body load.
         _systemSelectionGeneration++;
         if (string.IsNullOrWhiteSpace(systemId))
@@ -2180,11 +2193,13 @@ public sealed partial class WorkspaceViewModel : ObservableObject
         OnPropertyChanged(nameof(CanOpenSelectedPartition));
         OnPropertyChanged(nameof(ActiveSimulationSaveState));
         OnPropertyChanged(nameof(SimulationSaveStatus));
-        RebuildTopology();
+        var topologyBuilds = RebuildTopology();
         RebuildObjects(preferredSelection ?? RememberedSelection(SelectedCategory) ?? SelectionForCurrentSystemList());
         if (identityChanged)
         {
             RaiseWorkspaceSelectionChanged();
+            StorageOperationTiming.Record("workspace.system-switch.loaded-applied", started,
+                stepId: system.Id, scope: "workspace", generation: system.Revision, captureCount: topologyBuilds);
         }
 
         return identityChanged;

@@ -449,11 +449,12 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 x.PhysicalDiskStableId == stableId || x.VirtualDiskStableId == stableId)?.StableId;
     }
 
-    private void RefreshAll()
+    private int RefreshAll(StorageSnapshot? renameBaseline = null)
     {
-        RefreshTopology();
+        var topologyBuilds = RefreshTopology(renameBaseline);
         FillForm();
         UpdateButtonState();
+        return topologyBuilds;
     }
 
     private bool IsTopologyNodeSelected(TopologyNodeViewModel node)
@@ -478,6 +479,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private void OnTopologySelected(TopologyNodeViewModel node)
     {
+        var started = Stopwatch.GetTimestamp();
         CancelResizePrompt();
         if (node.Unit.Kind == StorageUnitKind.OsDisk)
         {
@@ -503,7 +505,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             _selectedDiskId = partition?.OsDiskStableId ?? node.Unit.ParentStableId;
         }
 
-        RefreshAll();
+        if (TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots)
+        {
+            foreach (var root in roots) root.RefreshSelection();
+        }
+        FillForm();
+        UpdateButtonState();
+        StorageOperationTiming.Record("workspace.selection.editor-applied", started,
+            stepId: ViewModel.ActiveDocument.Id, scope: "partition-editor", generation: ViewModel.ActiveDocument.Revision);
     }
 
     private MenuFlyout? CreateTopologyContextMenu(TopologyNodeViewModel node)
@@ -551,17 +560,19 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
     }
 
-    private void RefreshTopology()
+    private int RefreshTopology(StorageSnapshot? renameBaseline = null)
     {
         var root = EditWorkspace.ProjectPartitionWorkspaceRoot(_working, UnallocatedIgnoreBytes);
-        var rootViewModel = new TopologyNodeViewModel(
-            EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, EditWorkspace.PartitionRowStableId),
-            ViewModel,
-            _working,
-            _interaction,
-            isLayoutRoot: true);
+        var projected = EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, EditWorkspace.PartitionRowStableId);
+        var reused = renameBaseline is not null
+            && TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> { Count: 1 } roots
+            && roots[0].TryApplyRename(projected, renameBaseline, _working);
+        var rootViewModel = reused
+            ? ((IReadOnlyList<TopologyNodeViewModel>)TopologyControl.ItemsSource)[0]
+            : new TopologyNodeViewModel(projected, ViewModel, _working, _interaction, isLayoutRoot: true);
         rootViewModel.SetSurfaceViewportWidth(_viewportWidth);
-        TopologyControl.ItemsSource = new[] { rootViewModel };
+        if (!reused) TopologyControl.ItemsSource = new[] { rootViewModel };
+        return reused ? 0 : 1;
     }
 
     private void FillForm()
@@ -3003,6 +3014,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
         var editStarted = Stopwatch.GetTimestamp();
         var submittedSession = EditingSession;
+        var submittedWorking = _working;
         var documentId = ViewModel.ActiveDocument.Id;
         var revision = ViewModel.ActiveDocument.Revision;
         using var activity = BeginPageActivity(Text("正在应用分区修改", "Applying partition changes"));
@@ -3061,11 +3073,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             Text("修改已应用到本地模拟内容，正在后台保存。", "Changes were applied locally and queued for background saving."),
             "disk-partition-editor",
             "partition.submit.completed");
-        RefreshAll();
+        var topologyBuilds = RefreshAll(request.Kind == SimulationEditKind.Rename
+            && ReferenceEquals(EditingSession, submittedSession) && ViewModel.ActiveDocument.Id == documentId
+            ? submittedWorking : null);
         if (IsLoaded && ReferenceEquals(EditingSession, submittedSession)
             && ViewModel.ActiveDocument.Id == documentId)
             StorageOperationTiming.Record("simulation.edit.editor-applied", editStarted, result.Value.OperationId,
-                documentId, scope: "partition-editor", generation: result.Value.BeforeRevision);
+                documentId, scope: "partition-editor", generation: result.Value.BeforeRevision, captureCount: topologyBuilds);
         return true;
     }
 }

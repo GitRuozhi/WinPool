@@ -26,8 +26,12 @@ switch($kind) {
     }
     'StorageJobs' {
         $jobs=@(Get-CimInstance -Namespace $ns -ClassName MSFT_StorageJob -ErrorAction Stop | ForEach-Object {
-            if ([string]::IsNullOrWhiteSpace([string]$_.UniqueId) -or [string]::IsNullOrWhiteSpace([string]$_.ObjectId) -or $null -eq $_.JobState) { throw 'storage-job-identity-or-state-unavailable' }
-            @{ UniqueId=[string]$_.UniqueId; ObjectId=[string]$_.ObjectId; JobState=[uint16]$_.JobState }
+            if ([string]::IsNullOrWhiteSpace([string]$_.UniqueId) -or [string]::IsNullOrWhiteSpace([string]$_.ObjectId)) { throw 'storage-job-identity-unavailable' }
+            # The Storage module adapts JobState to a display name such as Completed.
+            # MSFT_StorageJob's underlying CIM property is UInt16; retain unknown numeric states.
+            $stateProperty=$_.CimInstanceProperties['JobState']
+            if ($null -eq $stateProperty -or $stateProperty.Value -isnot [uint16]) { throw 'storage-job-raw-state-unavailable' }
+            @{ UniqueId=[string]$_.UniqueId; ObjectId=[string]$_.ObjectId; JobState=$stateProperty.Value }
         })
         $result=@{ ObservedAtUtc=[DateTimeOffset]::UtcNow.ToString('o'); Jobs=$jobs }
     }

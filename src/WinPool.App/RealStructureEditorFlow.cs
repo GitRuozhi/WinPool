@@ -1,7 +1,9 @@
 using System.Text.Json;
+using System.Diagnostics;
 using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
+using WinPool.Infrastructure.Windows;
 
 namespace WinPool_App;
 
@@ -46,6 +48,8 @@ public partial class EditorPageBase
         var next = events.MoveNextAsync().AsTask();
         AgentRealStructureJobResponse? prepared = null;
         var accepted = false;
+        var uiStarted = Stopwatch.GetTimestamp();
+        long confirmationTicks = 0;
         IsRealStructureApplyInProgress = true;
         try
         {
@@ -66,7 +70,11 @@ public partial class EditorPageBase
             ViewModel.ObserveStructureJob(frozen, goal.ResumeFromJobId);
             var description = new RealStructureApplyAuthorization(draft, session, productSession).Describe(
                 draft, session.BaselineSourceFacts, ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn);
-            if (!await ConfirmAsync(Text("确认真实结构变更", "Confirm real structural changes"), description)) return false;
+            var confirmationStarted = Stopwatch.GetTimestamp();
+            var confirmed = await ConfirmAsync(Text("确认真实结构变更", "Confirm real structural changes"), description);
+            confirmationTicks = Stopwatch.GetTimestamp() - confirmationStarted;
+            StorageOperationTiming.Record("real.structure.confirmation", confirmationStarted, new(jobId), scope: "user-review");
+            if (!confirmed) return false;
             if (generation != session.BindingGeneration || content != session.ContentRevision || session.HasBaselineConflict || session.OutcomeUnknown
                 || ViewModel.ActiveDocument.SystemId != session.SystemId || ViewModel.RealProductSessionId != productSession)
                 return false;
@@ -154,6 +162,8 @@ public partial class EditorPageBase
             try { await next; } catch (OperationCanceledException) when (subscription.IsCancellationRequested) { }
             IsRealStructureApplyInProgress = false;
             EndRealActivity();
+            StorageOperationTiming.Record("real.structure.ui.total", uiStarted, new(jobId), scope: "structure-editor");
+            StorageOperationTiming.Record("real.structure.ui", uiStarted + confirmationTicks, new(jobId), scope: "structure-editor");
         }
     }
     protected async Task<bool> RestoreRemainingStructureGoalAsync(SimulationEditingSession session, Guid jobId,

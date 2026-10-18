@@ -668,9 +668,13 @@ public sealed class MonitoringService : IDisposable
 
     private async Task RefreshRemoteSnapshotAsync(CancellationToken cancellationToken)
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var correlation = CorrelationId.New();
         var response = await _agentConnection!.SendAsync(
-            new GetAgentSnapshotRequest(CorrelationId.New()),
+            new GetAgentSnapshotRequest(correlation),
             cancellationToken);
+        WinPool.Infrastructure.Windows.StorageOperationTiming.Record("ipc.control.roundtrip", started,
+            scope: nameof(GetAgentSnapshotRequest), correlationId: correlation.Value);
         if (!response.IsSuccess
             || response.Value is not AgentSnapshotResponse snapshot)
         {

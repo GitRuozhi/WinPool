@@ -5,6 +5,7 @@ using WinPool.App.ViewModels;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Execution;
+using WinPool.Infrastructure.Windows;
 
 namespace WinPool_App;
 
@@ -322,6 +323,7 @@ public partial class EditorPageBase : Page
         var reservationId = ViewModel.RealOperationSubmission.ReservationId;
         LastRealOperationResponse = null;
         LastRealInventoryRefreshSucceeded = false;
+        var uiStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         ReportRealActivity(Text("正在核对目标和操作条件", "Checking the target and operation conditions"));
         try
         {
@@ -332,6 +334,8 @@ public partial class EditorPageBase : Page
         {
             ViewModel.RealOperationSubmission.ReleasePreparation(reservationId);
             EndRealActivity();
+            StorageOperationTiming.Record("real.operation.ui", uiStarted,
+                LastRealOperationResponse?.Plan.OperationId, scope: intent.Intent.ToString());
         }
     }
 

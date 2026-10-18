@@ -64,6 +64,10 @@ IPC中间JSON层重新转义导致正文SHA失配的问题已修复，保留原�
 
 第二批20 Hz监控[已正常停止](../artifacts/test-results/v062/monitor-after-normal-stop-observed.json)，约37.8分钟、三目标45249／45326／45326条有效样本、drop=0；保留WDC真实编辑缺口，不能与其它短批次拼为8小时。退出准备曾因App正在关闭而取消，确认提示后重试正常退出，不据此认定宿主死锁；最终稳定构建仍须重新执行8小时项。
 
+受控刷新随后在实际WDC生效，[恢复作业](../artifacts/test-results/v062/wdc-cache-resume-progress-03.json)已验证新池与HDD层。第一个MAX候选由Windows明确拒绝后，后验查询误将Storage模块适配的`Completed`显示值转成UInt16；尚缺第二轮未变闭包／终态作业证明，产品保留待核对屏障且未发后续写。已改为读取原始CIM UInt16，保留未知数值并拒绝缺失／文本状态，[相关33项](../artifacts/test-results/v062/final/Infrastructure-storage-job-reader.trx)通过，实盘显式对账待新构建。当前WDC为该池的唯一成员，尚无VD；这替代上段临时RAW的现场状态，不代表完成或约定末态。
+
+[3 MiB实际连续10次改名](../artifacts/test-results/v062/gui-3m-rename-measurements-02.json)中，反馈最大17.612 ms、本地候选发布最大762.231 ms；编辑页绑定最大1179.404 ms，不等于延迟绘制完成。改名后的Workspace／编辑页仍各构造完整VM；现已对严格相同baseline与纯Rename链复用节点并更新全部snapshot上下文，排序／结构变化保持重建；纯选择复用根。[协调器与保存40项](../artifacts/test-results/v062/final/Infrastructure-name-reuse.trx)通过，优化后的实际GUI仍待测量。新建[MAX旧基线保守下界](../artifacts/test-results/v062/max-baseline-bounds.json)仅从准确child关联的非重叠阶段推导，后续以新墙钟／非写上界验证，不能把旧job含人工时长当精确基准。
+
 旧MAX历史144.454／102.418 s实际为Prepared job创建至终态，包含确认停留且不包含此前Prepare；缺少原生写调用开始／返回，不能据此精确计算本版70%非写开销／50%端到端降幅。对应历史读取／阶段原始数据仍保留，新的同口径性能比较待完成。
 
 <a id="v061-fixes"></a>

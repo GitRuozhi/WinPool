@@ -4,7 +4,8 @@ using WinPool.Domain;
 
 namespace WinPool.Infrastructure.Windows;
 
-public sealed record SimulationEditCommit(StorageSystemDocument Document, SimulationCommitIntent Intent);
+public sealed record SimulationEditCommit(StorageSystemDocument Document, SimulationCommitIntent Intent,
+    StorageSystemDocument? BaselineDocument = null);
 
 /// <summary>Validates frozen edits in the background and hands the accepted local candidate to its save owner.</summary>
 public sealed class SimulationEditCoordinator(
@@ -109,7 +110,7 @@ public sealed class SimulationEditCoordinator(
                 return Failure(ApplicationStatus.Rejected, correlation, "simulation.plan.revision_conflict", "The local document changed while this edit was being prepared. The newer content was preserved.");
             var intent = new SimulationCommitIntent(document.Id, document.Revision, commitId, plan.Steps);
             commitStarted = true;
-            await commitDocument(new(candidate, intent), cancellationToken);
+            await commitDocument(new(candidate, intent, document), cancellationToken);
             StorageOperationTiming.Record("simulation.edit.local-ready", started, operationId,
                 document.Id, scope: "simulation", generation: document.Revision);
             var target = unit is null

@@ -863,6 +863,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var namingDocumentId = ViewModel.ActiveDocument.Id;
         var namingRevision = ViewModel.ActiveDocument.Revision;
         SimulationEditReceipt? simulationReceipt = null;
+        StorageSnapshot? renamedWorking = null;
         _renameInProgress = true;
         try
         {
@@ -945,7 +946,10 @@ public sealed partial class StorageStructurePage : EditorPageBase
             }
 
             if (ViewModel.SystemCatalog.Systems.SingleOrDefault(document => document.SystemId == namingSystemId) is { } savedSystem)
+            {
+                renamedWorking = namingSession.Working;
                 namingSession.AcceptRename(savedSystem, targetId);
+            }
             if (!ReferenceEquals(EditingSession, namingSession) || ViewModel.SelectedSystem.SystemId != namingSystemId) return;
             _currentPlan = null;
             simulationReceipt = result.Value;
@@ -953,13 +957,13 @@ public sealed partial class StorageStructurePage : EditorPageBase
         finally
         {
             namingSession.RenameInProgress = false;
-            RefreshTopology();
+            var topologyBuilds = RefreshTopology(simulationReceipt is not null ? renamedWorking : null);
             UpdateButtonState();
             // The bindings and editor state have been applied; deferred XAML rendering is not measured here.
             if (simulationReceipt is not null && IsLoaded && ReferenceEquals(EditingSession, namingSession)
                 && ViewModel.SelectedSystem.SystemId == namingSystemId)
                 StorageOperationTiming.Record("simulation.edit.editor-applied", editStarted, simulationReceipt.OperationId,
-                    namingDocumentId, scope: "structure-editor", generation: simulationReceipt.BeforeRevision);
+                    namingDocumentId, scope: "structure-editor", generation: simulationReceipt.BeforeRevision, captureCount: topologyBuilds);
         }
     }
 
@@ -1472,7 +1476,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
         UpdateButtonState();
     }
 
-    private void RefreshTopology()
+    private int RefreshTopology(StorageSnapshot? renameBaseline = null)
     {
         var visible = new List<string>();
         if (ShowHotSpareSwitch.IsOn)
@@ -1495,15 +1499,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
             visible,
             showSourceTierTemplates: !ViewModel.IsUsingSimulatedInventory,
             sourceFacts: EditingSession.BaselineSourceFacts);
-        var rootViewModel = new TopologyNodeViewModel(
-            EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row"),
-            ViewModel,
-            display,
-            _interaction,
-            isLayoutRoot: true);
+        var projected = EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row");
+        var reused = renameBaseline is not null
+            && TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> { Count: 1 } roots
+            && roots[0].TryApplyRename(projected, renameBaseline, display);
+        var rootViewModel = reused
+            ? ((IReadOnlyList<TopologyNodeViewModel>)TopologyControl.ItemsSource)[0]
+            : new TopologyNodeViewModel(projected, ViewModel, display, _interaction, isLayoutRoot: true);
         rootViewModel.SetSurfaceViewportWidth(_viewportWidth);
         ApplyPendingModificationStates(rootViewModel);
-        TopologyControl.ItemsSource = new[] { rootViewModel };
+        if (!reused) TopologyControl.ItemsSource = new[] { rootViewModel };
+        return reused ? 0 : 1;
     }
 
     private void ApplyPendingModificationStates(TopologyNodeViewModel root)
@@ -1609,12 +1615,14 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void OnTopologySelected(TopologyNodeViewModel node)
     {
+        var started = Stopwatch.GetTimestamp();
         if (EditWorkspace.IsPlus(node.Unit.StableId))
         {
             CreateDraftPoolAndSelect();
             return;
         }
 
+        var priorWorking = _working;
         var priorState = _formDirty ? CaptureDraftState() : null;
         CaptureSelectedIntent();
         if (_formDirty && HasInvalidSizeInput())
@@ -1670,8 +1678,17 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
         ResetLayerSwitchesForSelection();
         FillPoolForm();
-        RefreshTopology();
+        var topologyBuilds = 0;
+        if (ReferenceEquals(priorWorking, _working)
+            && TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots)
+        {
+            foreach (var root in roots) root.RefreshSelection();
+        }
+        else topologyBuilds = RefreshTopology();
         UpdateButtonState();
+        StorageOperationTiming.Record("workspace.selection.editor-applied", started,
+            stepId: ViewModel.ActiveDocument.Id, scope: "structure-editor",
+            generation: ViewModel.ActiveDocument.Revision, captureCount: topologyBuilds);
     }
 
     private bool CanCreatePoolNow() => CanEditDraft
