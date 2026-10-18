@@ -31,7 +31,7 @@ C#、WinUI 3、.NET 10；SDK 由 `global.json` 固定，当前为 10.0.400／lat
 - 真实结构目标忽略分区／卷可用空间的运行波动，仍比较格式、标签、盘符、几何和对象增删。持久化往返按字符串值和 Returned null 语义计算指纹；缺失、未采集和失败仍分别保留。
 - `InvalidDataException` 不属于 `IOException`；连接超时、无效文档和保存失败由拥有该操作的异步边界呈现一次，其余层不静默吞错。
 
-真实结构 Apply 接受一个冻结目标的 job，以 jobId 幂等，父作业与子 operation 关联在子调用前耐久。整个作业持有真实写入调度所有权；MAX、GPT、MSR 和分区布局仍按阶段推进，新身份和容量只能从 Verified 后态取得。普通单写复用临写上下文和已验证后态，Accept 不重采，正常成功不进入恢复对账。三次采集计量仅适用于非 MAX、一个 Windows 写调用且首次后态成功的路径；补采与 MAX attempt 另计原因，不将整个结构作业算作三次。
+真实结构 Apply 接受一个冻结目标的 job，以 jobId 幂等，父作业与子 operation 关联在子调用前耐久。原草稿的动作、参数和目标关系摘要由 App 提交，Agent 以 fresh 事实重算后核对，确认前回显同一摘要；外部新增对象不能成为隐含删除目标。整个作业持有真实写入调度所有权；MAX、GPT、MSR 和分区布局仍按阶段推进，新身份和容量只能从 Verified 后态取得。普通单写复用临写上下文和已验证后态，Accept 不重采，正常成功不进入恢复对账。三次采集计量仅适用于非 MAX、一个 Windows 写调用且首次后态成功的路径；补采与 MAX attempt 另计原因，不将整个结构作业算作三次。
 
 写调用前先耐久记录 `CallIssued`；结果未知时不重放。Query／List 只读状态，显式 Recheck 才发起一次只读重查。启动取消未接受的 Prepared，将中断的 Accepted／Running 置 Unknown，并对需核对的结果做一次只读恢复；不自动继续剩余阶段。新计划不用原生 MAX，历史持久计划的只读识别仍保留，不能重解释成新算法。
 
@@ -47,15 +47,15 @@ C#、WinUI 3、.NET 10；SDK 由 `global.json` 固定，当前为 10.0.400／lat
 
 标准数据根为 `%LocalAppData%\WinPool`，便携位置为用户明确选择的程序旁 `Data`；位置指针为 `%LocalAppData%\WinPool.storage-location.json`。切换根前停止相关写入、等待后台任务，保留已提交 WAL 数据和可恢复原件；恢复路径限定目标根，不继续写旧根。允许重建开发数据不等于允许自动抹除未知目录。
 
-内部格式：核心 SQLite **20**、监控 SQLite **2**、IPC **14**、StorageSystemDocument **3**、SourceFacts **1**、StorageSnapshot **3**。这些不是产品版本。核心沿 17→18→19→20 迁移，监控保留 1→2 迁移；不支持的格式明确拒绝。核心 20 增加结构 job 持久化，并解除新模拟回执对 `operation_plans` 和历史整文的依赖；迁移保留旧 commitId 查询与真实 journal、未知结果屏障。
+内部格式：核心 SQLite **20**、监控 SQLite **2**、IPC **15**、StorageSystemDocument **3**、SourceFacts **1**、StorageSnapshot **3**。这些不是产品版本。核心沿 17→18→19→20 迁移，监控保留 1→2 迁移；不支持的格式明确拒绝。核心 20 增加结构 job 持久化，并解除新模拟回执对 `operation_plans` 和历史整文的依赖；迁移保留旧 commitId 查询与真实 journal、未知结果屏障。
 
 正常模拟编辑只发送 documentId、expectedRevision、commitId 及冻结的 typed edits；Agent 执行共享规则，以同事务 CAS 保存文档和轻量回执。同 commitId 同意图返回原回执，异意图拒绝；回复丢失先 lookup 原 commitId。App 核对回执的 revision／hash 后发布已有候选，不一致或候选缺失时按 ID 读权威正文一次。导入／创建／按需加载仍可传正文。目录以 metadata 加载，选中、导出或编辑时才取所需正文；迟到的切换结果不能覆盖当前选择。
 
 控制请求 pipe 和事件 pipe 分开，请求配对锁保留。帧上限 4 MiB、模拟正文上限 3 MiB；最终 wire budget 在 `IpcFrameCodec` 统一检查，超限请求在发送首字节前拒绝。App／Agent 严格同协议升级，不维持双生产协议。未知提交先查原 commitId／OperationId，不换 ID 重发。
 
-inventory 正文由更新事件唯一承载，手动请求返回 documentId／revision／generation 回执；同 revision 只应用一次，事件缺失或断流后补读一次最新缓存。真实 Prepare 返回冻结计划，接受／查询及状态事件使用递增 revision 的轻量状态，详细 evidence 有界按需读取。控制与事件连接的独立 5 秒超时由连接拥有者归一为失败结果，UI 操作边界呈现一次。
+inventory 正文由更新事件唯一承载，手动请求返回 documentId／revision／generation 回执；同 revision 只应用一次，事件缺失或断流后补读一次最新缓存。真实 Prepare 返回冻结计划，接受／查询及状态事件使用递增 revision 的轻量状态，详细 evidence 有界按需读取。工作区持续订阅恢复操作的状态，按持久 revision 去旧；终态先刷新事实及草稿，再解除提交屏障，关闭时取消订阅。控制与事件连接的独立 5 秒超时由连接拥有者归一为失败结果，UI 操作边界呈现一次。
 
-监控在 coordinator 接受样本时分配 sequence，再经过可能丢样的有界队列；Agent 传输最多等待 250 ms、每批最多 128 点，按实际 wire 上限继续拆分，独立于 SQLite 写入批次。App 一个 cache 供图表和告警，以实例／session／sequence 去重；初连／重连或 gap 同步窗口，未知区段不画成连续曲线。稳态不轮询完整 Agent snapshot，告警也不另起轮询。
+监控在 coordinator 接受样本时分配 sequence，再经过可能丢样的有界队列；Agent 传输最多等待 250 ms、每批最多 128 点，按实际 wire 上限继续拆分，独立于 SQLite 写入批次。App 一个 cache 供图表和告警，以实例／session／sequence 去重；快照和状态共用 Agent 实例内的单调 revision，迟到状态不能清空已恢复窗口。初连／重连或 gap 同步窗口，未知区段不画成连续曲线。稳态不轮询完整 Agent snapshot，告警也不另起轮询。
 
 采样、传输和绘图频率分开，20 Hz 设置保留；正常窗口淘汰不计为持久化丢样。真实编辑缺口保留原 operation/step、计数器族和开始时间，只有对应实际样本恢复才结束，不为停止／重启补造历史端点。轮换账本使用根内相对路径，完整性与内容校验后才释放封存原库，失败保留有效数据。
 

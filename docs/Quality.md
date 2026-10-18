@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-2026-10-18：**V0.61 局部复验发现 3 个待修复问题，候选暂不满足收口条件。** 本次抽测 **46 passed／0 failed／0 skip**，另以合成探针确认 **1 个 P1、2 个 P2**，见[复验记录](#v061-recheck)。首次实现验收的 **2489 passed／4 explicit skip** 是一次完整门及必要的受影响回归汇总，保留为原范围的证据；不能据此称当前没有未解决问题。本次未重跑全套、GUI或设备验收。
+2026-10-18：**V0.61 局部复验的 R1–R3 已修复，新候选完成开发机验收。** 本次受影响5项目有效 **706 passed／0 failed／0 skip**，净增11例；沿用未受影响证据后累计 **2500 passed／4 explicit skip**，未重跑整套。完整Release构建0警告／0错误；真实GUI结构准备后取消、新包Medium启动／刷新／主窗口重开／监控／托盘退出通过。详见[修复验收](#v061-fixes)及[当前候选](#v061-candidate)。
 
 ## 最小充分验证
 
@@ -18,9 +18,32 @@
 
 ## 当前证据与缺口
 
+<a id="v061-fixes"></a>
+
+### R1–R3 修复验收（2026-10-18）
+
+代码基线 `d210a23b194b88108fb8e93757a36dd99df9e9c0`，仍为V0.61／0.6.1.0。以下修复关闭W2／W4及W8；原探针和旧包保留，不能再将旧包当作当前交付。
+
+- **R1已修复：** App从原draft计算typed意图摘要，绑定动作、创建参数和相关组件；Agent以fresh重新计算并比较，外部在未编辑池或目标池新增子对象时，在持久化准备和provider调用前拒绝。App核对返回摘要及草稿revision后才展示／接受确认。正常、重复jobId、剩余目标恢复及可用空间变化回归通过；普通VD布局参数纳入摘要，不代表扩大既有布局执行能力。
+- **R2已修复：** Workspace持有恢复操作的事件订阅，按operationId／planHash／耐久revision接续；终态走既有事实更新和不确定标记路径后解除屏障。Running／Unknown到终态、旧／重复／不同操作事件、UTC回退、取消释放订阅均有直接回归，不引入轮询或自动重放。
+- **R3已修复：** Agent在同一捕获边界为monitor snapshot／state分配单调revision，session和窗口一致读取；App拒绝旧状态和旧实例事件。1–20快照后迟到state再来21仍保留1–21；真实session切换只补一次窗口，序列缺口仍可见。IPC升15，App／Agent须配套；核心schema20及monitoring schema2不变。
+
+| 本轮项目 | 有效通过／skip | 证据 |
+| --- | --- | --- |
+| Agent | 156／0 | [首轮TRX](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/WinPool.Agent.Tests.trx)155 passed／1 failed；修正只改变SizeRemaining的fixture后，[定向5项](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/WinPool.Agent.Tests-targeted-rerun.trx)替代该失败，不重复加总 |
+| App | 461／0 | [完整受影响项目](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/WinPool.App.Tests.trx)；首轮fixture的ID构造编译错误记录保留 |
+| Monitoring | 53／0 | [TRX](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/WinPool.Monitoring.Tests.trx) |
+| IPC | 12／0 | [TRX](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/WinPool.Ipc.Tests.trx) |
+| Agent.Client | 24／0 | [TRX](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/WinPool.Agent.Client.Tests.trx) |
+| **本轮合计** | **706／0** | [汇总、命令及原始失败路径](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/summary.json)；按testId去重，Agent净增5、App净增6；累计2500 passed／4 explicit skip，非新一次全套结果 |
+
+[完整Release构建](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/Release-build.log)0 warning／0 error，39.10 s，包含真实Workspace接线的App项目。R2终态竞态和R3迟到事件的确定性结论来自上述自动回归；GUI未人为制造磁盘故障或强制Unknown。
+
+真实GUI已按当前采集值核实WDC唯一身份及序列号，拖入新池草稿，经Agent准备后显示[完整确认框](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/structure-prepare-final.png)及[文字](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/confirmation-text.txt)，随后取消并放弃草稿。耐久job为Cancelled、child为0，无provider写入；未重复实盘MAX／清理。当前候选验收见下方。
+
 <a id="v061-recheck"></a>
 
-### V0.61 局部复验（2026-10-18）
+### V0.61 局部复验发现（2026-10-18，修复前）
 
 基线 `c65f09086e649d4a5e16dbb2f6b4f4325b4fae8e`。按用户要求只抽部分：Agent 13、Persistence 5、Infrastructure 18、App 2、Application 3、Agent.Client 5，合计 **46 passed／0 failed／0 skip**。覆盖结构作业耐久与单写、Unknown不重放、采集复用、模拟预览／提交一致性、回执丢失／原子性、监控批次与连接超时；逐项命令、TRX及日志见[运行清单](../artifacts/test-results/v061-recheck-20261018-113417/run.json)，总体结果见[summary.json](../artifacts/test-results/v061-recheck-20261018-113417/summary.json)。这些数量不累加到首次验收用例总数。
 
@@ -30,7 +53,7 @@
 2. **R2／P2：重开／重连恢复的真实操作不会持续接收终态。** [WorkspaceRealOperations](../src/WinPool.App/ViewModels/WorkspaceRealOperations.cs)只执行一次`RealOperationRecovery.RefreshAsync`；唯一消费`AgentRealOperationStatusEvent`的[RealOperationStatusCache](../src/WinPool.App/Services/RealOperationStatusCache.cs)由发起操作的编辑页等待流程持有，恢复路径没有订阅。合成服务读到Running后，Agent完成并推送Succeeded，提交屏障仍保持；事件订阅数为0，显式再Refresh才解除。结论来自生产恢复服务复现及Workspace调用链核对，未运行完整WinUI场景。后续应由工作区接续恢复操作的事件，终态刷新相关事实后解除屏障，保留Unknown保护，不恢复周期轮询。
 3. **R3／P2：重连后迟到的监控状态会静默清空刚恢复的图表窗口。** [NamedPipeAgentConnection](../src/WinPool.Agent.Client/NamedPipeAgentConnection.cs)先订阅事件、发布当前snapshot，再读已排队事件；[MonitoringService](../src/WinPool.App/Services/MonitoringService.cs)没有区分旧state与新snapshot的先后。顺序“当前session的1–20样本快照→较早无session状态→当前session状态→第21样本”使窗口被清空；探针最终仅1个样本，补快照请求0、gap计数0。已证明的是实时缓存窗口缺失，未证明持久样本丢失。后续需让snapshot与state共享可比较的先后边界，拒绝较旧状态；真正换session时正确重置／补窗并报告缺口，不增加全快照轮询。
 
-候选包独立只读复核通过：[586个ZIP文件逐一内容校验、SHA-256、App／Agent的V0.61／0.6.1.0及资源／排除项](../artifacts/test-results/v061-recheck-20261018-113417/package-verification.json)均与首次包记录一致。本次没有重打包或重做启动验收，原包仍包含上述问题。W2／W4及W8整体收口待修复后做直接回归；不因本次复验重开无关工作包或要求再跑全量。
+当时对旧候选的独立只读复核通过：[586个ZIP文件逐一内容校验、SHA-256、App／Agent的V0.61／0.6.1.0及资源／排除项](../artifacts/test-results/v061-recheck-20261018-113417/package-verification.json)均与首次包记录一致。该次没有重打包或重做启动验收，旧包包含上述问题，随后已被本页当前候选替代；W2／W4及W8的修复回归见上方。
 
 ### 既有审查与历史证据
 
@@ -51,7 +74,7 @@
 
 原始输出位于 [v061](../artifacts/test-results/v061/)。[完整门原始 TRX](../artifacts/test-results/v061/final/) 合计 **2452 passed／12 failed／4 skip**；其中 Infrastructure 因监控导出 fixture 挂起被 blame 中止，该轮不完整。原始失败与中止记录保留。随后 Infrastructure、Persistence、Agent.Client 完整项目回归通过，其余改动补充直接回归；未受影响的完整门结果继续有效。
 
-| 项目 | 当前有效通过／skip | 有效证据及口径 |
+| 项目 | 首次收口有效通过／skip | 有效证据及口径 |
 | --- | --- | --- |
 | Agent.Client | 24／0 | [完整项目回归](../artifacts/test-results/v061/final-fixes/v061-idle-control-pipe.trx)；合法空闲连接用例替换旧 `byteCount: 0` 超时预期，不重复计数 |
 | Agent | 151／0 | [完整门147项](../artifacts/test-results/v061/final/Admin_DESKTOP-BLE6H18_2026-10-18_01_18_39_net10.0.trx)、[scope回归14项](../artifacts/test-results/v061/final-fixes/v061-agent-final-fixes.trx)及[结构／provider字符串回归51项](../artifacts/test-results/v061/v061-provider-string-structure-agent.trx)；分别净增1项及3项，原结构作业单例扩为4个场景，不重复计数 |
@@ -64,7 +87,7 @@
 | IPC | 12／0 | [协议修复后完整项目](../artifacts/test-results/v061/final-fixes/v061-ipc-final.trx) |
 | Monitoring | 53／0 | [完整门](../artifacts/test-results/v061/final/Admin_DESKTOP-BLE6H18_2026-10-18_01_24_15_net10.0.trx) |
 | Persistence | 190／3 | [修复后完整项目193项](../artifacts/test-results/v061/final-fixes/v061-persistence-final.trx)；覆盖 schema20 构建守卫与只读读取。两个“schema20应拒绝”的旧参数已换成不支持的21，新参数通过；旧参数失败不列为未解问题 |
-| **合计** | **2489／4** | 按当前用例去重、以修复后的完整项目替代旧结果；各次定向运行的数量不另行累加 |
+| **合计** | **2489／4** | 首次收口时按用例去重、以修复后的完整项目替代旧结果；各次定向运行不另行累加；其后R1–R3新增11项见上方 |
 
 结构目标新增8项先复现2失败（[修复前8项](../artifacts/test-results/v061/v061-structure-goal-free-space-before.trx)：6 passed／2 failed），修复后175项全部通过。修复仅将 partition／volume 的 `SizeRemaining` 视为运行观察值，保留独立改标签、盘符、几何或移除磁盘／分区／卷的拒绝边界；不把可用空间波动误判为编辑。
 
@@ -109,6 +132,18 @@ HDD MAX 结构作业 `145626005d1b42dd811c7d06e8245186` 通过界面确认后完
 <a id="v061-candidate"></a>
 
 ### V0.61 便携候选交付（2026-10-18）
+
+**当前批次：R1–R3修复后。** 基线 `d210a23b194b88108fb8e93757a36dd99df9e9c0`，V0.61／0.6.1.0。[打包结果](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/package-result.json)：585个运行文件＋TESTING.md，ZIP 104,095,807 bytes；输入与标准Release树一致，App／Agent版本、资源、7-Zip许可及排除项由现有脚本检查。打包时仅尚未提交文档及既有Ref使源码状态为dirty，未混入包内。
+
+- [当前候选ZIP](../artifacts/packages/V0.61/20261018T041447677Z-900efa87aaf041d2ab0d311dda6f0ba4/WinPool-V0.61-win-x64.zip)
+- [SHA-256](../artifacts/packages/V0.61/20261018T041447677Z-900efa87aaf041d2ab0d311dda6f0ba4/WinPool-V0.61-win-x64.zip.sha256)：`453ad2cacbb59bcdc94bcb7a09c1936331aba8f1f06e495b5f74ea09ff8ea45c`
+- [包内测试说明](../artifacts/packages/V0.61/20261018T041447677Z-900efa87aaf041d2ab0d311dda6f0ba4/WinPool-V0.61-win-x64/TESTING.md)
+
+[解压核对](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/candidate-extraction.json)586文件逐一哈希一致；[App／Agent均为Medium](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/candidate-medium-start.json)。冷启动和Storage手动刷新成功，本次provider 2.769 s、merge 5.6 ms、persist 28.6 ms（[计时](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/candidate-refresh-timing.json)）；只报告当前值，不据此声明提速比例。关闭主窗口保留Agent，再打开可恢复既有监控曲线（[截图](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/candidate-monitor-after-reopen.png)），10 Hz／持续监控设置保持。真实托盘正常退出后App／Agent均消失，同一monitor session持久1767样本、终态4／drop0，五类错误日志均无新增；无未终结结构job，原13个模拟文档不变，末页Monitor，见[最终验收](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/candidate-verification-final.json)。
+
+本次前后读取分别为High和Medium，21个共同可见存储对象的身份／几何／卷参数及共同关联不变；Medium未返回一个Samsung EFI卷，其分区GUID／几何／EFI类型仍一致。[最初跨权限全量比较](../artifacts/test-results/v061-r1-r3-fixes-20261018-115854/candidate-verification.json)的false记录保留，最终验收明确限定共同可见范围，不能将其当作EFI被删除或原139项硬件检查的重跑。此次真实准备在确认处取消，child为0，未执行存储写入。候选未上传、推送、发布或发送。
+
+#### 首次候选（历史，包含R1–R3）
 
 源代码基线 `12e0f979d65b273da95f108c8dc001c5fb4f1622`，版本V0.61／0.6.1.0。[实际打包结果](../artifacts/test-results/v061/package-result.json)为585个运行文件及一份中英TESTING.md，ZIP 104,084,499 bytes；App／Agent配套版本、PRI／XBF／Assets和7-Zip许可均核对，未含Data、数据库、日志、诊断、PDB或脚本。打包时有未提交文档及既有 `Ref/`，包内源码状态如实为dirty，运行树哈希与已验证标准输出一致。首轮打包曾误将 `Microsoft.UI.Xaml` 目录按源码后缀拒绝，修正为仅检查文件后重新生成，未放宽私有数据检查。
 
