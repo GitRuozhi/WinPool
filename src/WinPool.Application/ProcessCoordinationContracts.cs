@@ -288,7 +288,11 @@ public sealed record AgentSnapshot(
     IReadOnlyList<ProcessRegistration> Processes,
     IReadOnlyList<MonitorSample>? LatestMonitorSamples = null,
     IReadOnlyList<StorageHealthEvent>? RecentStorageHealthEvents = null,
-    MonitorRuntimeDiagnostics? MonitorDiagnostics = null);
+    MonitorRuntimeDiagnostics? MonitorDiagnostics = null)
+{
+    // Shared with monitor state events; assigned at the Agent's capture boundary.
+    public long MonitorStateRevision { get; init; }
+}
 
 public abstract record AgentEvent(DateTimeOffset OccurredAtUtc);
 
@@ -329,7 +333,10 @@ public sealed record AgentMonitorStateEvent(
     MonitorRuntimeDiagnostics Diagnostics,
     IReadOnlyList<StorageHealthEvent> StorageHealthEvents,
     DateTimeOffset OccurredAtUtc,
-    AgentLifecycleState LifecycleState = AgentLifecycleState.Running) : AgentEvent(OccurredAtUtc);
+    AgentLifecycleState LifecycleState = AgentLifecycleState.Running) : AgentEvent(OccurredAtUtc)
+{
+    public long MonitorStateRevision { get; init; }
+}
 
 public sealed record AgentProcessStateEvent(
     ProcessRegistration Registration,

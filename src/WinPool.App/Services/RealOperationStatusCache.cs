@@ -32,7 +32,12 @@ public sealed class RealOperationStatusCache
         if (response is not AgentRealOperationStatusResponse status) return null;
 
         var terminal = status.State is not (RealOperationState.Prepared or RealOperationState.Accepted or RealOperationState.Running);
-        if (!operations.TryGetValue(status.OperationId, out var known)
+        operations.TryGetValue(status.OperationId, out var known);
+        if (known is not null && (status.Revision < known.Revision
+            || status.Revision == known.Revision
+                && status.ReconciliationDiagnostic == known.Operation.ReconciliationDiagnostic))
+            return known.Operation;
+        if (known is null
             || (terminal && known.EvidenceRevision < status.Revision))
         {
             await evidenceGate.WaitAsync(cancellationToken);
@@ -102,6 +107,7 @@ public sealed class RealOperationStatusCache
     public async IAsyncEnumerable<AgentRealOperationResponse> WatchAsync(OperationId operationId,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        AgentRealOperationResponse? delivered = null;
         while (!cancellationToken.IsCancellationRequested)
         {
             using var watcher = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -110,7 +116,11 @@ public sealed class RealOperationStatusCache
             try
             {
                 var initial = await QueryAsync(operationId, cancellationToken);
-                if (initial is not null) yield return initial;
+                if (initial is not null && !ReferenceEquals(initial, delivered))
+                {
+                    delivered = initial;
+                    yield return initial;
+                }
                 while (await next)
                 {
                     var item = events.Current;
@@ -118,8 +128,14 @@ public sealed class RealOperationStatusCache
                     if (item is AgentRealOperationStatusEvent changed && changed.Status.OperationId == operationId)
                         operation = await ResolveAsync(changed.Status, cancellationToken);
                     else if (item is AgentStateReseedEvent { Reason: not "agent.events.latest_snapshot" })
+                        // Revisions are durable event IDs across Agent instances;
+                        // wall-clock changes do not order operation status.
                         operation = await QueryAsync(operationId, cancellationToken);
-                    if (operation is not null) yield return operation;
+                    if (operation is not null && !ReferenceEquals(operation, delivered))
+                    {
+                        delivered = operation;
+                        yield return operation;
+                    }
                     next = events.MoveNextAsync().AsTask();
                 }
             }

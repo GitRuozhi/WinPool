@@ -140,6 +140,14 @@ public sealed partial class MonitoringSessionCoordinator : IMonitoringCoordinato
             .OrderBy(sample => sample.Sequence)
             .ToArray();
 
+    /// <summary>Reads one session and its window under that session's existing memory gate.</summary>
+    public (MonitoringSession? Session, IReadOnlyList<MonitorSample> Samples) CaptureCurrent(bool includeSamples = true)
+    {
+        var active = sessions.Values.FirstOrDefault(value => value.Snapshot().State is
+            MonitoringSessionState.Starting or MonitoringSessionState.Running);
+        return active is null ? (null, []) : active.CaptureCurrent(includeSamples);
+    }
+
     public MonitorRuntimeDiagnostics CurrentDiagnostics
     {
         get
@@ -631,6 +639,16 @@ public sealed partial class MonitoringSessionCoordinator : IMonitoringCoordinato
             lock (gate)
             {
                 return session;
+            }
+        }
+
+        public (MonitoringSession? Session, IReadOnlyList<MonitorSample> Samples) CaptureCurrent(bool includeSamples)
+        {
+            lock (gate)
+            {
+                if (session.State is not (MonitoringSessionState.Starting or MonitoringSessionState.Running))
+                    return (null, []);
+                return (session, includeSamples ? Latest.Snapshot().OrderBy(sample => sample.Sequence).ToArray() : []);
             }
         }
 

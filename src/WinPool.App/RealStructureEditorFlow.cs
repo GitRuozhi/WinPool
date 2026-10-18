@@ -37,11 +37,10 @@ public partial class EditorPageBase
         }
         foreach (var creation in draft.Creations) session.PoolIntents[creation.Pool.StableId] = creation.Intent;
         var generation = session.BindingGeneration;
+        var content = session.ContentRevision;
         var productSession = ViewModel.RealProductSessionId;
         var jobId = Guid.NewGuid();
-        var goal = new RealStructureJobGoal(session.SystemId, session.Working,
-            session.PoolIntents.OrderBy(item => item.Key, StringComparer.Ordinal)
-                .Select(item => new RealStructurePoolGoal(item.Key, item.Value)).ToArray(), session.RealStructureResumeJobId);
+        var goal = RealStructureJobGoal.Create(session, draft, session.RealStructureResumeJobId);
         using var subscription = new CancellationTokenSource();
         await using var events = connection.WatchAsync(subscription.Token).GetAsyncEnumerator(subscription.Token);
         var next = events.MoveNextAsync().AsTask();
@@ -58,11 +57,17 @@ public partial class EditorPageBase
                 throw new InvalidDataException(preparation.Messages.FirstOrDefault()?.DiagnosticText
                     ?? preparation.Messages.FirstOrDefault()?.Code ?? "The structural job could not be prepared.");
             prepared = frozen;
+            if (frozen.DraftIntentHash != goal.DraftIntentHash)
+                throw new InvalidDataException("The prepared structural actions differ from the draft to be confirmed.");
+            if (generation != session.BindingGeneration || content != session.ContentRevision
+                || session.HasBaselineConflict || session.OutcomeUnknown
+                || ViewModel.ActiveDocument.SystemId != session.SystemId || ViewModel.RealProductSessionId != productSession)
+                return false;
             ViewModel.ObserveStructureJob(frozen, goal.ResumeFromJobId);
             var description = new RealStructureApplyAuthorization(draft, session, productSession).Describe(
                 draft, session.BaselineSourceFacts, ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn);
             if (!await ConfirmAsync(Text("确认真实结构变更", "Confirm real structural changes"), description)) return false;
-            if (generation != session.BindingGeneration || session.HasBaselineConflict || session.OutcomeUnknown
+            if (generation != session.BindingGeneration || content != session.ContentRevision || session.HasBaselineConflict || session.OutcomeUnknown
                 || ViewModel.ActiveDocument.SystemId != session.SystemId || ViewModel.RealProductSessionId != productSession)
                 return false;
             ReportRealActivity(Text("正在应用结构目标", "Applying the structural goal"));

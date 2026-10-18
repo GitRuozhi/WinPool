@@ -11,9 +11,133 @@ namespace WinPool.Agent.Tests;
 
 public sealed class AgentRealOperationServiceTests
 {
+    [Fact]
+    public async Task StructurePreparationRejectsChangedOrdinaryVirtualDiskLayoutWithTheOriginalDraftDigest()
+    {
+        var system = InternalStableIdentity.SystemFromDocumentId("local:structure-job");
+        var baseline = JobDocument(StorageSnapshot.Empty(Environment.MachineName) with
+        {
+            SnapshotVersion = "ordinary-before", ScannedAt = DateTimeOffset.UtcNow,
+            StorageSubsystems = [new("subsystem:job", "Storage Spaces", "Healthy", "OK")],
+            PhysicalDisks = [new("physical:job", true, "Fixture disk", "Fixture", "SERIAL-JOB", "SATA", "HDD",
+                64L << 30, 512, 4096, "Healthy", "OK", false, "In a pool", 7, false, false, false, false, "pool:job",
+                Usage: PhysicalDiskUsage.AutoSelect)],
+            StoragePools = [new("pool:primordial", true, "Primordial", true, "Healthy", "OK", 0, 0, "subsystem:job", []),
+                new("pool:job", true, "Existing empty pool", false, "Healthy", "OK", 64L << 30, 0,
+                    "subsystem:job", ["physical:job"], 512, 4096, "Fixed")]
+        }, system);
+        var editing = new SimulationEditingSession();
+        editing.Bind(baseline, SimulationEditingSession.InsertRealDraftVirtualDisk(baseline.Snapshot, "pool:job", "Requested VD"));
+        editing.PoolIntents.Add("pool:job", new(true, false, "NTFS", 65536, "Requested volume", VirtualDiskName: "Requested VD"));
+        var originalDraft = RealStructureDraftPlanner.Build(editing);
+        Assert.True(originalDraft.Preview.CanApply);
+        var goal = RealStructureJobGoal.Create(editing, originalDraft);
+        var changedWorking = goal.Working with
+        {
+            VirtualDisks = goal.Working.VirtualDisks.Select(vd => vd with { Interleave = 32768 }).ToArray()
+        };
+        var changed = new SimulationEditingSession();
+        changed.Bind(baseline, changedWorking);
+        foreach (var intent in editing.PoolIntents) changed.PoolIntents.Add(intent.Key, intent.Value);
+        var changedDraft = RealStructureDraftPlanner.Build(changed);
+        Assert.True(changedDraft.Preview.CanApply); // Both layouts are legal; only the confirmed parameters changed.
+        Assert.NotEqual(goal.DraftIntentHash, RealStructureJobGoal.ComputeDraftIntentHash(changed, changedDraft));
+        var backend = new RecordingBackend();
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        fixture.Service.AttachStructureInventory(_ => Task.FromResult(baseline),
+            _ => Task.FromResult<StorageSystemDocument?>(baseline));
+        var jobId = Guid.NewGuid();
+        var rejected = await fixture.Service.PrepareStructureJobAsync(new(goal with { Working = changedWorking }, jobId,
+            fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
+        Assert.False(rejected.IsSuccess);
+        Assert.Contains(rejected.Messages, item => item.Code == "agent.structure.draft_changed");
+        Assert.Null(await fixture.Plans.GetStructureJobAsync(jobId));
+        var original = await fixture.Service.PrepareStructureJobAsync(new(goal, Guid.NewGuid(),
+            fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
+        Assert.Equal(RealOperationState.Prepared, Assert.IsType<AgentRealStructureJobResponse>(original.Value).State);
+        Assert.Equal(0, backend.PreflightCalls);
+        Assert.Equal(0, backend.ExecuteCalls);
+    }
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("other-pool")]
+    [InlineData("selected-pool")]
+    public async Task StructurePreparationBindsTheOriginalDraftAndNeverExpandsItToExternalChildren(string externalChange)
+    {
+        var system = InternalStableIdentity.SystemFromDocumentId("local:structure-job");
+        var before = StorageSnapshot.Empty(Environment.MachineName) with
+        {
+            SnapshotVersion = "original-two-pools", ScannedAt = DateTimeOffset.UtcNow,
+            StorageSubsystems = [new("subsystem:job", "Storage Spaces", "Healthy", "OK")],
+            PhysicalDisks = [
+                new("physical:job", true, "Fixture A", "Fixture", "SERIAL-A", "SATA", "HDD", 64L << 30,
+                    512, 4096, "Healthy", "OK", false, "In a pool", 7, false, false, false, false, "pool:job", Usage: PhysicalDiskUsage.AutoSelect),
+                new("physical:b", true, "Fixture B", "Fixture", "SERIAL-B", "SATA", "HDD", 64L << 30,
+                    512, 4096, "Healthy", "OK", false, "In a pool", 8, false, false, false, false, "pool:b", Usage: PhysicalDiskUsage.AutoSelect)],
+            StoragePools = [
+                new("pool:primordial", true, "Primordial", true, "Healthy", "OK", 0, 0, "subsystem:job", []),
+                new("pool:job", true, "A", false, "Healthy", "OK", 64L << 30, 0, "subsystem:job", ["physical:job"], 512, 4096, "Fixed"),
+                new("pool:b", true, "B", false, "Healthy", "OK", 64L << 30, 0, "subsystem:job", ["physical:b"], 512, 4096, "Fixed")]
+        };
+        var original = JobDocument(before, system);
+        var editing = new SimulationEditingSession();
+        editing.Bind(original, SimulationEditingSession.RemoveRealPoolDraft(original.Snapshot, "pool:job"));
+        var originalDraft = RealStructureDraftPlanner.Build(editing);
+        Assert.True(originalDraft.Preview.CanApply);
+        Assert.Equal("pool:job", Assert.Single(originalDraft.RemovedPools).StableId);
+        Assert.Empty(originalDraft.RemovedTiers);
+        var goal = RealStructureJobGoal.Create(editing, originalDraft);
+        var fresh = externalChange != "none" ? JobDocument(before with
+        {
+            StorageTiers = [new("tier:external", true, "External template", "HDD", "Simple", 0, 0,
+                externalChange == "other-pool" ? "pool:b" : "pool:job", null,
+                [externalChange == "other-pool" ? "physical:b" : "physical:job"], 1, 65536, 1, 0)]
+        }, system) : original;
+        var backend = new RecordingBackend();
+        var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
+            new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
+        await using var lease = fixture.Lease;
+        var reads = 0;
+        fixture.Service.AttachStructureInventory(_ => { reads++; return Task.FromResult(fresh); },
+            _ => Task.FromResult<StorageSystemDocument?>(fresh));
+        var jobId = Guid.NewGuid();
+        var request = new PrepareAgentRealStructureJobRequest(goal, jobId, fixture.Session.ProductSessionId, CorrelationId.New());
+        var prepared = await fixture.Service.PrepareStructureJobAsync(request, fixture.Session, default);
+        if (externalChange != "none")
+        {
+            Assert.False(prepared.IsSuccess);
+            Assert.Contains(prepared.Messages, item => item.Code == "agent.structure.draft_changed");
+            Assert.Null(await fixture.Plans.GetStructureJobAsync(jobId));
+            Assert.False(await fixture.Plans.HasStructureWriteBarrierAsync());
+        }
+        else
+        {
+            var frozen = Assert.IsType<AgentRealStructureJobResponse>(prepared.Value);
+            Assert.Equal(RealOperationState.Prepared, frozen.State);
+            Assert.Equal(goal.DraftIntentHash, frozen.DraftIntentHash);
+            var repeated = Assert.IsType<AgentRealStructureJobResponse>((await fixture.Service.PrepareStructureJobAsync(
+                request with { CorrelationId = CorrelationId.New() }, fixture.Session, default)).Value);
+            Assert.Equal(frozen.GoalHash, repeated.GoalHash);
+            Assert.Equal(1, reads);
+            var changed = await fixture.Service.PrepareStructureJobAsync(request with
+                { Goal = goal with { DraftIntentHash = new string('a', 64) } }, fixture.Session, default);
+            Assert.False(changed.IsSuccess);
+            var legacy = await fixture.Service.PrepareStructureJobAsync(request with
+                { JobId = Guid.NewGuid(), Goal = goal with { DraftIntentHash = null } }, fixture.Session, default);
+            Assert.False(legacy.IsSuccess);
+            Assert.Contains(legacy.Messages, item => item.Code == "agent.structure.draft_changed");
+        }
+        Assert.Equal(0, backend.PreflightCalls);
+        Assert.Equal(0, backend.ExecuteCalls);
+    }
+
     [Theory]
     [InlineData("pool")]
     [InlineData("vd-returned-null")]
+    [InlineData("vd-size-remaining-drift")]
     [InlineData("prepare-fails")]
     [InlineData("fingerprint-mismatch")]
     public async Task StructureJobPersistsParentAndChildBeforeProviderAndKeepsOneMutationOwner(string scenario)
@@ -75,6 +199,24 @@ public sealed class AgentRealOperationServiceTests
         var pool = current.Snapshot.StoragePools.Single(item => !item.IsPrimordial);
         var requested = scenario == "pool" ? SimulationEditingSession.RemoveRealPoolDraft(current.Snapshot, pool.StableId)
             : SimulationEditingSession.RemoveRealVirtualDiskDraft(current.Snapshot, "vd:job");
+        var editing = new SimulationEditingSession();
+        editing.Bind(current, requested);
+        var goal = RealStructureJobGoal.Create(editing);
+        if (scenario == "vd-size-remaining-drift")
+        {
+            current = current with { SourceFacts = current.SourceFacts! with
+            {
+                Objects = current.SourceFacts.Objects.Select(item => item.Id is not ("partition:job" or "volume:job") ? item : item with
+                {
+                    Fields = item.Fields.Select(field => field.Name != "SizeRemaining" ? field : field with
+                    {
+                        Value = JsonSerializer.SerializeToElement(field.Value!.Value.GetInt64() - 4096)
+                    }).ToImmutableArray()
+                }).ToImmutableArray()
+            } };
+            Assert.Equal(editing.Baseline.Partitions.Single().SizeRemaining - 4096, current.Snapshot.Partitions.Single().SizeRemaining);
+            Assert.Equal(editing.Baseline.Volumes.Single().SizeRemaining - 4096, current.Snapshot.Volumes.Single().SizeRemaining);
+        }
         var backend = new RecordingBackend { PauseExecution = true };
         var fixture = await CreateAcceptedLifecycleFixtureAsync(backend, TimeProvider.System,
             new InMemoryOperationAuthority(new OperationPolicyEvaluator()));
@@ -114,7 +256,8 @@ public sealed class AgentRealOperationServiceTests
         };
         fixture.Service.AttachStructureInventory(_ => Task.FromResult(current), _ => Task.FromResult<StorageSystemDocument?>(current));
         var prepared = await fixture.Service.PrepareStructureJobAsync(new(
-            new(current.SystemId, requested, []), jobId, fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
+            goal, jobId, fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
+        Assert.True(prepared.IsSuccess, string.Join("; ", prepared.Messages.Select(item => item.Code + ": " + item.DiagnosticText)));
         var job = Assert.IsType<AgentRealStructureJobResponse>(prepared.Value);
         Assert.Equal(RealOperationState.Prepared, job.State);
         var accept = new AcceptAgentRealStructureJobRequest(jobId, job.GoalHash, fixture.Session.ProductSessionId, CorrelationId.New());

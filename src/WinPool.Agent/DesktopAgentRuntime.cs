@@ -44,6 +44,8 @@ internal sealed class DesktopAgentRuntime :
     private readonly CancellationTokenSource monitorEventCancellation = new();
     private Task monitorSamplesTask = Task.CompletedTask;
     private readonly Task monitorStateTask;
+    private readonly object monitorStateSync = new();
+    private long monitorStateRevision;
 
     public DesktopAgentRuntime(
         TrayApplicationContext tray,
@@ -124,21 +126,22 @@ internal sealed class DesktopAgentRuntime :
     {
         cancellationToken.ThrowIfCancellationRequested();
         var monitorDiagnostics = monitoring.CurrentDiagnostics;
+        var monitorState = CaptureMonitorState(includeSamples: true);
         var snapshot = new AgentSnapshot(
             instanceId,
             tray.IsTrayVisible,
-            ActiveMonitoringSession: monitoring.CurrentSession,
-            ShutdownStatus: lifecycle.Snapshot(),
+            ActiveMonitoringSession: monitorState.Session,
+            ShutdownStatus: monitorState.Lifecycle,
             Processes: processRegistry.Snapshot()
                 .Select(AgentProcessProjection.ToRegistration)
                 .ToArray(),
-            LatestMonitorSamples: monitoring.CurrentSamples,
+            LatestMonitorSamples: monitorState.Samples,
             RecentStorageHealthEvents: GetRecentStorageHealthEvents(),
             MonitorDiagnostics: monitorDiagnostics with
             {
                 SamplingFailure = Volatile.Read(ref startupMonitoringFailure)
                     ?? monitorDiagnostics.SamplingFailure
-            });
+            }) { MonitorStateRevision = monitorState.Revision };
         return await SuccessAsync(new AgentSnapshotResponse(snapshot), request.CorrelationId);
     }
 
@@ -794,15 +797,26 @@ internal sealed class DesktopAgentRuntime :
         }
     }
 
+    private (MonitoringSession? Session, IReadOnlyList<MonitorSample> Samples, AgentShutdownStatus Lifecycle, long Revision) CaptureMonitorState(bool includeSamples)
+    {
+        lock (monitorStateSync)
+        {
+            var current = monitoring.CaptureCurrent(includeSamples);
+            return (current.Session, current.Samples, lifecycle.Snapshot(), checked(++monitorStateRevision));
+        }
+    }
+
     private void PublishMonitorState()
     {
         var diagnostics = monitoring.CurrentDiagnostics;
+        var monitorState = CaptureMonitorState(includeSamples: false);
         agentEvents.Publish(new AgentMonitorStateEvent(
-        instanceId, monitoring.CurrentSession, diagnostics with
+        instanceId, monitorState.Session, diagnostics with
         {
             SamplingFailure = Volatile.Read(ref startupMonitoringFailure)
                 ?? diagnostics.SamplingFailure
-        }, GetRecentStorageHealthEvents(), DateTimeOffset.UtcNow, lifecycle.State));
+        }, GetRecentStorageHealthEvents(), DateTimeOffset.UtcNow, monitorState.Lifecycle.State)
+        { MonitorStateRevision = monitorState.Revision });
     }
 
     private async Task PublishMonitorStateLoopAsync()

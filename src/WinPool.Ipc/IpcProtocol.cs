@@ -7,8 +7,9 @@ namespace WinPool.Ipc;
 public static class IpcProtocol
 {
     // Real-operation lifecycle messages require both peers to use the closed
-    // version 14 contract. App and Agent are upgraded together.
-    public const int CurrentVersion = 14;
+    // version 15 contract, including frozen structure intent and ordered monitor
+    // state. App and Agent are upgraded together.
+    public const int CurrentVersion = 15;
     public const int MaximumFrameBytes = 4 * 1024 * 1024;
     public static readonly TimeSpan MaximumHandshakeAge = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan HandshakeReadTimeout = TimeSpan.FromSeconds(5);

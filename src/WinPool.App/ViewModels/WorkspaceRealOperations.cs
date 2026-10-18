@@ -22,6 +22,9 @@ public sealed partial class WorkspaceViewModel
     }
     private readonly CancellationTokenSource _realOperationRecoveryCancellation = new();
     private Task? _realOperationRecoveryRefresh;
+    private Task? _realOperationRecoveryWatch;
+    private CancellationTokenSource? _realOperationRecoveryWatchCancellation;
+    private OperationId? _watchedRecoveryOperation;
     private bool _refreshingRecoveredRealOperation;
     public RealStructureResultSynchronization RealStructureResults { get; } = new();
     public bool IsRealOperationBusy { get; private set; }
@@ -35,6 +38,7 @@ public sealed partial class WorkspaceViewModel
 
     public void SetRealOperationActivity(bool busy, bool obscure, string phase, string? owner = null)
     {
+        var wasBusy = IsRealOperationBusy;
         var retained = !busy && RealOperationSubmission.IsBlocked;
         var chinese = Localization.EffectiveLanguage == LanguagePreference.ZhCn;
         var nextPhase = retained ? chinese ? "操作结果待核对" : "Operation result needs review" : phase;
@@ -54,11 +58,19 @@ public sealed partial class WorkspaceViewModel
                     AutoDismiss = false, RecordInHistory = false });
         else _notificationService.DismissByKey(EditorProgressKey);
         RealOperationActivityChanged?.Invoke();
+        if (!busy)
+        {
+            EnsureRealOperationRecoveryWatch();
+            // The originating page may have stopped waiting after an uncertain
+            // response while its terminal event arrived during that active flow.
+            if (wasBusy && RealOperationSubmission.IsBlocked) _ = RecoverRealOperationsAsync();
+        }
     }
 
     public void ObserveRealOperation(AgentRealOperationResponse status)
     {
         if (!RealOperationSubmission.Observe(status)) return;
+        RealStructureResults.ObserveUnresolved(status);
         LastRealOperationStatus = status;
         if (_recoveredRealOperationFeedback.TryGetValue(status.Plan.OperationId, out var previous))
         {
@@ -141,23 +153,80 @@ public sealed partial class WorkspaceViewModel
         await RecoverRealOperationsAsync();
     }
 
-    public async Task RecoverRealOperationsAsync()
+    public Task RecoverRealOperationsAsync() => RecoverRealOperationsAsync(null);
+
+    private async Task RecoverRealOperationsAsync(AgentRealOperationResponse? retainedStatus)
     {
         if (_realOperationRecoveryCancellation.IsCancellationRequested || IsRealOperationBusy) return;
         if (_realOperationRecoveryRefresh is { } pending)
         {
             await pending;
-            return;
+            if (retainedStatus is null || !RealOperationSubmission.IsBlocked) return;
         }
-        _realOperationRecoveryRefresh = RecoverRealOperationsCoreAsync();
+        _realOperationRecoveryRefresh = RecoverRealOperationsCoreAsync(retainedStatus);
         try { await _realOperationRecoveryRefresh; }
         finally
         {
             _realOperationRecoveryRefresh = null;
+            EnsureRealOperationRecoveryWatch();
         }
     }
 
-    private async Task RecoverRealOperationsCoreAsync()
+    private void EnsureRealOperationRecoveryWatch()
+    {
+        var operationId = RealOperationSubmission.OperationId;
+        if (_watchedRecoveryOperation != operationId) _realOperationRecoveryWatchCancellation?.Cancel();
+        if (_agentConnection is null || _realOperationRecoveryCancellation.IsCancellationRequested
+            || IsRealOperationBusy || operationId is null
+            || _watchedRecoveryOperation == operationId && _realOperationRecoveryWatch is { IsCompleted: false }) return;
+        var subscription = CancellationTokenSource.CreateLinkedTokenSource(_realOperationRecoveryCancellation.Token);
+        _realOperationRecoveryWatchCancellation = subscription;
+        _watchedRecoveryOperation = operationId;
+        _realOperationRecoveryWatch = WatchRecoveredRealOperationAsync(subscription);
+    }
+
+    private async Task WatchRecoveredRealOperationAsync(CancellationTokenSource subscription)
+    {
+        // Keep UI continuations on the workspace context, but publish ownership
+        // before the initial synchronous cache/query result can call recovery.
+        await Task.Yield();
+        try
+        {
+            await foreach (var status in RealOperationRecovery.WatchAsync(_agentConnection!,
+                RealOperationSubmission, subscription.Token))
+            {
+                if (IsRealOperationBusy) continue;
+                if (RealOperationSubmissionState.IsReconciledTerminal(status))
+                    await RecoverRealOperationsAsync(status);
+                else ObserveRealOperation(status);
+            }
+        }
+        catch (OperationCanceledException) when (subscription.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is IOException or InvalidDataException
+            or InvalidOperationException or ArgumentException or JsonException)
+        {
+            if (!subscription.IsCancellationRequested)
+                _notificationService.PublishWarning(Localization["Warning"], exception.Message,
+                    "real", "real:recover:unavailable");
+        }
+        finally
+        {
+            if (ReferenceEquals(_realOperationRecoveryWatchCancellation, subscription))
+            {
+                _realOperationRecoveryWatchCancellation = null;
+                _realOperationRecoveryWatch = null;
+                var previous = _watchedRecoveryOperation;
+                _watchedRecoveryOperation = null;
+                // A refresh can reveal another unfinished identity. Transfer
+                // ownership once; a failed stream is not retried in a loop.
+                if (RealOperationSubmission.OperationId is { } next && next != previous)
+                    EnsureRealOperationRecoveryWatch();
+            }
+            subscription.Dispose();
+        }
+    }
+
+    private async Task RecoverRealOperationsCoreAsync(AgentRealOperationResponse? retainedStatus)
     {
         if (_agentConnection is null) return;
         var closed = new List<AgentRealOperationResponse>();
@@ -200,7 +269,7 @@ public sealed partial class WorkspaceViewModel
                             : "Completed changes remain. In an empty structure draft, select Restore pending job to inspect the remaining goal; applying again requires confirmation.",
                         "real", $"real:job:{job.JobId:D}", options: new GlobalNotificationOptions
                         { Detail = $"JobId: {job.JobId:D}\n{string.Join(Environment.NewLine, job.Completed)}" });
-                });
+                }, retainedStatus);
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
             {

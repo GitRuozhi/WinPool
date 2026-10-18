@@ -43,6 +43,7 @@ public sealed class MonitoringService : IDisposable
     private readonly CancellationTokenSource _eventCancellation = new();
     private readonly Task _eventTask;
     private AgentInstanceId? _agentInstanceId;
+    private long _monitorStateRevision;
     private long _lastSequence;
     private long _transportGaps;
     private readonly HashSet<string> _seriesAwaitingGap = new(StringComparer.OrdinalIgnoreCase);
@@ -642,7 +643,7 @@ public sealed class MonitoringService : IDisposable
             ready.TrySetResult(true);
             if (response.Value is MonitoringSessionResponse started && _agentInstanceId is { } instance)
                 ApplyRemoteState(instance,
-                    started.Session, _agentDiagnostics, _recentStorageHealthEvents);
+                    started.Session, _agentDiagnostics, _recentStorageHealthEvents, out _);
             Changed?.Invoke();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -720,15 +721,9 @@ public sealed class MonitoringService : IDisposable
                             ApplyRemoteSnapshot(reseed.Snapshot, replaceWindow: true);
                             break;
                         case AgentMonitorStateEvent state:
-                            if (state.LifecycleState != AgentLifecycleState.Running)
-                            {
-                                IsRemoteStateKnown = false;
-                                break;
-                            }
-                            var needsInitialWindow = !IsRemoteStateKnown;
-                            ApplyRemoteState(state.AgentInstanceId, state.Session,
-                                state.Diagnostics, state.StorageHealthEvents);
-                            if (needsInitialWindow)
+                            if (ApplyRemoteState(state.AgentInstanceId, state.Session,
+                                state.Diagnostics, state.StorageHealthEvents, out var needsWindow,
+                                state.MonitorStateRevision, lifecycleState: state.LifecycleState) && needsWindow)
                                 await RefreshRemoteSnapshotAsync(cancellationToken);
                             break;
                         case AgentMonitorBatchEvent batch:
@@ -737,7 +732,11 @@ public sealed class MonitoringService : IDisposable
                             break;
                         case AgentEventTransportStateEvent { State: AgentEventTransportState.Disconnected }:
                             IsRemoteStateKnown = false;
-                            lock (_sync) _transportGaps++;
+                            lock (_sync)
+                            {
+                                _transportGaps++;
+                                _agentDiagnostics = _agentDiagnostics with { TransportGapCount = _transportGaps };
+                            }
                             break;
                     }
                     Changed?.Invoke();
@@ -778,23 +777,14 @@ public sealed class MonitoringService : IDisposable
 
     private void ApplyRemoteSnapshot(AgentSnapshot snapshot, bool replaceWindow)
     {
-        // A control/event handshake can complete while the Agent is still
-        // recovering its own state. Its recovery snapshot intentionally has
-        // no active monitoring session, but that absence is not proof that
-        // monitoring stopped. Only a ready Agent owns a definitive stopped
-        // state for this page.
-        if (snapshot.ShutdownStatus.State != AgentLifecycleState.Running)
-        {
-            IsRemoteStateKnown = false;
-            return;
-        }
-
-        var latestSamples = snapshot.LatestMonitorSamples ?? Array.Empty<MonitorSample>();
-        ApplyRemoteState(snapshot.AgentInstanceId, snapshot.ActiveMonitoringSession,
-            snapshot.MonitorDiagnostics ?? new MonitorRuntimeDiagnostics(0, 0),
-            snapshot.RecentStorageHealthEvents ?? []);
         lock (_sync)
         {
+            if (!ApplyRemoteState(snapshot.AgentInstanceId, snapshot.ActiveMonitoringSession,
+                snapshot.MonitorDiagnostics ?? new MonitorRuntimeDiagnostics(0, 0),
+                snapshot.RecentStorageHealthEvents ?? [], out _, snapshot.MonitorStateRevision,
+                allowAgentChange: true, lifecycleState: snapshot.ShutdownStatus.State)
+                || !IsRemoteStateKnown)
+                return;
             if (replaceWindow)
             {
                 _windows.Clear();
@@ -803,16 +793,32 @@ public sealed class MonitoringService : IDisposable
                 _lastSequence = 0;
                 _seriesAwaitingGap.Clear();
             }
-            AppendSamplesLocked(latestSamples);
+            AppendSamplesLocked((snapshot.LatestMonitorSamples ?? [])
+                .Where(sample => sample.SessionId == _remoteSessionId).ToArray());
         }
     }
 
-    private void ApplyRemoteState(AgentInstanceId instanceId, MonitoringSession? session,
-        MonitorRuntimeDiagnostics diagnostics, IReadOnlyList<StorageHealthEvent> healthEvents)
+    private bool ApplyRemoteState(AgentInstanceId instanceId, MonitoringSession? session,
+        MonitorRuntimeDiagnostics diagnostics, IReadOnlyList<StorageHealthEvent> healthEvents,
+        out bool needsWindow, long? revision = null, bool allowAgentChange = false,
+        AgentLifecycleState lifecycleState = AgentLifecycleState.Running)
     {
         lock (_sync)
         {
-            if (_agentInstanceId != instanceId || (_remoteSessionId != session?.SessionId && session is not null))
+            needsWindow = false;
+            var agentChanged = _agentInstanceId != instanceId;
+            // Only a connection/control snapshot can establish another Agent.
+            if (agentChanged && _agentInstanceId is not null && !allowAgentChange)
+                return false;
+            if (!agentChanged && revision is { } incoming
+                && (incoming > 0 || _monitorStateRevision > 0) && incoming <= _monitorStateRevision)
+                return false;
+            if (agentChanged) _monitorStateRevision = 0;
+            if (revision is { } accepted) _monitorStateRevision = accepted;
+
+            var sessionChanged = _remoteSessionId != session?.SessionId && session is not null;
+            needsWindow = (!IsRemoteStateKnown || agentChanged || sessionChanged) && session is not null;
+            if (agentChanged || sessionChanged)
             {
                 _windows.Clear();
                 _seriesTargets.Clear();
@@ -823,37 +829,39 @@ public sealed class MonitoringService : IDisposable
                 _transportGaps = 0;
             }
             _agentInstanceId = instanceId;
+            if (lifecycleState != AgentLifecycleState.Running)
+            {
+                // Recovering/closing is unknown, not an authoritative stopped session.
+                IsRemoteStateKnown = false;
+                needsWindow = false;
+                return true;
+            }
             _recentStorageHealthEvents = healthEvents.ToArray();
             _agentDiagnostics = diagnostics with
             {
                 TransportGapCount = _transportGaps
             };
-        }
-        IsRemoteStateKnown = true;
-        if (session is null)
-        {
-            _remoteSession = null;
-            _remoteSessionId = null;
-            IsRunning = false;
-            lock (_sync)
+            IsRemoteStateKnown = true;
+            if (session is null)
             {
+                _remoteSession = null;
+                _remoteSessionId = null;
+                IsRunning = false;
                 // A stopped/no-session response confirms the connection has
                 // recovered, but it must not manufacture a successful sample
                 // timestamp or imply that persistence was healthy.
                 RecordCommunicationSuccessLocked();
+                return true;
             }
-            return;
-        }
 
-        _remoteSessionId = session.SessionId;
-        _remoteSession = session;
-        IsRunning = session.State is MonitoringSessionState.Starting or MonitoringSessionState.Running or MonitoringSessionState.Stopping;
-        SampleRateHz = 1 / Math.Max(session.Request.SamplingInterval.TotalSeconds, 0.001);
-        lock (_sync)
-        {
+            _remoteSessionId = session.SessionId;
+            _remoteSession = session;
+            IsRunning = session.State is MonitoringSessionState.Starting or MonitoringSessionState.Running or MonitoringSessionState.Stopping;
+            SampleRateHz = 1 / Math.Max(session.Request.SamplingInterval.TotalSeconds, 0.001);
             _lastExportSessionId = session.SessionId;
             foreach (var target in session.Request.Targets)
                 if (!string.IsNullOrWhiteSpace(target.DisplayName)) _targetNames[target.ObjectId] = target.DisplayName;
+            return true;
         }
     }
 
@@ -868,6 +876,7 @@ public sealed class MonitoringService : IDisposable
             if (gap)
             {
                 _transportGaps++;
+                _agentDiagnostics = _agentDiagnostics with { TransportGapCount = _transportGaps };
                 _seriesAwaitingGap.UnionWith(_windows.Keys);
             }
             AppendSamplesLocked(batch.Samples);

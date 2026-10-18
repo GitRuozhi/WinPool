@@ -134,8 +134,15 @@ public sealed partial class AgentRealOperationService
         && collection.Scope.SystemId == system && collection.Scope.OperationId == operation;
 
     private static RealStructureJobGoal StructureGoal(SimulationEditingSession session, Guid? resume = null) =>
-        new(session.SystemId, session.Working, session.PoolIntents.OrderBy(item => item.Key, StringComparer.Ordinal)
-            .Select(item => new RealStructurePoolGoal(item.Key, item.Value)).ToArray(), resume);
+        RealStructureJobGoal.Create(session, resumeFromJobId: resume);
+
+    private static RealStructureJobGoal WithDraftIntent(RealStructureJobGoal goal, StorageSystemDocument baseline)
+    {
+        if (goal.DraftIntentHash is not null) return goal;
+        var editing = BindStructureSession(goal, baseline);
+        return goal with { DraftIntentHash = RealStructureJobGoal.ComputeDraftIntentHash(editing,
+            RealStructureDraftPlanner.Build(editing)) };
+    }
 
     public async Task<ApplicationResult<AgentResponse>> PrepareStructureJobAsync(
         PrepareAgentRealStructureJobRequest request, TrustedRealSession session, CancellationToken ct)
@@ -170,8 +177,11 @@ public sealed partial class AgentRealOperationService
                 if (source is null || source.MachineBinding != machine || source.State is not
                     (RealOperationState.PartiallyCompleted or RealOperationState.Failed or RealOperationState.Cancelled)
                     || result is null || result.Pending is not null
-                    || JsonSerializer.Serialize(canonical with { ResumeFromJobId = null })
-                        != JsonSerializer.Serialize(result.Remaining with { ResumeFromJobId = null }))
+                    || JsonSerializer.Serialize(canonical with { ResumeFromJobId = null, DraftIntentHash = null })
+                        != JsonSerializer.Serialize(result.Remaining with { ResumeFromJobId = null, DraftIntentHash = null }))
+                    return Reject(request.CorrelationId, "agent.structure.remaining_goal_changed_or_unresolved");
+                var savedBaseline = result.Baseline ?? JsonSerializer.Deserialize<FrozenStructureJob>(source.GoalJson)!.Baseline;
+                if (canonical.DraftIntentHash != WithDraftIntent(result.Remaining, savedBaseline).DraftIntentHash)
                     return Reject(request.CorrelationId, "agent.structure.remaining_goal_changed_or_unresolved");
                 resumedLayout = result.Layout;
             }
@@ -186,6 +196,10 @@ public sealed partial class AgentRealOperationService
             var editing = BindStructureSession(canonical, baseline);
             var draft = RealStructureDraftPlanner.Build(editing);
             if (!draft.Preview.CanApply) return Reject(request.CorrelationId, "agent.structure.invalid_goal", string.Join("; ", draft.Preview.BlockingReasons));
+            var actualIntentHash = RealStructureJobGoal.ComputeDraftIntentHash(editing, draft);
+            if (canonical.DraftIntentHash != actualIntentHash)
+                return Reject(request.CorrelationId, "agent.structure.draft_changed",
+                    "The live structural targets or parameters differ from the original draft. Refresh and review the draft before confirming.");
             _ = new RealStructureApplyAuthorization(draft, editing, session.ProductSessionId);
             foreach (var creation in draft.Creations.Where(item => item.CreatePool || item.CreateVirtualDisk || item.CreateTier))
                 foreach (var member in creation.PhysicalDiskIds)
@@ -212,6 +226,9 @@ public sealed partial class AgentRealOperationService
         var job = await plans.GetStructureJobAsync(request.JobId, ct);
         if (job is null || job.IntentHash != request.GoalHash) return Reject(request.CorrelationId, "agent.structure.goal_mismatch");
         if (job.State != RealOperationState.Prepared) return StructureStatus(job, request.CorrelationId);
+        if (JsonSerializer.Deserialize<FrozenStructureJob>(job.GoalJson)!.Goal.DraftIntentHash is null)
+            return Reject(request.CorrelationId, "agent.structure.draft_changed",
+                "This saved structural job needs a new draft review before it can be accepted.");
         if (!CanEnter(session) || !isSessionStillArmed(session) || session.Binding != job.SessionBinding
             || request.ProductSessionId != session.ProductSessionId
             || StructureGoalHash(job.GoalJson, job.MachineBinding, job.SessionBinding) != job.IntentHash
@@ -266,10 +283,11 @@ public sealed partial class AgentRealOperationService
         var remaining = includeRemaining && terminal && job.State != RealOperationState.Succeeded
             ? result?.Remaining ?? frozen.Goal with { ResumeFromJobId = job.JobId }
             : null;
+        if (remaining is not null) remaining = WithDraftIntent(remaining, result?.Baseline ?? frozen.Baseline);
         return ApplicationResult<AgentResponse>.Succeeded(new AgentRealStructureJobResponse(job.JobId, job.IntentHash,
             job.State, job.UpdatedAt.ToUnixTimeMilliseconds(), job.Children, result?.Completed ?? [], result?.Code,
             job.State == RealOperationState.OutcomeUnknown,
-            remaining, frozen.Goal.SystemId), correlation);
+            remaining, frozen.Goal.SystemId, frozen.Goal.DraftIntentHash), correlation);
     }
 
     private async Task<IReadOnlyList<AgentRealStructureJobResponse>> ListRecoverableStructureStatusesAsync(
@@ -324,10 +342,9 @@ public sealed partial class AgentRealOperationService
         }
         finally
         {
-            var remaining = new RealStructureJobGoal(session.SystemId, session.Working,
-                session.PoolIntents.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => new RealStructurePoolGoal(item.Key, item.Value)).ToArray());
             try
             {
+                var remaining = StructureGoal(session);
                 var latest = await plans.GetStructureJobAsync(job.JobId);
                 var durable = latest?.ResultJson is { } json ? JsonSerializer.Deserialize<StructureJobResult>(json) : null;
                 if (durable?.Pending is { } pending

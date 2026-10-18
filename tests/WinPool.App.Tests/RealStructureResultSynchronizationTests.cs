@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading.Channels;
 using WinPool.App.Services;
 using WinPool.Application;
 using WinPool.Domain;
@@ -10,6 +12,182 @@ namespace WinPool.App.Tests;
 /// <summary>Exercises the production frozen-stage owner and recovery ordering, not a second draft consumer.</summary>
 public sealed class RealStructureResultSynchronizationTests
 {
+    [Theory]
+    [InlineData(RealOperationState.Running)]
+    [InlineData(RealOperationState.OutcomeUnknown)]
+    public async Task RecoveredOperationFollowsTerminalEventAndMapsFactsBeforeReleasingBarrier(RealOperationState initialState)
+    {
+        var f = new Fixture();
+        f.Register();
+        var operation = f.Frozen with { State = initialState, RequiresReconciliation = initialState == RealOperationState.OutcomeUnknown };
+        long revision = 1;
+        AgentRealOperationStatusResponse Status() => new(operation.Plan.OperationId, revision, operation.State,
+            operation.Steps, operation.Code, operation.RequiresReconciliation);
+        var connection = new RecordingConnection(request => Success(request switch
+        {
+            QueryAgentRealOperationRequest => Status(),
+            ListAgentRecoverableRealOperationsRequest => new AgentRecoverableRealOperationsResponse([Status()]),
+            LoadAgentRealOperationEvidenceRequest => new AgentRealOperationEvidenceResponse(operation, 0, null),
+            _ => throw new InvalidOperationException("Recovery must not submit another write.")
+        }, request));
+        await RealOperationRecovery.RefreshAsync(connection, f.Submission, ObserveUnfinished, CancellationToken.None);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var refreshing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowRefresh = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var refreshCount = 0;
+        var notifications = 0;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var following = FollowAsync();
+        await started.Task.WaitAsync(timeout.Token);
+        Assert.True(f.Submission.IsBlocked);
+        Assert.True(f.Session.RealResultSynchronizationPending);
+        Assert.Equal(initialState == RealOperationState.OutcomeUnknown, f.Session.OutcomeUnknown);
+
+        // Neither another operation nor an older terminal revision can close this identity.
+        await connection.Events.Writer.WriteAsync(new AgentRealOperationStatusEvent(
+            Status() with { OperationId = OperationId.New(), State = RealOperationState.Succeeded }, DateTimeOffset.UtcNow));
+        await connection.Events.Writer.WriteAsync(new AgentRealOperationStatusEvent(
+            Status() with { Revision = 0, State = RealOperationState.Succeeded, RequiresReconciliation = false }, DateTimeOffset.UtcNow));
+        operation = f.Terminal;
+        revision = 2;
+        var terminal = new AgentRealOperationStatusEvent(Status(), DateTimeOffset.UtcNow);
+        await connection.Events.Writer.WriteAsync(terminal);
+        await refreshing.Task.WaitAsync(timeout.Token);
+        Assert.True(f.Submission.IsBlocked);
+        Assert.True(f.Session.RealResultSynchronizationPending);
+        await connection.Events.Writer.WriteAsync(terminal);
+        await connection.Events.Writer.WriteAsync(terminal with { Status = terminal.Status with { Revision = 1, State = RealOperationState.Running } });
+        allowRefresh.SetResult(true);
+        await following.WaitAsync(timeout.Token);
+
+        Assert.False(f.Submission.IsBlocked);
+        Assert.False(f.Session.RealResultSynchronizationPending);
+        Assert.False(f.Session.OutcomeUnknown);
+        Assert.Equal("vd:verified", f.Session.PoolIntents[Fixture.PoolId].VerifiedVirtualDiskId);
+        Assert.Equal(f.Fresh.Revision, f.Session.BaselineRevision);
+        Assert.Equal(1, refreshCount);
+        Assert.Equal(1, notifications);
+        Assert.Equal(0, connection.ActiveWatchers);
+        Assert.Equal(1, connection.WatchCalls);
+        Assert.Equal(2, connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>().Count());
+        Assert.All(connection.Requests, request => Assert.True(request is QueryAgentRealOperationRequest
+            or ListAgentRecoverableRealOperationsRequest or LoadAgentRealOperationEvidenceRequest));
+
+        void ObserveUnfinished(AgentRealOperationResponse status)
+        {
+            f.Results.ObserveUnresolved(status);
+            Assert.True(f.Submission.Observe(status));
+        }
+        async Task FollowAsync()
+        {
+            await foreach (var status in RealOperationRecovery.WatchAsync(connection, f.Submission, timeout.Token))
+            {
+                if (!RealOperationSubmissionState.IsReconciledTerminal(status))
+                {
+                    ObserveUnfinished(status);
+                    started.TrySetResult();
+                    continue;
+                }
+                Assert.True(await f.Results.RecoverAsync(status, async () =>
+                {
+                    refreshCount++;
+                    refreshing.TrySetResult();
+                    return await allowRefresh.Task.WaitAsync(timeout.Token);
+                }, () => f.Fresh, (_, _) =>
+                {
+                    notifications++;
+                    Assert.True(f.Submission.IsBlocked);
+                    Assert.False(f.Session.OutcomeUnknown);
+                    Assert.False(f.Session.RealResultSynchronizationPending);
+                    return true;
+                }, value => Assert.True(f.Submission.Observe(value)), timeout.Token));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RecoveryReseedUsesDurableRevisionAndAcceptsTerminalAfterUtcClockMovesBack()
+    {
+        var f = new Fixture();
+        f.Register();
+        var operation = f.Frozen with { State = RealOperationState.OutcomeUnknown, RequiresReconciliation = true };
+        f.Submission.Observe(operation);
+        f.Results.ObserveUnresolved(operation);
+        long revision = 10;
+        var queries = 0;
+        var reseeded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        AgentRealOperationStatusResponse Status() => new(operation.Plan.OperationId, revision, operation.State,
+            operation.Steps, operation.Code, operation.RequiresReconciliation);
+        var connection = new RecordingConnection(request =>
+        {
+            AgentResponse response;
+            if (request is QueryAgentRealOperationRequest)
+            {
+                response = Status();
+                if (++queries == 2) reseeded.TrySetResult();
+            }
+            else if (request is LoadAgentRealOperationEvidenceRequest)
+                response = new AgentRealOperationEvidenceResponse(operation, 0, null);
+            else throw new InvalidOperationException();
+            return Success(response, request);
+        });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var watcher = RealOperationRecovery.WatchAsync(connection, f.Submission, timeout.Token).GetAsyncEnumerator();
+        Assert.True(await watcher.MoveNextAsync());
+        var next = watcher.MoveNextAsync().AsTask();
+        var now = DateTimeOffset.UtcNow;
+        await connection.Events.Writer.WriteAsync(new AgentStateReseedEvent(
+            new(new AgentInstanceId(Guid.NewGuid()), true, null, new(AgentLifecycleState.Running, null, [], [], false), []),
+            "agent.events.reconnected", now.AddMinutes(1)));
+        await reseeded.Task.WaitAsync(timeout.Token);
+        await connection.Events.Writer.WriteAsync(new AgentRealOperationStatusEvent(
+            Status() with { Revision = 9, State = RealOperationState.Succeeded, RequiresReconciliation = false }, now.AddMinutes(2)));
+        operation = f.Terminal;
+        revision = 11;
+        var terminal = new AgentRealOperationStatusEvent(Status(), now.AddMinutes(-1));
+        await connection.Events.Writer.WriteAsync(terminal);
+        Assert.True(await next.WaitAsync(timeout.Token));
+        Assert.Equal(RealOperationState.Succeeded, watcher.Current.State);
+        Assert.True(await f.Results.RecoverAsync(watcher.Current, () => Task.FromResult(true), () => f.Fresh,
+            (_, _) => true, value => Assert.True(f.Submission.Observe(value)), timeout.Token));
+        // Duplicate terminal and older Running events cannot reopen the closed identity.
+        await connection.Events.Writer.WriteAsync(terminal);
+        await connection.Events.Writer.WriteAsync(terminal with { Status = terminal.Status with { Revision = 10, State = RealOperationState.Running } });
+        Assert.False(await watcher.MoveNextAsync());
+        Assert.False(f.Submission.IsBlocked);
+        Assert.False(f.Session.OutcomeUnknown);
+        Assert.Equal(2, queries);
+        Assert.Equal(2, connection.Requests.OfType<LoadAgentRealOperationEvidenceRequest>().Count());
+        Assert.Equal(0, connection.ActiveWatchers);
+    }
+
+    [Fact]
+    public async Task CancelledRecoverySubscriptionDisposesWatcherAndKeepsUnknownBarrier()
+    {
+        var f = new Fixture();
+        f.Register();
+        var unknown = f.Frozen with { State = RealOperationState.OutcomeUnknown, RequiresReconciliation = true };
+        f.Submission.Observe(unknown);
+        f.Results.ObserveUnresolved(unknown);
+        var connection = new RecordingConnection(request => Success(request switch
+        {
+            QueryAgentRealOperationRequest => new AgentRealOperationStatusResponse(unknown.Plan.OperationId, 1,
+                unknown.State, [], null, true),
+            LoadAgentRealOperationEvidenceRequest => new AgentRealOperationEvidenceResponse(unknown, 0, null),
+            _ => throw new InvalidOperationException()
+        }, request));
+        using var cancellation = new CancellationTokenSource();
+        await using var watcher = RealOperationRecovery.WatchAsync(connection, f.Submission, cancellation.Token).GetAsyncEnumerator();
+        Assert.True(await watcher.MoveNextAsync());
+        var pending = watcher.MoveNextAsync().AsTask();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        Assert.Equal(0, connection.ActiveWatchers);
+        Assert.True(f.Submission.IsBlocked);
+        Assert.True(f.Session.OutcomeUnknown);
+        Assert.True(f.Session.RealResultSynchronizationPending);
+    }
+
     [Theory]
     [InlineData("accept-reply-lost")]
     [InlineData("no-query-reply")]
@@ -644,8 +822,20 @@ public sealed class RealStructureResultSynchronizationTests
     private sealed class RecordingConnection(Func<AgentRequest, ApplicationResult<AgentResponse>> reply) : IAgentConnection
     {
         public List<AgentRequest> Requests { get; } = [];
+        public Channel<AgentEvent> Events { get; } = Channel.CreateUnbounded<AgentEvent>();
+        public int WatchCalls { get; private set; }
+        public int ActiveWatchers { get; private set; }
         public Task<ApplicationResult<AgentHandshake>> ConnectAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
-        public IAsyncEnumerable<AgentEvent> WatchAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public async IAsyncEnumerable<AgentEvent> WatchAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            WatchCalls++;
+            ActiveWatchers++;
+            try
+            {
+                await foreach (var item in Events.Reader.ReadAllAsync(cancellationToken)) yield return item;
+            }
+            finally { ActiveWatchers--; }
+        }
         public Task<ApplicationResult<AgentResponse>> SendAsync(AgentRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
