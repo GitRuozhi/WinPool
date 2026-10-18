@@ -28,6 +28,36 @@ public sealed class EmbeddedStorageInventoryTierMemberTests
     }
 
     [Theory]
+    [InlineData(WindowsRealStorageReadProfile.Os)]
+    [InlineData(WindowsRealStorageReadProfile.OsResize)]
+    [InlineData(WindowsRealStorageReadProfile.Metadata)]
+    public async Task NarrowCanonicalPhysicalFieldsRetainTheStrictSingleHddAssociationProof(string profile)
+    {
+        using var result = await RunAsync("profile-physical", profile);
+
+        Assert.Equal("uid:physical-uid", Assert.Single(ReadKeys(result)));
+        Assert.Equal(0, result.RootElement.GetProperty("ExtentCalls").GetInt32());
+        Assert.Equal(1, result.RootElement.GetProperty("AllocationQueries").GetInt32());
+        Assert.Empty(result.RootElement.GetProperty("SourceQueryFailures").EnumerateArray());
+        Assert.Equal(3, result.RootElement.GetProperty("PhysicalMediaTypeRaw").GetInt32());
+        Assert.Equal("HDD", result.RootElement.GetProperty("PhysicalMediaTypeDisplay").GetString());
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task MetadataCanonicalVirtualFieldsUseFastProofOnlyForTheSupportedLayout(bool nonzeroWriteCache, int expectedExtentCalls)
+    {
+        using var result = await RunAsync(nonzeroWriteCache ? "profile-virtual-write-cache-nonzero" : "profile-virtual",
+            WindowsRealStorageReadProfile.Metadata);
+
+        Assert.Equal("uid:physical-uid", Assert.Single(ReadKeys(result)));
+        Assert.Equal(expectedExtentCalls, result.RootElement.GetProperty("ExtentCalls").GetInt32());
+        Assert.Equal(1, result.RootElement.GetProperty("AllocationQueries").GetInt32());
+        Assert.Empty(result.RootElement.GetProperty("SourceQueryFailures").EnumerateArray());
+    }
+
+    [Theory]
     [InlineData("allocation-mismatch")]
     [InlineData("allocation-query-throws")]
     [InlineData("tier-size-mismatch")]
@@ -92,7 +122,7 @@ public sealed class EmbeddedStorageInventoryTierMemberTests
     private static string[] ReadKeys(JsonDocument result) => result.RootElement.GetProperty("Keys")
         .EnumerateArray().Select(item => item.GetString()!).ToArray();
 
-    private static async Task<JsonDocument> RunAsync(string scenario)
+    private static async Task<JsonDocument> RunAsync(string scenario, string? profile = null)
     {
         var harness = """
 $ErrorActionPreference = 'Stop'
@@ -101,7 +131,21 @@ $fixture = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $script:extentCalls = 0
 $script:allocationQueries = 0
 $sourceQueryFailures = [System.Collections.Generic.List[object]]::new()
+function Write-WinPoolInventoryStage([string]$stage, [string]$class = '', [string]$related = '') { }
 $physical = [pscustomobject]@{ UniqueId='physical-uid'; ObjectId='physical-object'; MediaType='HDD' }
+if (@($fixture.PhysicalFields).Count -gt 0) {
+    # No provider is invoked. Use the real Storage type adapter over synthetic
+    # raw CIM properties, as Get-CimInstance -Property does in the product host.
+    Import-Module Storage -ErrorAction Stop
+    $physical = [Microsoft.Management.Infrastructure.CimInstance]::new('MSFT_PhysicalDisk','root/Microsoft/Windows/Storage')
+    foreach ($entry in @(
+        @{ Name='UniqueId'; Value='physical-uid'; Type=[Microsoft.Management.Infrastructure.CimType]::String },
+        @{ Name='ObjectId'; Value='physical-object'; Type=[Microsoft.Management.Infrastructure.CimType]::String },
+        @{ Name='MediaType'; Value=[uint16]3; Type=[Microsoft.Management.Infrastructure.CimType]::UInt16 })) {
+        $physical.CimInstanceProperties.Add([Microsoft.Management.Infrastructure.CimProperty]::Create(
+            $entry.Name, $entry.Value, $entry.Type, [Microsoft.Management.Infrastructure.CimFlags]::None))
+    }
+}
 $physicalObjects = @($physical)
 $pool = [pscustomobject]@{ UniqueId='pool-uid'; ObjectId='pool-object'; IsPrimordial=$false }
 $script:poolParents = @($pool)
@@ -118,7 +162,37 @@ $tier = [pscustomobject]@{
     Size=[uint64]100; AllocatedSize=[uint64]100; FootprintOnPool=[uint64]100
 }
 $virtualTiers = @($tier)
+function Select-FixtureFields($value, [string[]]$names) {
+    if ($value -is [Microsoft.Management.Infrastructure.CimInstance]) {
+        $projected = [Microsoft.Management.Infrastructure.CimInstance]::new(
+            $value.CimSystemProperties.ClassName, $value.CimSystemProperties.Namespace)
+        foreach ($name in $names) {
+            $property = $value.CimInstanceProperties[$name]
+            if ($null -ne $property) {
+                $projected.CimInstanceProperties.Add([Microsoft.Management.Infrastructure.CimProperty]::Create(
+                    $property.Name, $property.Value, $property.CimType, $property.Flags))
+            }
+        }
+        return $projected
+    }
+    $projected = [ordered]@{}
+    foreach ($name in $names) {
+        $property = $value.PSObject.Properties[$name]
+        if ($null -ne $property) { $projected[$name] = $property.Value }
+    }
+    return [pscustomobject]$projected
+}
 switch ([string]$fixture.Scenario) {
+    'profile-physical' {
+        # Identity selection retains this partial canonical object; associated
+        # pool/allocation observations above remain separate full objects.
+        $physicalObjects = @(Select-FixtureFields $physical @($fixture.PhysicalFields))
+    }
+    { $_ -in @('profile-virtual','profile-virtual-write-cache-nonzero') } {
+        $physicalObjects = @(Select-FixtureFields $physical @($fixture.PhysicalFields))
+        $virtual = Select-FixtureFields $virtual @($fixture.VirtualFields)
+        if ([string]$fixture.Scenario -eq 'profile-virtual-write-cache-nonzero') { $virtual.WriteCacheSize = [uint64]1 }
+    }
     'physical-facts-empty' { $physicalObjects = @() }
     'physical-facts-no-provider-identity' { $physicalObjects = @([pscustomobject]@{ UniqueId=''; ObjectId='physical-object'; MediaType='HDD' }) }
     'allocation-mismatch' { $script:allocatedMembers = @([pscustomobject]@{ UniqueId='other-uid'; ObjectId='other-object'; MediaType='HDD' }) }
@@ -176,6 +250,9 @@ $keys = @()
 $failure = $null
 try { $keys = @(Get-ExactTierMemberKeys $tier $virtual $pool $virtualTiers) } catch { $failure = [string]$_.Exception.Message }
 [ordered]@{ Keys=@($keys); ExtentCalls=$script:extentCalls; AllocationQueries=$script:allocationQueries;
+    PhysicalMediaTypeRaw=if ($physicalObjects.Count -eq 1 -and $physicalObjects[0] -is [Microsoft.Management.Infrastructure.CimInstance]) {
+        $physicalObjects[0].CimInstanceProperties['MediaType'].Value } else { $null };
+    PhysicalMediaTypeDisplay=if ($physicalObjects.Count -eq 1) { [string]$physicalObjects[0].MediaType } else { $null };
     SourceQueryFailures=@($sourceQueryFailures.ToArray()); Failure=$failure } | ConvertTo-Json -Depth 8 -Compress
 """;
 
@@ -198,7 +275,12 @@ try { $keys = @(Get-ExactTierMemberKeys $tier $virtual $pool $virtualTiers) } ca
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteAsync(JsonSerializer.Serialize(new { Scenario = scenario }));
+        await process.StandardInput.WriteAsync(JsonSerializer.Serialize(new
+        {
+            Scenario = scenario,
+            PhysicalFields = profile is null ? [] : WindowsRealStorageReadProfile.ForId(profile)!.Fields["MSFT_PhysicalDisk"],
+            VirtualFields = profile is null ? [] : WindowsRealStorageReadProfile.ForId(profile)!.Fields["MSFT_VirtualDisk"]
+        }));
         process.StandardInput.Close();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         try

@@ -35,10 +35,16 @@ public sealed class WindowsRealStorageReadProfile
             // Metadata and OS operations do not resize the backing pool/VD.
             // Member identity, native roles and descendant protection facts remain.
             var fields = (Dictionary<string, string[]>)Fields;
-            fields["MSFT_PhysicalDisk"] = Split("UniqueId ObjectId FriendlyName SerialNumber DeviceId Size HealthStatus Usage BusType IsBoot IsSystem IsPageFile IsCrashDump"
+            // The canonical member is also consumed by the strict single-HDD tier
+            // association proof during projection, even for metadata/OS commands.
+            fields["MSFT_PhysicalDisk"] = Split("UniqueId ObjectId FriendlyName SerialNumber DeviceId Size HealthStatus Usage BusType MediaType IsBoot IsSystem IsPageFile IsCrashDump"
                 + (id is Os or OsResize ? " LogicalSectorSize PhysicalSectorSize" : ""));
             fields["MSFT_StoragePool"] = Split("UniqueId ObjectId FriendlyName IsPrimordial");
-            fields["MSFT_VirtualDisk"] = Split("UniqueId ObjectId FriendlyName");
+            // Rename-VD selects this object directly before association traversal.
+            // Keep the native prerequisites of the same strict tier-member proof.
+            fields["MSFT_VirtualDisk"] = Split("UniqueId ObjectId FriendlyName" + (id == Metadata
+                ? " Size AllocatedSize FootprintOnPool WriteCacheSize ResiliencySettingName ProvisioningType NumberOfColumns Interleave NumberOfDataCopies PhysicalDiskRedundancy"
+                : ""));
             fields["MSFT_StorageTier"] = Split("UniqueId ObjectId FriendlyName");
         }
     }

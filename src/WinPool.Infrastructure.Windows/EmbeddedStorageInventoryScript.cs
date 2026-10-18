@@ -643,7 +643,9 @@ function Get-ExactSingleHddTierMemberKey($tier, $virtual, $pool, $virtualTiers) 
         if ([string]::IsNullOrWhiteSpace($memberUniqueId) -or [string]::IsNullOrWhiteSpace($memberObjectId) -or
             -not [string]::Equals([string]$member.MediaType, 'HDD', [StringComparison]::OrdinalIgnoreCase)) { return $null }
 
+        Write-WinPoolInventoryStage 'allocated-members.begin' 'MSFT_VirtualDisk' 'MSFT_PhysicalDisk'
         $allocatedMembers = @(Get-PhysicalDisk -VirtualDisk $virtual -HasAllocations $true -ErrorAction Stop)
+        Write-WinPoolInventoryStage 'allocated-members.returned' 'MSFT_VirtualDisk' 'MSFT_PhysicalDisk'
         if ($allocatedMembers.Count -ne 1 -or
             -not [string]::Equals([string]$allocatedMembers[0].UniqueId, $memberUniqueId, [StringComparison]::Ordinal) -or
             -not [string]::Equals([string]$allocatedMembers[0].ObjectId, $memberObjectId, [StringComparison]::Ordinal)) { return $null }
@@ -671,7 +673,9 @@ function Get-ExactTierMemberKeysByExtent($tier, $virtual) {
     if (@($physicalObjects).Count -eq 0 -or @($physicalObjects | Where-Object {
         [string]::IsNullOrWhiteSpace([string]$_.UniqueId) -or [string]::IsNullOrWhiteSpace([string]$_.ObjectId)
     }).Count -gt 0) { throw 'tier-extent-physical-facts-unavailable' }
+    Write-WinPoolInventoryStage 'tier-extents.begin' 'MSFT_StorageTier' 'GetPhysicalExtent'
     $result = Invoke-CimMethod -InputObject $tier -MethodName GetPhysicalExtent -ErrorAction Stop
+    Write-WinPoolInventoryStage 'tier-extents.returned' 'MSFT_StorageTier' 'GetPhysicalExtent'
     if ($null -eq $result.ReturnValue -or [uint32]$result.ReturnValue -ne 0) { throw 'tier-extent-method-failed' }
     $keys = @()
     foreach ($extent in @($result.PhysicalExtents)) {
