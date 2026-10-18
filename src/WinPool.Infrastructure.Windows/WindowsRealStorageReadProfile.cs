@@ -78,8 +78,19 @@ public sealed class WindowsRealStorageReadProfile
     public static string? CoveringBoth(string? first, string? second) => Covers(first, second) ? first
         : Covers(second, first) ? second : null;
 
-    public bool IncludesField(string className, string field) => !Fields.TryGetValue(className, out var fields)
-        || fields.Contains(field, StringComparer.OrdinalIgnoreCase);
+    public bool IncludesFingerprintField(string className, string field)
+    {
+        // These newly collected values are prerequisites of the strict tier-member
+        // projection, not additions to the persisted v1 command fingerprint domain.
+        if ((Id is Metadata or Os or OsResize) && className == "MSFT_PhysicalDisk"
+            && field.Equals("MediaType", StringComparison.OrdinalIgnoreCase)) return false;
+        if (Id == Metadata && className == "MSFT_VirtualDisk")
+            return field.Equals("UniqueId", StringComparison.OrdinalIgnoreCase)
+                || field.Equals("ObjectId", StringComparison.OrdinalIgnoreCase)
+                || field.Equals("FriendlyName", StringComparison.OrdinalIgnoreCase);
+        return !Fields.TryGetValue(className, out var fields)
+            || fields.Contains(field, StringComparer.OrdinalIgnoreCase);
+    }
 
     public bool RequiresProjectedField(FactObjectType type, string name)
     {

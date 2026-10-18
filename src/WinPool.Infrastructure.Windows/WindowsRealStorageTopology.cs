@@ -677,7 +677,7 @@ public sealed class WindowsRealStorageTopology
                 .Append(item.Id).Append('|').Append(item.SourceIdentity).Append('\n');
             foreach (var field in item.Fields.OrderBy(field => field.Name, StringComparer.Ordinal))
             {
-                if (profile is not null && !profile.IncludesField(ClassName(item.ObjectType), field.Name)) continue;
+                if (profile is not null && !profile.IncludesFingerprintField(ClassName(item.ObjectType), field.Name)) continue;
                 // File writes can change free-space counters without changing
                 // identity, protection, geometry, layout, or mount ownership.
                 if (field.Name.Equals("SizeRemaining", StringComparison.OrdinalIgnoreCase))
