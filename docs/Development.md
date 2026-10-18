@@ -93,7 +93,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 .\build\Package-WinPool.ps1 -TestedScope '填写本批次实际通过的验证范围'
 ```
 
-说明记录真实 Git HEAD／dirty 状态；没有填入的实测范围明确记为未登记。脚本存在不表示候选包已生成或已验证，实际结果归 Quality／Plan。
+说明记录构建时源码SHA／受控输入状态；没有填入的实测范围明确记为未登记。脚本存在不表示候选包已生成或已验证，实际结果归 Quality／Plan。
 
 `Rebuild-WinPool.ps1` 会移动中间输出、重建并写快捷方式，不是每次打包或检查的前置。`Clean-WinPool.ps1` 和完整性标签修复脚本只在对应问题需要时使用，不进行例行清理或重复 ACL 调查。运行树替换前的 `Assert-RealOperationIdle.ps1` 保留；持久 Unknown 与实际存活进程的区别按当前守卫处理，程序替换不解除产品写屏障。
 

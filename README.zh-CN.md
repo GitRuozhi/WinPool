@@ -48,4 +48,4 @@ Windows 11 has not yet received equivalent testing because current storage hardw
 
 ## 权利
 
-本仓库未对WinPool自有代码授予许可证，保留所有权利。第三方组件遵循各自许可证，见[随包运行库索引](assets/ThirdParty/RuntimeLicenses/README.md)；7-Zip的[许可证](assets/ThirdParty/7zip/26.03/License.txt)及[来源说明](assets/ThirdParty/7zip/26.03/NOTICE.txt)单独提供。
+本仓库未对WinPool自有代码授予许可证，保留所有权利。第三方组件遵循各自许可证，见[随包运行库索引](assets/ThirdParty/RuntimeLicenses/README.md)；7-Zip的[许可证](assets/ThirdParty/7zip/26.04/License.txt)及[来源说明](assets/ThirdParty/7zip/26.04/NOTICE.txt)单独提供。

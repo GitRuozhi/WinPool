@@ -97,6 +97,6 @@ WinPool 是 Windows 存储拓扑、管理编辑和监控桌面软件。保留 Wi
 | V0.70及以后 | 收紧功能、集成与质量收口；签名MSIX和正式发布按实际需要另定，不用它们阻塞首稿 |
 | V1.x／V2.0 | 1.x聚焦已有管理／监控与交付；2.0才讨论完整测试、开发及AI工作区 |
 
-只有一套产品功能与版本，便携／安装两种交付方式，不做Standard／Preview功能分版。当前是x64便携运行目录，App与Agent配套；唯一打包脚本生成不含开发数据的 zip、校验值与本批次测试说明，具体产物见[Quality候选记录](Quality.md#v061-candidate)。安装版、Store和公共SDK未交付。默认 `%LocalAppData%\WinPool`，可明确选择程序旁可写Data。首稿候选包生成不等于上传／tag／Release发布授权。
+只有一套产品功能与版本，便携／安装两种交付方式，不做Standard／Preview功能分版。当前是x64便携运行目录，App与Agent配套；唯一打包脚本生成不含开发数据的 zip、校验值与本批次测试说明，具体产物及当前待验状态见[Quality](Quality.md#当前证据与缺口)。安装版、Store和公共SDK未交付。默认 `%LocalAppData%\WinPool`，可明确选择程序旁可写Data。首稿候选包生成不等于上传／tag／Release发布授权。
 
 支持目标为Windows 10 22H2 x64及主要Windows 11 24H2／25H2 x64；ARM64、x86和更早系统不保证。当前只有开发者环境，外部测试负责不同系统／SKU／设备的实测。软件平台验证与研究的Windows 11等价可靠性测试是不同范围；研究原说明保留在根README，不用旧单盘结果宣称跨环境可靠。

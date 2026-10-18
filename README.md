@@ -48,4 +48,4 @@ The research findings cover their recorded samples. Software platform testing an
 
 ## Rights
 
-No license is granted for WinPool's own code by this repository. All rights are reserved. Third-party components retain their respective licenses; see the [runtime license index](assets/ThirdParty/RuntimeLicenses/README.md) and the bundled 7-Zip [license](assets/ThirdParty/7zip/26.03/License.txt) and [source notice](assets/ThirdParty/7zip/26.03/NOTICE.txt).
+No license is granted for WinPool's own code by this repository. All rights are reserved. Third-party components retain their respective licenses; see the [runtime license index](assets/ThirdParty/RuntimeLicenses/README.md) and the bundled 7-Zip [license](assets/ThirdParty/7zip/26.04/License.txt) and [source notice](assets/ThirdParty/7zip/26.04/NOTICE.txt).

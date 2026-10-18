@@ -68,9 +68,13 @@ IPC中间JSON层重新转义导致正文SHA失配的问题已修复，保留原�
 
 [3 MiB实际连续10次改名](../artifacts/test-results/v062/gui-3m-rename-measurements-02.json)中，反馈最大17.612 ms、本地候选发布最大762.231 ms；编辑页绑定最大1179.404 ms，不等于延迟绘制完成。改名后的Workspace／编辑页仍各构造完整VM；现已对严格相同baseline与纯Rename链复用节点并更新全部snapshot上下文，排序／结构变化保持重建；纯选择复用根。[协调器与保存40项](../artifacts/test-results/v062/final/Infrastructure-name-reuse.trx)通过，优化后的实际GUI仍待测量。新建[MAX旧基线保守下界](../artifacts/test-results/v062/max-baseline-bounds.json)仅从准确child关联的非重叠阶段推导，后续以新墙钟／非写上界验证，不能把旧job含人工时长当精确基准。
 
-上述原始CIM修复已在实盘完成[显式只读对账](../artifacts/test-results/v062/wdc-jobstate-rechecked.json)：已取得两轮未变闭包及终态作业，未创建VD、Pending已清。App随后因恢复刷新后用当前模拟项而非本机目录项校验，仍保留界面屏障；现修正本机目录校验，并在恢复草稿之前调用既有完整恢复闭环，[恢复／同步62项](../artifacts/test-results/v062/final/App-local-recovery-catalog.trx)通过。实际界面解除阻塞待新构建，不压遮罩或绕过真实校验。
+上述原始CIM修复已在实盘完成[显式只读对账](../artifacts/test-results/v062/wdc-jobstate-rechecked.json)：已取得两轮未变闭包及终态作业，未创建VD、Pending已清。App随后因恢复刷新后用当前模拟项而非本机目录项校验，仍保留界面屏障；现修正本机目录校验，并在恢复草稿之前调用既有完整恢复闭环，[恢复／同步62项](../artifacts/test-results/v062/final/App-local-recovery-catalog.trx)通过。`43d7954`实际界面已解除遮罩，普通鼠标交互恢复；但剩余草稿仍被正确拦截：Agent把局部raw后验当完整基线，丢失未采集的Samsung及其磁盘／分区／卷，见[待实施原因](../artifacts/test-results/v062/wdc-recovery-pending-reason-ui.txt)。当前正修复显示合并与既有损坏结果的恢复，尚未继续WDC写入。
 
 [节点复用后的10次改名](../artifacts/test-results/v062/gui-simulation-renames-3m-reuse-01.json)中，发布最大13.239 ms、本地候选最大624.722 ms、编辑页绑定最大706.481 ms；10次均未构造新的完整根VM，实际显示与后台保存继续正常。该批使用GUI可访问性动作，尚有上述旧恢复遮罩，鼠标选择测试未进入处理器，未记通过；完整鼠标交互及已加载系统切换需在解除阻塞后验证。
+
+解除遮罩后的[3 MiB真实鼠标选择10次](../artifacts/test-results/v062/gui-3m-selection-phases-02.json)最大115.3 ms、完整根重建0，符合200 ms预算；[系统切换10次](../artifacts/test-results/v062/gui-loaded-switch-01.json)完整编辑页应用502.836–985.922 ms，超过200 ms预算。Workspace仅第一份新副本首建根，其余已加载切换约4.8–6.6 ms；修复聚焦编辑页重复建树，不把首载与热切换混为一项。
+
+[530 KB文档实际改名10次](../artifacts/test-results/v062/gui-simulation-renames-530k-01.json)本地候选最大294.777 ms、发布最大5.513 ms、完整根重建0；首动作反馈852.008 ms，后9次11.386–18.552 ms，首动作尚不符合100 ms预算。该文档[鼠标选择10次](../artifacts/test-results/v062/gui-530k-selection-phases-01.json)9次14.8–21.3 ms，另一次198.8 ms，同样尚未满足100 ms预算。保留失败批次，后续调查并在稳定构建复验，不用热样本覆盖失败结果；仅编辑本次导入副本，未修改原开发文档。
 
 旧MAX历史144.454／102.418 s实际为Prepared job创建至终态，包含确认停留且不包含此前Prepare；缺少原生写调用开始／返回，不能据此精确计算本版70%非写开销／50%端到端降幅。对应历史读取／阶段原始数据仍保留，新的同口径性能比较待完成。
 
