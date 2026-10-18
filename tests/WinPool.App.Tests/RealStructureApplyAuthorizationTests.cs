@@ -149,6 +149,92 @@ public sealed class RealStructureApplyAuthorizationTests
     }
 
     [Fact]
+    public void VerifiedStagesCanChangeFromOsToRequiredToFullMaximumEvidence()
+    {
+        var fixture = new Fixture();
+        var authorization = fixture.Authorization;
+        var clear = RealOperationProposalFactory.ClearToRaw(fixture.Session.SystemId, fixture.DirectDisk);
+        clear = clear with { Targets = clear.Targets.Append(authorization.PhysicalTarget).ToArray() };
+        var baseline = fixture.Frozen(clear, "full-before").Plan.RealOperation!;
+        authorization.FreezeBaselineEvidence(authorization.PhysicalTargets, baseline.MachineBinding,
+            baseline.SessionBinding, baseline.PhysicalMemberFingerprint, "full-before");
+        authorization.Confirm();
+        authorization.RebindEvidenceProfile(clear, null, "full-before", "command-os-v1", "os-before", baseline.PhysicalMemberFingerprint);
+        var cleared = WithProfile(fixture.Frozen(clear, "os-before"), "command-os-v1");
+        authorization.ValidateFrozen(clear, cleared);
+        authorization.ObserveVerified(clear, Verified(cleared, "os-after"), fixture.Project(fixture.Session.Baseline));
+
+        authorization.RebindEvidenceProfile(fixture.CreatePool, "command-os-v1", "os-after",
+            "command-required-v1", "required-before", baseline.PhysicalMemberFingerprint);
+        var pool = WithProfile(fixture.Frozen(fixture.CreatePool, "required-before"), "command-required-v1");
+        authorization.ValidateFrozen(fixture.CreatePool, pool);
+        authorization.ObserveVerified(fixture.CreatePool, Verified(pool, "required-after", "pool:verified"), fixture.WithCreatedPool());
+
+        var vd = fixture.CreateVd("pool:verified");
+        authorization.RebindEvidenceProfile(vd, "command-required-v1", "required-after", null,
+            "full-maximum", baseline.PhysicalMemberFingerprint);
+        var maximum = fixture.Frozen(vd, "full-maximum", addMaxPolicy: true);
+        authorization.ValidateFrozen(vd, maximum);
+        Assert.Null(maximum.Plan.RealOperation!.EvidenceProfile);
+    }
+
+    [Theory]
+    [InlineData("topology")]
+    [InlineData("member-role")]
+    [InlineData("physical")]
+    [InlineData("profile")]
+    [InlineData("scope")]
+    [InlineData("pending")]
+    public void EvidenceProfileChangeCannotAdoptAnUnverifiedState(string change)
+    {
+        var fixture = new Fixture();
+        var authorization = fixture.Authorization;
+        var baseline = fixture.Frozen(fixture.CreatePool, "before");
+        var real = baseline.Plan.RealOperation!;
+        authorization.FreezeBaselineEvidence(authorization.PhysicalTargets, real.MachineBinding,
+            real.SessionBinding, real.PhysicalMemberFingerprint, real.TargetFingerprint);
+        authorization.Confirm();
+        if (change == "pending") authorization.ValidateFrozen(fixture.CreatePool, baseline);
+        var proposal = fixture.CreatePool;
+        if (change == "scope") proposal = proposal with
+        {
+            Targets = [new(fixture.Session.SystemId, StorageObjectKind.PhysicalDisk, "unconfirmed:member")]
+        };
+        Assert.Throws<InvalidDataException>(() => authorization.RebindEvidenceProfile(proposal,
+            change == "profile" ? "command-os-v1" : null,
+            change is "topology" or "member-role" ? "external-state" : "before",
+            "command-required-v1", "next", change == "physical" ? "foreign-member" : real.PhysicalMemberFingerprint));
+    }
+
+    [Fact]
+    public void FrozenPlanMustUseTheExplicitlyConvertedEvidenceProfile()
+    {
+        var fixture = new Fixture();
+        var authorization = fixture.Authorization;
+        var baseline = fixture.Frozen(fixture.CreatePool, "before").Plan.RealOperation!;
+        authorization.FreezeBaselineEvidence(authorization.PhysicalTargets, baseline.MachineBinding,
+            baseline.SessionBinding, baseline.PhysicalMemberFingerprint, baseline.TargetFingerprint);
+        authorization.Confirm();
+        authorization.RebindEvidenceProfile(fixture.CreatePool, null, "before", "command-required-v1", "next", baseline.PhysicalMemberFingerprint);
+        Assert.Throws<InvalidDataException>(() => authorization.ValidateFrozen(fixture.CreatePool, fixture.Frozen(fixture.CreatePool, "next")));
+        authorization.ValidateFrozen(fixture.CreatePool, WithProfile(fixture.Frozen(fixture.CreatePool, "next"), "command-required-v1"));
+    }
+
+    private static AgentRealOperationResponse WithProfile(AgentRealOperationResponse response, string? profile)
+    {
+        var plan = response.Plan with { RealOperation = response.Plan.RealOperation! with { EvidenceProfile = profile } };
+        return response with { Plan = plan with { PlanHash = OperationPlanHasher.Compute(plan) } };
+    }
+
+    private static AgentRealOperationResponse Verified(AgentRealOperationResponse frozen, string post, string? created = null) => frozen with
+    {
+        State = RealOperationState.Succeeded,
+        Steps = [new(frozen.Plan.RealOperation!.Steps[0].Id, RealOperationStepState.Verified, null, null,
+            JsonSerializer.Serialize(new { PostFingerprint = post,
+                frozen.Plan.RealOperation.PhysicalMemberFingerprint, CreatedObjectId = created }))]
+    };
+
+    [Fact]
     public void ConfirmationNamesTheMemberAndTheEntireRequestedResult()
     {
         var fixture = new Fixture();

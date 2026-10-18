@@ -386,9 +386,13 @@ public sealed partial class AgentRealOperationService
         var jobId = job.JobId;
         var childOrdinal = job.Children.Count;
         var current = frozen.Baseline;
+        if (current.SourceFacts is not { IsMerged: false } baselineFacts
+            || !WindowsRealStorageReadProfile.Covers(baselineFacts.ScopedCollection?.Scope.EvidenceProfile, null))
+            throw new InvalidDataException("The confirmed structural baseline must contain full raw storage evidence.");
         var draft = RealStructureDraftPlanner.Build(session);
         var authorization = new RealStructureApplyAuthorization(draft, session, trustedSession.ProductSessionId);
         var topology = new WindowsRealStorageTopology(current, job.MachineBinding, job.CreatedAt);
+        var authorizedEvidence = new Dictionary<string, (StorageSystemDocument Document, string? Profile)>(StringComparer.Ordinal);
         foreach (var members in authorization.PhysicalTargetSets)
         {
             var ids = members.Select(member => member.ProviderKey).ToHashSet(StringComparer.Ordinal);
@@ -398,6 +402,7 @@ public sealed partial class AgentRealOperationService
                 : topology.RequireSelectedPhysicalMemberSet(members, requirePoolable: false);
             authorization.FreezeBaselineEvidence(members, topology.MachineBinding, trustedSession.Binding,
                 closure.PhysicalMemberFingerprint, closure.Fingerprint);
+            authorizedEvidence.Add(EvidenceScope(members), (current, null));
         }
         authorization.Confirm();
         var synchronization = new RealStructureResultSynchronization();
@@ -583,6 +588,22 @@ public sealed partial class AgentRealOperationService
         return true;
 
         StorageObjectId Id(StorageObjectKind kind, string key) => new(session.SystemId, kind, key);
+        string EvidenceScope(IEnumerable<StorageObjectId> members) => JsonSerializer.Serialize(members
+            .Select(member => member.ProviderKey).Order(StringComparer.Ordinal).ToArray());
+        RealExactPhysicalMemberSetClosure EvidenceClosure(StorageSystemDocument document,
+            IReadOnlyList<StorageObjectId> members, string? profile)
+        {
+            if (document.SystemId != session.SystemId || document.SourceFacts is not { IsMerged: false } facts
+                || !WindowsRealStorageReadProfile.Covers(facts.ScopedCollection?.Scope.EvidenceProfile, profile))
+                throw new InvalidDataException("Structural authorization needs complete raw facts covering its evidence profile.");
+            var evidence = new WindowsRealStorageTopology(document, job.MachineBinding, timeProvider.GetUtcNow(), profile);
+            var ids = members.Select(member => member.ProviderKey).ToHashSet(StringComparer.Ordinal);
+            var pools = evidence.Snapshot.StoragePools.Where(pool => !pool.IsPrimordial && pool.MemberPhysicalDiskIds.Any(ids.Contains)).ToArray();
+            if (pools.Length > 1) throw new InvalidDataException("A structural evidence scope cannot span concrete pools.");
+            return pools.Length == 1
+                ? evidence.RequireExactPhysicalMemberSet(Id(StorageObjectKind.StoragePool, pools[0].StableId), members)
+                : evidence.RequireSelectedPhysicalMemberSet(members, requirePoolable: false);
+        }
         async Task<bool> Stage(RealOperationIntentRequest proposal, string description,
             RealStructureResultSynchronization.OutputMapping? mapping = null, RealAutomaticLayoutProgress? layout = null)
         {
@@ -591,7 +612,32 @@ public sealed partial class AgentRealOperationService
             // child stage to an unrelated member merely because it shares Primordial.
             proposal = RealOperationProposalFactory.DeclareCurrentPoolMembers(proposal, current.Snapshot);
             authorization.ValidateProposal(proposal);
-            var plan = await backend!.PrepareAsync(proposal, trustedSession, OperationId.New(), CancellationToken.None);
+            var members = proposal.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
+            var scopeKey = EvidenceScope(members);
+            var previousEvidence = authorizedEvidence[scopeKey];
+            var nextProfile = WindowsRealStorageReadProfile.ForSteps(proposal.Steps)?.Id;
+            var operationId = OperationId.New();
+            if (previousEvidence.Profile != nextProfile)
+            {
+                var raw = previousEvidence.Document;
+                if (!WindowsRealStorageReadProfile.Covers(raw.SourceFacts!.ScopedCollection?.Scope.EvidenceProfile, nextProfile))
+                {
+                    if (readStructureScoped is null)
+                        throw new InvalidDataException("A wider structural evidence profile requires a fresh scoped observation.");
+                    var scope = StorageInventoryScopeFactory.Create(current.SourceFacts!, operationId, null, proposal.Targets)
+                        with { EvidenceProfile = WindowsRealStorageReadProfile.CoveringBoth(previousEvidence.Profile, nextProfile) };
+                    raw = await readStructureScoped(scope, CancellationToken.None);
+                    if (!HasStructureResultScope(raw, operationId, session.SystemId)
+                        || !raw.SourceFacts!.ScopedCollection!.Scope.Targets.ToHashSet().SetEquals(proposal.Targets))
+                        throw new InvalidDataException("The structural evidence refresh belongs to another operation or target closure.");
+                }
+                var oldClosure = EvidenceClosure(raw, members, previousEvidence.Profile);
+                var newClosure = EvidenceClosure(raw, members, nextProfile);
+                authorization.RebindEvidenceProfile(proposal, previousEvidence.Profile, oldClosure.Fingerprint,
+                    nextProfile, newClosure.Fingerprint, newClosure.PhysicalMemberFingerprint);
+                authorizedEvidence[scopeKey] = (raw, nextProfile);
+            }
+            var plan = await backend!.PrepareAsync(proposal, trustedSession, operationId, CancellationToken.None);
             var frozen = new AgentRealOperationResponse(plan, RealOperationState.Prepared,
                 plan.RealOperation!.Steps.Select(item => new RealOperationStepProgress(item.Id, RealOperationStepState.Pending, null, null, null)).ToArray(), null, false);
             authorization.ValidateFrozen(proposal, frozen);
@@ -648,6 +694,9 @@ public sealed partial class AgentRealOperationService
             if (response.State == RealOperationState.Succeeded)
             {
                 authorization.ObserveVerified(proposal, response, current);
+                if (post?.Document is not { SourceFacts.IsMerged: false } rawPostState)
+                    throw new InvalidDataException("A verified structural stage must retain its raw post-state evidence.");
+                authorizedEvidence[scopeKey] = (rawPostState, nextProfile);
                 completed.Add(description);
             }
             var remaining = StructureGoal(session, jobId);

@@ -69,6 +69,9 @@ public sealed class WindowsRealStorageReadProfile
         || observed == OsResize && requested is Os or Metadata
         || observed == Os && requested == Metadata;
 
+    public static string? CoveringBoth(string? first, string? second) => Covers(first, second) ? first
+        : Covers(second, first) ? second : null;
+
     public bool IncludesField(string className, string field) => !Fields.TryGetValue(className, out var fields)
         || fields.Contains(field, StringComparer.OrdinalIgnoreCase);
 

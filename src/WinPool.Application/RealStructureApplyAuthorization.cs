@@ -31,6 +31,7 @@ public sealed class RealStructureApplyAuthorization : IRealOperationAuthorizatio
     private string? directDiskId;
     private readonly Dictionary<string, string> physicalFingerprints = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> postFingerprints = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> evidenceProfiles = new(StringComparer.Ordinal);
     private readonly HashSet<string> memberScopes = new(StringComparer.Ordinal);
     private string? machineBinding;
     private string? agentSessionBinding;
@@ -164,7 +165,7 @@ public sealed class RealStructureApplyAuthorization : IRealOperationAuthorizatio
     }
 
     public void FreezeBaselineEvidence(IReadOnlyList<StorageObjectId> members, string machine,
-        string sessionBinding, string physicalFingerprint, string topologyFingerprint)
+        string sessionBinding, string physicalFingerprint, string topologyFingerprint, string? evidenceProfile = null)
     {
         var scope = MemberScope(members.Select(member => member.ProviderKey));
         if (confirmed || stopped || !memberScopes.Contains(scope)
@@ -173,11 +174,29 @@ public sealed class RealStructureApplyAuthorization : IRealOperationAuthorizatio
             throw new InvalidDataException("The frozen baseline must belong to one exact confirmed member set.");
         physicalFingerprints.Add(scope, physicalFingerprint);
         postFingerprints.Add(scope, topologyFingerprint);
+        evidenceProfiles.Add(scope, evidenceProfile);
         machineBinding = machine;
         agentSessionBinding = sessionBinding;
     }
 
     public void Confirm() => confirmed = !stopped;
+
+    public void RebindEvidenceProfile(RealOperationIntentRequest proposal, string? previousProfile,
+        string previousFingerprint, string? nextProfile, string nextFingerprint, string physicalFingerprint)
+    {
+        ValidateProposal(proposal);
+        var scope = ProposalMemberScope(proposal);
+        if (pendingOperation is not null || previousProfile == nextProfile
+            || !evidenceProfiles.TryGetValue(scope, out var profile) || profile != previousProfile
+            || !postFingerprints.TryGetValue(scope, out var post) || previousFingerprint != post
+            || !physicalFingerprints.TryGetValue(scope, out var physical) || physicalFingerprint != physical
+            || string.IsNullOrWhiteSpace(nextFingerprint))
+            throw new InvalidDataException("A new evidence profile must retain the confirmed member identity and verified previous state.");
+        // The Agent projects one complete raw closure through both profiles. A
+        // fresh plan alone cannot introduce a new authorization baseline.
+        evidenceProfiles[scope] = nextProfile;
+        postFingerprints[scope] = nextFingerprint;
+    }
 
     public void ValidateContext(SystemId system, string session, long bindingGeneration, bool conflict, bool unknown)
     {
@@ -210,6 +229,7 @@ public sealed class RealStructureApplyAuthorization : IRealOperationAuthorizatio
             || real.Steps.Count != proposal.Steps.Count
             || physicalFingerprints.TryGetValue(scope, out var physicalFingerprint) && real.PhysicalMemberFingerprint != physicalFingerprint
             || postFingerprints.TryGetValue(scope, out var postFingerprint) && real.TargetFingerprint != postFingerprint
+            || evidenceProfiles.TryGetValue(scope, out var profile) && real.EvidenceProfile != profile
             || machineBinding is not null && real.MachineBinding != machineBinding
             || agentSessionBinding is not null && real.SessionBinding != agentSessionBinding
             || pendingOperation is not null && (plan.OperationId != pendingOperation || plan.PlanHash != pendingPlanHash))
@@ -223,6 +243,7 @@ public sealed class RealStructureApplyAuthorization : IRealOperationAuthorizatio
                 throw new InvalidDataException("The Agent changed the confirmed command, target or parameters.");
         }
         physicalFingerprints.TryAdd(scope, real.PhysicalMemberFingerprint);
+        evidenceProfiles.TryAdd(scope, real.EvidenceProfile);
         machineBinding ??= real.MachineBinding;
         agentSessionBinding ??= real.SessionBinding;
         pendingOperation = plan.OperationId;

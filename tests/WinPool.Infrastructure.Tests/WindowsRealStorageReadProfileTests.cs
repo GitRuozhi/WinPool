@@ -11,6 +11,21 @@ namespace WinPool.Infrastructure.Tests;
 
 public sealed class WindowsRealStorageReadProfileTests
 {
+    [Theory]
+    [InlineData(null, WindowsRealStorageReadProfile.Os, null)]
+    [InlineData(WindowsRealStorageReadProfile.Os, WindowsRealStorageReadProfile.Required, WindowsRealStorageReadProfile.Required)]
+    [InlineData(WindowsRealStorageReadProfile.Required, null, null)]
+    [InlineData(WindowsRealStorageReadProfile.OsResize, WindowsRealStorageReadProfile.Required, null)]
+    [InlineData(WindowsRealStorageReadProfile.Required, WindowsRealStorageReadProfile.OsResize, null)]
+    public void ProfileTransitionObservationMustCoverBothOldAndNewEvidence(string? previous, string? next, string? expected)
+    {
+        var observed = WindowsRealStorageReadProfile.CoveringBoth(previous, next);
+        Assert.Equal(expected, observed);
+        Assert.True(WindowsRealStorageReadProfile.Covers(observed, previous));
+        Assert.True(WindowsRealStorageReadProfile.Covers(observed, next));
+        Assert.True(WindowsRealStorageReadProfile.Covers(null, next));
+    }
+
     [Fact]
     public async Task FixedFullHardwareScopedAndHostTemplatesParseWithoutExecutingStorageCommands()
     {

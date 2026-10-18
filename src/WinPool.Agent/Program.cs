@@ -179,8 +179,7 @@ internal static class Program
                 var raw = await collector.CaptureFreshAsync(scope, cancellationToken).ConfigureAwait(false);
                 var inventory = await inventoryReady.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
                 await inventory.PublishFreshAsync(raw, scope, cancellationToken).ConfigureAwait(false);
-                var cached = await localDocument.LoadAsync(cancellationToken).ConfigureAwait(false);
-                return cached is null ? raw : LocalInventoryDocumentCodec.Decode(cached.Document);
+                return raw;
             });
             try
             {

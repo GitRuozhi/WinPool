@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-2026-10-18：**源码已推进V0.62／0.6.2.0，已批准计划进入W6本机验收。** 一次完整自动门已执行，原始结果为2517项：2464通过、53失败、0跳过。53项均在Infrastructure，修复后按影响范围补验；不能把补验次数累加成完整门用例数。实盘批次、8小时监控及实际候选验收仍未完成。原始构建、TRX与性能证据集中于[本次目录](../artifacts/test-results/v062/)，局部通过不等于V0.62完成。
+2026-10-19：**源码已推进V0.62／0.6.2.0，已批准计划进入W6本机验收。** 一次完整自动门已执行，原始结果为2517项：2464通过、53失败、0跳过。53项均在Infrastructure，修复后按影响范围补验；不能把补验次数累加成完整门用例数。实盘批次、8小时监控及实际候选验收仍未完成。原始构建、TRX与性能证据集中于[本次目录](../artifacts/test-results/v062/)，局部通过不等于V0.62完成。
 
 实施前最新两份独立全量验收记录均为2499 passed／1 failed／4 skip。方法与边界见[Review索引](Review/README.md)，本地[汇总A](../artifacts/acceptance-20261018/automated-summary.json)／[汇总B](../artifacts/test-results/acceptance-20261018/acceptance-test-summary.json)可读。唯一失败是旧私有字段源码断言；其历史结论不代表本次新二进制已验证。
 
@@ -30,21 +30,33 @@ V0.61的R1–R3修复及当次候选开发机验收继续作为历史有效证�
 
 [Release构建](../artifacts/test-results/v062/final/Release-build-02.log)及[修复构建](../artifacts/test-results/v062/final/repair-build.log)均为0警告、0错误。修复构建身份含未提交受控修改，不能称为clean `4229118`；最终候选将另绑定稳定源码与文件hash。
 
-只读SQLite检查将数据库绝对路径编码成file URI，避免`#`或`%`被误作片段／转义而打开错误文件。[路径及迁移补验62项](../artifacts/test-results/v062/final/Persistence-uri-migration-repairs.trx)全部通过，包括真实路径、解码诱饵库、写入拒绝及源文件集合／hash不变；未受影响的GiB测量沿用原始完整门，不重复运行。
+只读SQLite检查将数据库绝对路径编码成file URI，避免`#`或`%`被误作片段／转义而打开错误文件。[路径及迁移补验62项](../artifacts/test-results/v062/final/Persistence-uri-migration-repairs.trx)全部通过，包括真实路径、解码诱饵库、写入拒绝及源文件集合／hash不变。
 
-Persistence的[197项完整结果](../artifacts/test-results/v062/final/WinPool.Persistence.Tests.trx)包含三项已开启的实际测量：
+Persistence原始[197项完整结果](../artifacts/test-results/v062/final/WinPool.Persistence.Tests.trx)通过。随包7za更新至26.04后，[归档相关69项补验](../artifacts/test-results/v062/final/Persistence-7zip2604-repairs.trx)全部通过、无跳过，包含重新开启执行的三项实际测量；下表均为26.04结果：
 
 | 测量 | 输入／样本 | 归档大小 | 实测耗时 |
 | --- | ---: | ---: | ---: |
-| 1 GiB直接归档 | 1,102,270,464 B／2,810,000 | 56,030,301 B | 压缩149.638 s |
-| 生产轮转生命周期 | 封存1,102,274,560 B／2,810,001 | 56,121,804 B | 生命周期170.576 s |
-| 7z参数比较 | 129,351,680 B／330,000 | 64m／2线程7,272,628 B；128m／4线程7,273,814 B | 15.520／15.767 s |
+| 1 GiB直接归档 | 1,102,270,464 B／2,810,000 | 56,735,681 B | 压缩149.637 s |
+| 生产轮转生命周期 | 封存1,102,274,560 B／2,810,001 | 56,554,050 B | 生命周期171.813 s |
+| 7z参数比较 | 129,351,680 B／330,000 | 64m／2线程7,285,107 B；128m／4线程7,291,055 B | 15.750／16.007 s |
 
-上述原始完整门使用7za 26.03。生产参数为`-mx=9 -m0=lzma2 -md=64m -ms=on -mmt=2`，比较中峰值内存718,884,864 B，对照1,304,961,024 B，少44.91%，保留当前参数。前两项校验解压哈希，第三项执行`7z t`；TRX未记录哈希字面值。这些测量不替代8小时20 Hz实际监控。
+原始完整门中的26.03数字保留在原TRX，不作为26.04证明。生产参数为`-mx=9 -m0=lzma2 -md=64m -ms=on -mmt=2`，本次参数比较峰值工作集718,917,632 B，对照1,304,518,656 B，少44.89%，保留当前参数。前两项校验解压哈希，第三项执行`7z t`；TRX未记录哈希字面值。这些测量不替代8小时20 Hz实际监控。
 
-依赖核查中发现[7-Zip官方26.04说明](https://www.7-zip.org/history.txt)包含安全修复，随包x64独立7za已更新至26.04；[官方asset摘要与下载校验](../artifacts/test-results/v062/final/7zip-2604-input.json)一致，旧26.03源文件已按规则保留到项目根Old。归档相关补验仍待新运行树完成，旧测量不冒充26.04结果。[本次NuGet公告查询](../artifacts/test-results/v062/final/dependency-advisories.json)未列出已知易受攻击包，只代表该数据源此次查询范围。
+依赖核查中发现[7-Zip官方26.04说明](https://www.7-zip.org/history.txt)包含安全修复，随包x64独立7za已更新至26.04；[官方asset摘要与下载校验](../artifacts/test-results/v062/final/7zip-2604-input.json)一致，旧26.03源文件已按规则保留到项目根Old。[本次NuGet公告查询](../artifacts/test-results/v062/final/dependency-advisories.json)未列出已知易受攻击包，只代表该数据源此次查询范围。
 
-实际Medium启动已确认App与Agent均为普通权限，但发现IPC中间JSON层重新转义导致正文SHA失配，影响本机清单加载和模拟保存；修复与相关补验进行中，不将启动窗口出现当作正常加载通过。UAC返回Win32取消1223后，原App与Agent保持存活、closing=false，界面恢复，随后经托盘正常退出。[构建保留fixture](../artifacts/test-results/v062/final/runtime-preservation-repairs.log)已通过，实际无变更构建仍待新targets核验。[Release分析器](../artifacts/test-results/v062/final/analyzers-release.log)无警告／错误，0文件变更；命令临时设Configuration=Release，避免默认Debug缺少引用导致工作区不完整。
+IPC中间JSON层重新转义导致正文SHA失配的问题已修复，保留原始JSON字节而不重算或跳过hash。相关补验为[Agent 180项](../artifacts/test-results/v062/final/WinPool.Agent.Tests-wire-repairs.trx)、[Agent.Client 26项](../artifacts/test-results/v062/final/WinPool.Agent.Client.Tests-wire-repairs.trx)、[IPC 19项](../artifacts/test-results/v062/final/WinPool.Ipc.Tests-wire-repairs.trx)，全部通过。修复后的实际Medium界面已正常加载本机清单。
+
+实际提权中，一次UAC返回Win32取消1223后，原App与Agent保持存活、closing=false，界面恢复，随后经托盘正常退出；用户未看到该次提示，不能称为人工点击“否”验证。另一次用户明确点击“是”，旧Medium App／Agent正常退出，新High App／Agent接续成功，见[进程与权限证据](../artifacts/test-results/v062/uac-accepted-processes.json)。
+
+[构建保留fixture](../artifacts/test-results/v062/final/runtime-preservation-repairs.log)和[实际无变更构建](../artifacts/test-results/v062/final/no-change-build-02.json)通过：MergeSkipped=true，stamp／identity内容及时间戳不变，耗时13.496 s。[Release分析器](../artifacts/test-results/v062/final/analyzers-release.log)无警告／错误，0文件变更；命令临时设Configuration=Release，避免默认Debug缺少引用导致工作区不完整。补验产物与后续候选的依赖适用映射尚待收口，原完整门hash清单不能自动代表后续修复。
+
+[接近64 MiB的独立跨进程验证](../artifacts/test-results/v062/ipc-near-limit-114-05/summary.json)已通过，输入完整envelope为66,623,922 B，包含16,421对象；保存、加载、typed改名、CAS／重复提交、导出、再导入后对象／字段／关系语义均核对。连续轻控制最大22.061 ms；发送取消反馈27.131 ms，接收取消返回OutcomeUnknown的反馈0.066 ms、暂存释放663.295 ms，两端最终均无受控暂存文件。客户端／服务端峰值private分别约4.20／3.01 GB，不能把2 MiB传输buffer预算当作对象图内存上限；强制GC后的值也不声称为自动回收。该fixture不启动完整产品Agent，不替代GUI取消、生命周期或实际开发数据验收。
+
+首次实际HDD MAX在创建child或发出写入前，被full基线与窄profile计划的指纹不匹配拦截；[原始拒绝证据](../artifacts/test-results/v062/hdd-max-first-rejected.json)保留。已改为用覆盖两种profile的raw事实先验证旧指纹，再转换授权锚点；拒绝merged／覆盖不足基线，保留身份、成员、角色及参数检查。[App 462项](../artifacts/test-results/v062/final/App-structure-profile.trx)、[事实profile／成员51项](../artifacts/test-results/v062/final/Infrastructure-structure-profile-02.trx)、[Agent 180项](../artifacts/test-results/v062/final/Agent-structure-profile-02.trx)通过，实际WDC重试尚待执行。首轮补验的4个失败均为测试样本未模拟实际变更或旧profile合同，原日志保留。29.5分钟20 Hz监控的[部分记录](../artifacts/test-results/v062/monitor-before-restart.json)为三个有效目标各35,382样本、drop=0、正常结束；因修复需重启Agent，将重新计连续8小时，不能拼接为一次通过。
+
+独立可见WinUI Graph同负载比较（3条×1200点，20 Hz输入／最多10 Hz呈现）已运行两轮，原始结果在[第一次](../artifacts/test-results/v062/final/graph-benchmark-01.log)／[第二次](../artifacts/test-results/v062/final/graph-benchmark-02.log)。第二次新Graph主线程最大4.627 ms，但托管分配仅减少42.33%，未达减半门槛；继续修复，尚不记通过。该测量只覆盖同步SetSeries，完整MonitorPage可见／隐藏实测另行完成。
+
+旧MAX历史144.454／102.418 s实际为Prepared job创建至终态，包含确认停留且不包含此前Prepare；缺少原生写调用开始／返回，不能据此精确计算本版70%非写开销／50%端到端降幅。对应历史读取／阶段原始数据仍保留，新的同口径性能比较待完成。
 
 <a id="v061-fixes"></a>
 

@@ -18,6 +18,61 @@ public sealed class WindowsPoolMemberRoleEvidenceTests
     private const string Native = "native:roles";
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
+    [Theory]
+    [InlineData("none")]
+    [InlineData("member-role")]
+    [InlineData("member-set")]
+    [InlineData("output-identity")]
+    [InlineData("protected-role")]
+    public void StructuralProfileTransitionReprojectsTheVerifiedClosureWithoutAdoptingExternalChanges(string change)
+    {
+        var fixture = new Fixture(withVirtualDisk: true, physicalCount: 2);
+        var original = fixture.Topology();
+        var poolTarget = fixture.Id(StorageObjectKind.StoragePool, Pool);
+        var members = fixture.PhysicalIds.Select(id => fixture.Id(StorageObjectKind.PhysicalDisk, id)).ToArray();
+        var oldClosure = fixture.Topology(WindowsRealStorageReadProfile.Os).RequireExactPhysicalMemberSet(poolTarget, members);
+        var requiredClosure = fixture.Topology(WindowsRealStorageReadProfile.Required).RequireExactPhysicalMemberSet(poolTarget, members);
+        Assert.NotEqual(oldClosure.Fingerprint, requiredClosure.Fingerprint);
+        Assert.Equal(oldClosure.PhysicalMemberFingerprint, requiredClosure.PhysicalMemberFingerprint);
+        var session = new SimulationEditingSession();
+        session.Bind(original.Document, original.Snapshot);
+        var draft = new RealStructureDraftPlan(new(true, [], []), [original.Snapshot.StoragePools.Single()], [], [], []);
+        var authorization = new RealStructureApplyAuthorization(draft, session, "profile-transition");
+        var trusted = new TrustedRealSession(SessionId.New(), "profile-transition", "profile-process", 42, Now,
+            Path.GetFullPath("WinPool.App.exe"), true);
+        authorization.FreezeBaselineEvidence(members, original.MachineBinding, trusted.Binding,
+            oldClosure.PhysicalMemberFingerprint, oldClosure.Fingerprint, WindowsRealStorageReadProfile.Os);
+        authorization.Confirm();
+        var proposal = RealOperationProposalFactory.DissolveSingleMemberPool(original.SystemId, poolTarget,
+            fixture.Id(StorageObjectKind.VirtualDisk, Virtual), members: members);
+        if (change == "member-role")
+        {
+            var member = fixture.PhysicalIds[0];
+            fixture.SetTextField(member, "Usage", PhysicalDiskUsage.HotSpare);
+            Assert.Equal(PhysicalDiskUsage.HotSpare, fixture.Facts.Objects.Single(item => item.Id == member).Field("Usage")!.DisplayValue());
+            Assert.NotEqual(oldClosure.Fingerprint, fixture.Topology(WindowsRealStorageReadProfile.Os)
+                .RequireExactPhysicalMemberSet(poolTarget, members).Fingerprint);
+        }
+        if (change == "member-set") fixture.RemoveRelationship("pool-member");
+        if (change == "output-identity") fixture.SetTextField(Virtual, "UniqueId", "foreign-vd-identity");
+        if (change == "protected-role") fixture.SetField(Disk, "IsSystem", true);
+        void ConvertAndValidate()
+        {
+            var before = fixture.Topology(WindowsRealStorageReadProfile.Os).RequireExactPhysicalMemberSet(poolTarget, members);
+            var next = fixture.Topology(WindowsRealStorageReadProfile.Required).RequireExactPhysicalMemberSet(poolTarget, members);
+            authorization.RebindEvidenceProfile(proposal, WindowsRealStorageReadProfile.Os, before.Fingerprint,
+                WindowsRealStorageReadProfile.Required, next.Fingerprint, next.PhysicalMemberFingerprint);
+            var environment = new EnvironmentProfile(EnvironmentId.New(), EnvironmentKind.LocalMachine, original.MachineBinding,
+                ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, Now);
+            var plan = RealOperationPlanFactory.Create(proposal, OperationId.New(), environment, trusted,
+                next.Fingerprint, next.Fingerprint, next.PhysicalMemberFingerprint, "fresh structural evidence", Now,
+                Now.AddMinutes(2), WindowsRealStorageReadProfile.Required);
+            authorization.ValidateFrozen(proposal, new(plan, RealOperationState.Prepared, [], null, false));
+        }
+        if (change == "none") ConvertAndValidate();
+        else Assert.Throws<InvalidDataException>(ConvertAndValidate);
+    }
+
     [Fact]
     public async Task EmptyConcretePoolProvesRolesAndPersistsProofWithoutChangingRawNulls()
     {
@@ -462,8 +517,8 @@ public sealed class WindowsPoolMemberRoleEvidenceTests
         }
 
         public StorageObjectId Id(StorageObjectKind kind, string value) => new(system, kind, value);
-        public WindowsRealStorageTopology Topology() => new(new(StorageSystemDocument.CurrentSchemaVersion, "local:test",
-            StorageSystemKind.Local, "Test", Facts, [], Now) { SystemId = system }, "local-machine", Now);
+        public WindowsRealStorageTopology Topology(string? profile = null) => new(new(StorageSystemDocument.CurrentSchemaVersion, "local:test",
+            StorageSystemKind.Local, "Test", Facts, [], Now) { SystemId = system }, "local-machine", Now, profile);
         public RealTargetClosure Closure() => Topology().RequireSinglePhysicalClosure([Id(StorageObjectKind.StoragePool, Pool)]);
         public void RemoveRelationship(string kind) => Facts = Facts with
         { Relationships = Facts.Relationships.Where(item => item.Kind != kind).ToImmutableArray() };

@@ -226,14 +226,15 @@ public sealed partial class AgentRealOperationServiceTests
         {
             if (scenario == "prepare-fails") throw new InvalidDataException("Fixture capability rejection before a child exists.");
             var now = DateTimeOffset.UtcNow;
-            var topology = new WindowsRealStorageTopology(current, "machine-binding-test", now);
+            var profile = WindowsRealStorageReadProfile.ForSteps(proposal.Steps)?.Id;
+            var topology = new WindowsRealStorageTopology(current, "machine-binding-test", now, profile);
             var members = proposal.Targets.Where(target => target.Kind == StorageObjectKind.PhysicalDisk).ToArray();
             var closure = topology.RequireExactPhysicalMemberSet(new(current.SystemId, StorageObjectKind.StoragePool, pool.StableId), members);
             var environment = new EnvironmentProfile(EnvironmentId.New(), EnvironmentKind.LocalMachine, "machine-binding-test",
                 ExecutionCapability.ReadInventory | ExecutionCapability.MutateStorageStructure, false, now);
             return RealOperationPlanFactory.Create(proposal, id, environment, trusted, topology.InventoryVersion,
                 scenario == "fingerprint-mismatch" ? "different-exact-topology" : closure.Fingerprint,
-                closure.PhysicalMemberFingerprint, "fixture positive support", now, now.AddMinutes(2));
+                closure.PhysicalMemberFingerprint, "fixture positive support", now, now.AddMinutes(2), profile);
         };
         backend.ExecuteOverride = async (plan, step) =>
         {
@@ -248,13 +249,19 @@ public sealed partial class AgentRealOperationServiceTests
                     durable.RootElement.GetProperty("Baseline").GetProperty("SourceFacts").GetProperty("InventoryVersion").GetString());
             }
             Assert.Single(await fixture.Plans.GetStepsAsync(plan.OperationId), step => step.State == PersistedOperationStepState.CallIssued);
-            var scope = StorageInventoryScopeFactory.Create(current.SourceFacts!, plan.OperationId, step.Id, plan.Targets);
+            Assert.Equal(WindowsRealStorageReadProfile.Required, plan.RealOperation!.EvidenceProfile);
+            var scope = StorageInventoryScopeFactory.Create(current.SourceFacts!, plan.OperationId, step.Id, plan.Targets)
+                with { EvidenceProfile = plan.RealOperation.EvidenceProfile };
             current = JobDocument(requested with { SnapshotVersion = "job-after", ScannedAt = DateTimeOffset.UtcNow }, current.SystemId, scope);
+            Assert.False(current.SourceFacts!.IsMerged);
+            Assert.Equal(plan.RealOperation.EvidenceProfile, current.SourceFacts.ScopedCollection!.Scope.EvidenceProfile);
             return new RealStepResult(RealStepOutcome.Verified, "fake.pool_deleted", JsonSerializer.Serialize(new
             { PostFingerprint = "verified-after-delete", PhysicalMemberFingerprint = plan.RealOperation!.PhysicalMemberFingerprint }))
             { VerifiedPostState = new(current, scope, current.UpdatedAt) };
         };
-        fixture.Service.AttachStructureInventory(_ => Task.FromResult(current), _ => Task.FromResult<StorageSystemDocument?>(current));
+        var structuralFreshReads = 0;
+        fixture.Service.AttachStructureInventory(_ => { structuralFreshReads++; return Task.FromResult(current); },
+            _ => Task.FromResult<StorageSystemDocument?>(current));
         var prepared = await fixture.Service.PrepareStructureJobAsync(new(
             goal, jobId, fixture.Session.ProductSessionId, CorrelationId.New()), fixture.Session, default);
         Assert.True(prepared.IsSuccess, string.Join("; ", prepared.Messages.Select(item => item.Code + ": " + item.DiagnosticText)));
@@ -333,6 +340,7 @@ public sealed partial class AgentRealOperationServiceTests
             Assert.Single(terminal.Children);
             Assert.Equal(1, backend.ExecuteCalls);
             Assert.Equal(0, backend.ReconciliationCalls);
+            Assert.Equal(1, structuralFreshReads);
             Assert.False(await fixture.Plans.HasRealWriteBarrierAsync());
         }
         finally { backend.ReleaseExecution.TrySetResult(); }
