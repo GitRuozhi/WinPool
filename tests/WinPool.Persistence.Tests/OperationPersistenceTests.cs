@@ -9,6 +9,33 @@ namespace WinPool.Persistence.Tests;
 public sealed class OperationPersistenceTests
 {
     [Fact]
+    public async Task StructureDisplayRepairComparesTheOriginalResultBeforeUpdating()
+    {
+        await using var database = await TemporaryDatabase.CreateAsync();
+        await using var lease = AgentWriteOwnerLease.Acquire(database.Store, "test-agent");
+        var writer = new OperationPlanRepository(database.Store, lease);
+        var id = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        const string original = "{\"shape\":\"scoped\"}";
+        const string repaired = "{\"shape\":\"complete\"}";
+        await writer.SaveStructureJobAsync(new(id, "unchanged-goal-hash", "unchanged-frozen-goal",
+            "machine", "session", RealOperationState.PartiallyCompleted, now, now, original, []));
+        Assert.True(await writer.TransitionStructureJobAsync(id, RealOperationState.PartiallyCompleted,
+            RealOperationState.PartiallyCompleted, repaired, now, expectedResultJson: original));
+        var first = (await writer.GetStructureJobAsync(id))!;
+        Assert.False(await writer.TransitionStructureJobAsync(id, RealOperationState.PartiallyCompleted,
+            RealOperationState.PartiallyCompleted, "stale competing repair", now.AddSeconds(1), expectedResultJson: original));
+        var current = (await writer.GetStructureJobAsync(id))!;
+        Assert.Equal(repaired, current.ResultJson);
+        Assert.Equal(first.UpdatedAt, current.UpdatedAt);
+        Assert.Equal("unchanged-goal-hash", current.IntentHash);
+        Assert.Equal("unchanged-frozen-goal", current.GoalJson);
+        Assert.Empty(current.Children);
+        Assert.Equal(RealOperationState.PartiallyCompleted, current.State);
+        Assert.False(await writer.HasStructureWriteBarrierAsync());
+    }
+
+    [Fact]
     public async Task PrepareAcceptAndStepTransitionsAreDurableAndIdempotent()
     {
         await using var database = await TemporaryDatabase.CreateAsync();

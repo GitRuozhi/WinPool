@@ -411,15 +411,18 @@ public sealed partial class AgentRealOperationServiceTests
                 "Healthy", "OK", 64L << 30, 0, "subsystem:job", ["physical:job"])).ToArray()
         };
         var collections = 0;
+        var published = baseline;
         var restarted = new AgentRealOperationService(fixture.Plans, fixture.Events, backend, new FixedMachineIdentity(),
             authority: null, timeProvider: null, isSessionStillArmed: _ => true, isAdministrator: () => true);
         restarted.AttachStructureInventory(_ => Task.FromResult(JobDocument(actual, system)),
-            _ => Task.FromResult<StorageSystemDocument?>(JobDocument(actual, system)), (scope, _) =>
+            _ => Task.FromResult<StorageSystemDocument?>(published), (scope, _) =>
             {
                 var count = Interlocked.Increment(ref collections);
                 Assert.Equal(child.OperationId, scope.OperationId);
                 if (firstScopedReadFails && count == 1) throw new IOException("The related read was interrupted.");
-                return Task.FromResult(JobDocument(actual, system, scope));
+                var raw = JobDocument(actual, system, scope);
+                published = raw with { SourceFacts = WinPoolFactRefresh.Merge(baseline.SourceFacts!, raw.SourceFacts!) };
+                return Task.FromResult(raw);
             });
         await restarted.InitializeRecoveryAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

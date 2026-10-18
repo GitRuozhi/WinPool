@@ -107,20 +107,24 @@ public sealed partial class OperationPlanRepository
     }
 
     public async Task<bool> TransitionStructureJobAsync(Guid jobId, RealOperationState expected,
-        RealOperationState next, string? result, DateTimeOffset at, CancellationToken cancellationToken = default)
+        RealOperationState next, string? result, DateTimeOffset at, CancellationToken cancellationToken = default,
+        string? expectedResultJson = null)
     {
         AssertWriteOwnership();
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
             UPDATE real_structure_jobs SET state=$next,result_json=$result,
-                updated_utc_ms=MAX(updated_utc_ms+1,$at) WHERE job_id=$id AND state=$expected;
+                updated_utc_ms=MAX(updated_utc_ms+1,$at) WHERE job_id=$id AND state=$expected
+                AND ($compareResult=0 OR result_json=$expectedResult);
             """;
         command.Parameters.AddWithValue("$next", (int)next);
         command.Parameters.AddWithValue("$result", (object?)result ?? DBNull.Value);
         command.Parameters.AddWithValue("$at", at.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$id", Id(jobId));
         command.Parameters.AddWithValue("$expected", (int)expected);
+        command.Parameters.AddWithValue("$compareResult", expectedResultJson is null ? 0 : 1);
+        command.Parameters.AddWithValue("$expectedResult", (object?)expectedResultJson ?? DBNull.Value);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 

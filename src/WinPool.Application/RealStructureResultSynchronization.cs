@@ -260,7 +260,9 @@ public sealed class RealStructureResultSynchronization
         };
     }
 
-    private static void RebaseRemainingDraft(SimulationEditingSession session, StorageSystemDocument fresh)
+    /// <summary>Maps a retained intent onto complete display facts. This is not raw write authorization.</summary>
+    public static void RebaseRemainingDraft(SimulationEditingSession session, StorageSystemDocument fresh,
+        bool preservePhysicalEvidence = false)
     {
         var old = session.Baseline;
         var target = session.Working;
@@ -283,6 +285,10 @@ public sealed class RealStructureResultSynchronization
             {
                 var desired = target.PhysicalDisks.SingleOrDefault(item => item.StableId == live.StableId);
                 var prior = old.PhysicalDisks.SingleOrDefault(item => item.StableId == live.StableId);
+                // Repairing a historical scoped-as-full draft may add unrelated
+                // display objects, but must not silently accept a changed target
+                // serial, protection role or geometry from the current cache.
+                if (preservePhysicalEvidence && desired is not null && prior is not null) return desired;
                 var poolId = desired is not null && prior is not null && desired.PoolStableId != prior.PoolStableId ? desired.PoolStableId : live.PoolStableId;
                 var usage = desiredUsages.TryGetValue(live.StableId, out var requestedUsage) ? requestedUsage
                     : desired is not null && prior is not null && desired.Usage != prior.Usage ? desired.Usage : live.Usage;
@@ -295,6 +301,7 @@ public sealed class RealStructureResultSynchronization
             Partitions = Merge(old.Partitions, target.Partitions, actual.Partitions, item => item.StableId),
             Volumes = Merge(old.Volumes, target.Volumes, actual.Volumes, item => item.StableId)
         };
+        remaining = remaining with { Relationships = StorageRelationshipProjector.Project(remaining) };
         session.RebaseVerified(fresh, session.Capture() with { Snapshot = remaining });
     }
 }

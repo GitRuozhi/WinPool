@@ -116,7 +116,12 @@ public sealed partial class AgentRealOperationService
         var synchronization = new RealStructureResultSynchronization();
         synchronization.Register(session, response with { State = RealOperationState.Prepared }, pending.Proposal, pending.Mapping, layout);
         var scope = StorageInventoryScopeFactory.Create(baseline.SourceFacts!, child.Plan.OperationId, null, child.Plan.Targets);
-        var fresh = await readStructureScoped!(scope, ct);
+        var raw = await readStructureScoped!(scope, ct);
+        if (!HasStructureResultScope(raw, child.Plan.OperationId, session.SystemId)) return null;
+        // The scoped collector returns execution evidence only. Its absent
+        // unrelated devices are not deletions from the machine or the draft.
+        var display = await readPublishedInventory!(ct) ?? baseline;
+        var fresh = MergeStructureDisplay(display, raw);
         if (!HasStructureResultScope(fresh, child.Plan.OperationId, session.SystemId)
             || !synchronization.Reconcile(response, fresh, true)) return null;
         if (layout is not null)
@@ -168,6 +173,7 @@ public sealed partial class AgentRealOperationService
             if (canonical.ResumeFromJobId is { } sourceJobId)
             {
                 var source = await plans.GetStructureJobAsync(sourceJobId, ct);
+                if (source is not null) source = await RestoreCompleteStructureDisplayAsync(source, ct);
                 var result = source?.ResultJson is { } json ? JsonSerializer.Deserialize<StructureJobResult>(json) : null;
                 if (source is { State: RealOperationState.Cancelled, Children.Count: 0 } && result is null)
                 {
@@ -279,7 +285,41 @@ public sealed partial class AgentRealOperationService
         QueryAgentRealStructureJobRequest request, TrustedRealSession session, CancellationToken ct)
     {
         var job = await plans.GetStructureJobAsync(request.JobId, ct);
+        if (job is not null) job = await RestoreCompleteStructureDisplayAsync(job, ct);
         return job is null ? Reject(request.CorrelationId, "agent.structure.not_found") : StructureStatus(job, request.CorrelationId, includeRemaining: true);
+    }
+
+    private static StorageSystemDocument MergeStructureDisplay(StorageSystemDocument display, StorageSystemDocument raw)
+    {
+        if (!display.IsLocal || display.SystemId != raw.SystemId || display.SourceFacts is null || raw.SourceFacts is null)
+            throw new InvalidDataException("The structural display and raw result must belong to the same local system.");
+        return raw with { SourceFacts = WinPoolFactRefresh.Merge(display.SourceFacts, raw.SourceFacts) };
+    }
+
+    private async Task<PersistedStructureJob> RestoreCompleteStructureDisplayAsync(PersistedStructureJob job, CancellationToken ct)
+    {
+        if (job.State is not (RealOperationState.PartiallyCompleted or RealOperationState.Failed or RealOperationState.Cancelled)
+            || job.ResultJson is null || readPublishedInventory is null) return job;
+        var saved = JsonSerializer.Deserialize<StructureJobResult>(job.ResultJson)!;
+        if (saved.Pending is not null || saved.Baseline is not { SourceFacts.IsMerged: false,
+                SourceFacts.ScopedCollection.Complete: true } scopedBaseline) return job;
+        var frozen = JsonSerializer.Deserialize<FrozenStructureJob>(job.GoalJson)!;
+        var scopedMembers = scopedBaseline.Snapshot.PhysicalDisks.Select(item => item.StableId).ToHashSet(StringComparer.Ordinal);
+        if (!frozen.Baseline.Snapshot.PhysicalDisks.Any(item => !scopedMembers.Contains(item.StableId))) return job;
+        var display = await readPublishedInventory(ct);
+        if (display is null || !display.IsLocal || display.SystemId != scopedBaseline.SystemId
+            || display.SourceFacts is null || display.SourceFacts.ScopedCollection is { Complete: false }
+            || !display.SourceFacts.IsMerged && display.SourceFacts.ScopedCollection is not null
+            || !scopedMembers.IsSubsetOf(display.Snapshot.PhysicalDisks.Select(item => item.StableId))
+            || !display.Snapshot.PhysicalDisks.Any(item => !scopedMembers.Contains(item.StableId))) return job;
+        var editing = BindStructureSession(saved.Remaining, scopedBaseline);
+        RealStructureResultSynchronization.RebaseRemainingDraft(editing, display, preservePhysicalEvidence: true);
+        var repaired = JsonSerializer.Serialize(saved with { Baseline = display, Remaining = StructureGoal(editing, job.JobId) });
+        // This is a one-time display/intent repair, not a storage operation.
+        // A concurrent recovery wins its own result; never overwrite it or retry.
+        await plans.TransitionStructureJobAsync(job.JobId, job.State, job.State, repaired, timeProvider.GetUtcNow(), ct,
+            expectedResultJson: job.ResultJson);
+        return (await plans.GetStructureJobAsync(job.JobId, ct))!;
     }
 
     public async Task<ApplicationResult<AgentResponse>> StopStructureJobAsync(
@@ -738,7 +778,9 @@ public sealed partial class AgentRealOperationService
             {
                 if (readStructureScoped is null) return false;
                 var scope = StorageInventoryScopeFactory.Create(before.SourceFacts!, plan.OperationId, null, plan.Targets);
-                current = await readStructureScoped(scope, CancellationToken.None);
+                var raw = await readStructureScoped(scope, CancellationToken.None);
+                if (!HasStructureResultScope(raw, plan.OperationId, session.SystemId)) return false;
+                current = MergeStructureDisplay(await readPublishedInventory!(CancellationToken.None) ?? before, raw);
             }
             if (!HasStructureResultScope(current, plan.OperationId, session.SystemId)
                 || !synchronization.Reconcile(response, current, true)) return false;
