@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-**本轮技术目标为 V0.61。** 本文件描述已落地的技术所有权与持续约束；执行、验证和候选包状态见[Plan](Plan.md)及[Quality](Quality.md)，实际版本字段以 `Directory.Build.props` 为准。产品语义归[Product](Product.md)；整理前的详细实现与历史证据保留在[原件](Archive/20261017-v061-document-baseline/Development-before.md)。
+**当前版本为 V0.61，无活动计划。** 本文件描述已落地的技术所有权与持续约束；阶段执行记录见[完成计划](Archive/20261018-v061-completed/Plan.md)，验证和候选包状态见[Quality](Quality.md)，实际版本字段以 `Directory.Build.props` 为准。产品语义归[Product](Product.md)；整理前的详细实现与历史证据保留在[原件](Archive/20261017-v061-document-baseline/Development-before.md)。
 
 ## 模块与所有权
 
@@ -101,10 +101,10 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 | 产品语义、能力和路线 | Product；对象与控件专项按链接查阅 |
 | 技术所有权、数据、构建 | Development |
 | 验证规则、命令及当前证据索引 | Quality |
-| 本轮顺序、固定决定、状态 | 唯一 `docs/Plan.md` |
+| 阶段顺序、固定决定、状态 | 有活动阶段时使用唯一 `docs/Plan.md`，完成后移入Archive；当前无活动计划 |
 | 重要已完成变化 | CHANGELOG |
 | 授权、文件处置、Git | AGENTS |
 
-只更新变化事实的归属位置，不复制历史数值、逐日过程或完整对话。`docs/` 根仅放 Product、Development、Quality、Plan、CHANGELOG。按需资料分为 [Reference](Reference/README.md) 的专项说明／调查／源码入口、[Review](Review/README.md) 的本轮审查来源、[Design](Design/README.md) 的未来方案和 [Archive](Archive/README.md) 的阶段历史；只有活动 Plan 采纳的部分进入实施范围。结束或被替代的文档按本项目规则原样归档，不伪称完成；普通小修不新增 Plan、报告或副本表。
+只更新变化事实的归属位置，不复制历史数值、逐日过程或完整对话。`docs/` 根仅放 Product、Development、Quality、CHANGELOG及有活动阶段时的Plan。按需资料分为 [Reference](Reference/README.md) 的专项说明／调查／源码入口、[Review](Review/README.md) 的审查来源、[Design](Design/README.md) 的未来方案和 [Archive](Archive/README.md) 的阶段历史；只有活动 Plan 采纳的部分进入实施范围。结束或被替代的文档按本项目规则原样归档，不伪称完成；普通小修不新增 Plan、报告或副本表。
 
 唯一版本源为 `Directory.Build.props`。本轮收口使用 `WinPoolVersionMajor=0`、`Minor=6`、`Iteration=1`，由既有公式生成 V0.61／0.6.1／0.6.1.0；文档目标不替代实际版本字段。全部本轮实现属于同一 V0.61，不为工作包单独升版，不创建迭代 10。V0.68／V0.69 仅在未来确需迭代时收紧范围，首稿不为用完版本号等待。
