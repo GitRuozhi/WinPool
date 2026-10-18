@@ -3352,6 +3352,13 @@ public sealed partial class WindowsRealStorageBackendTests
             var document = Capture();
             var facts = document.SourceFacts!;
             var ids = StorageInventoryScopeFactory.Create(facts, scope.OperationId, scope.StepId, scope.Targets).BeforeObjectIds.ToHashSet(StringComparer.Ordinal);
+            // The provider returns selected members' shared parent metadata,
+            // without traversing Primordial to include unrelated members.
+            var primordial = facts.Objects.Where(item => item.ObjectType == FactObjectType.StoragePool
+                && item.Field("IsPrimordial")?.DisplayValue() == "true").Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+            ids.UnionWith(facts.Relationships.Where(edge => edge.Kind == "pool-member"
+                && ids.Contains(edge.ToId) && primordial.Contains(edge.FromId)).Select(edge => edge.FromId));
+            ids.UnionWith(facts.Relationships.Where(edge => edge.Kind == "subsystem-pool" && ids.Contains(edge.ToId)).Select(edge => edge.FromId));
             // This fixture simulates a scoped source response. Production source-level traversal has separate provider tests.
             var selected = facts.Objects.Where(x => ids.Contains(x.Id) || x.ObjectType is not
                 (FactObjectType.StorageSubsystem or FactObjectType.StoragePool or FactObjectType.StorageTier or FactObjectType.PhysicalDisk

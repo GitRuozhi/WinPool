@@ -174,29 +174,40 @@ public sealed partial class WindowsRealStorageBackend
             var failed = progress[prefixLength];
             var frozenStep = plan.RealOperation.Steps[prefixLength];
             if (failed.State is not (RealOperationStepState.Failed or RealOperationStepState.Verifying or RealOperationStepState.OutcomeUnknown)
-                || failed.ResultEvidence is null || failed.TargetEvidence is null
+                || failed.ResultEvidence is null
                 || progress.Skip(prefixLength + 1).Any(item => item.State is not (RealOperationStepState.Pending or RealOperationStepState.StoppedBeforeCall)))
                 return Unknown(progress, "real.reconciliation_exact_step_outcome_unknown");
-            var noCall = JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(failed.ResultEvidence);
-            if (noCall is not { NoWindowsCall: true } || noCall.PhysicalMemberFingerprint != closure.PhysicalMemberFingerprint
-                || noCall.Code is not ("adapter.closed-command-or-target-required" or "adapter.maximum-requires-journaled-explicit-attempt"
-                    or "adapter.preflight-rejected" or "real.exact_pre_call_unverified")
-                || noCall.PlanHash is not null && noCall.PlanHash != plan.PlanHash
-                || noCall.StepId is not null && noCall.StepId != frozenStep.Id
-                || (noCall.PlanHash is null) != (noCall.StepId is null))
-                return Unknown(progress, "real.reconciliation_no_call_evidence_invalid");
-            var recorded = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(failed.TargetEvidence);
-            var current = WindowsRealOperationPlanner.BuildExactMemberTarget(topology, closure, frozenStep.Command, outputs) with
-                { CreatedInThisPlan = WindowsRealStorageTargetBuilder.GetReference(frozenStep.Command).CreatedByStep is not null };
-            // The historical closed-target rejection was caused by this absent
-            // parent identity. It proves no call; every other frozen target fact
-            // must still match the fresh exact command target before release.
-            if (recorded is { ParentUniqueId.Length: 0 } && frozenStep.Command is SetPhysicalDiskUsageCommand
-                && noCall.Code == "adapter.closed-command-or-target-required" && noCall.PlanHash is null)
-                recorded = recorded with { ParentUniqueId = current.ParentUniqueId };
-            if (recorded is null || !SameStorageTarget(recorded, current))
-                return Unknown(progress, "real.reconciliation_no_call_target_invalid");
-            _ = await planner.ValidateMultiMaximumSafetyAsync(topology, closure, frozenStep.Command, ct).ConfigureAwait(false);
+            // The Agent records this Failed receipt directly from NotStarted.
+            // SQLite requires and retains target_json at PreparingCall/CallIssued,
+            // so an absent target also excludes any earlier issued call. Adapter
+            // no-call receipts still require their full exact target below.
+            var agentPreflightFailed = failed is { State: RealOperationStepState.Failed,
+                    Code: "operation.preflight_failed", TargetEvidence: null }
+                && IsProvenNoEffect(failed, closure.PhysicalMemberFingerprint, out var preflightReceipt)
+                && preflightReceipt is not null && preflightReceipt.Code == failed.Code
+                && NoCallBindingMatches(preflightReceipt, plan, frozenStep);
+            if (!agentPreflightFailed)
+            {
+                if (failed.TargetEvidence is null) return Unknown(progress, "real.reconciliation_exact_step_outcome_unknown");
+                var noCall = JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(failed.ResultEvidence);
+                if (noCall is not { NoWindowsCall: true } || noCall.PhysicalMemberFingerprint != closure.PhysicalMemberFingerprint
+                    || noCall.Code is not ("adapter.closed-command-or-target-required" or "adapter.maximum-requires-journaled-explicit-attempt"
+                        or "adapter.preflight-rejected" or "real.exact_pre_call_unverified")
+                    || !NoCallBindingMatches(noCall, plan, frozenStep))
+                    return Unknown(progress, "real.reconciliation_no_call_evidence_invalid");
+                var recorded = JsonSerializer.Deserialize<WindowsStorageCommandTarget>(failed.TargetEvidence);
+                var current = WindowsRealOperationPlanner.BuildExactMemberTarget(topology, closure, frozenStep.Command, outputs) with
+                    { CreatedInThisPlan = WindowsRealStorageTargetBuilder.GetReference(frozenStep.Command).CreatedByStep is not null };
+                // The historical closed-target rejection was caused by this absent
+                // parent identity. It proves no call; every other frozen target fact
+                // must still match the fresh exact command target before release.
+                if (recorded is { ParentUniqueId.Length: 0 } && frozenStep.Command is SetPhysicalDiskUsageCommand
+                    && noCall.Code == "adapter.closed-command-or-target-required" && noCall.PlanHash is null)
+                    recorded = recorded with { ParentUniqueId = current.ParentUniqueId };
+                if (recorded is null || !SameStorageTarget(recorded, current))
+                    return Unknown(progress, "real.reconciliation_no_call_target_invalid");
+                _ = await planner.ValidateMultiMaximumSafetyAsync(topology, closure, frozenStep.Command, ct).ConfigureAwait(false);
+            }
             var reconciled = progress.Select((item, index) => index < prefixLength ? item : index == prefixLength
                 ? item with { State = RealOperationStepState.Failed, Code = "real.reconciliation_proven_no_call" }
                 : item with { State = RealOperationStepState.StoppedBeforeCall, Code = "real.reconciliation_never_started" }).ToArray();

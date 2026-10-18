@@ -1525,13 +1525,17 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
 
     private static bool IsProvenNoEffect(
         RealOperationStepProgress step,
-        string physicalFingerprint)
+        string physicalFingerprint) => IsProvenNoEffect(step, physicalFingerprint, out _);
+
+    private static bool IsProvenNoEffect(RealOperationStepProgress step, string physicalFingerprint,
+        out WindowsNoEffectStepEvidence? evidence)
     {
+        evidence = null;
         if (step.ResultEvidence == "preflight_failed") return true;
         if (string.IsNullOrWhiteSpace(step.ResultEvidence)) return false;
         try
         {
-            var evidence = JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(
+            evidence = JsonSerializer.Deserialize<WindowsNoEffectStepEvidence>(
                 step.ResultEvidence);
             return evidence is { NoWindowsCall: true }
                 && StringComparer.Ordinal.Equals(
@@ -1542,6 +1546,10 @@ public sealed partial class WindowsRealStorageBackend : IRealStorageBackend, IMa
             return false;
         }
     }
+
+    private static bool NoCallBindingMatches(WindowsNoEffectStepEvidence evidence, OperationPlan plan, RealOperationStep step) =>
+        evidence.PlanHash is null && evidence.StepId is null
+        || evidence.PlanHash == plan.PlanHash && evidence.StepId == step.Id;
 
     private static RealReconciliationResult Unknown(
         IReadOnlyList<RealOperationStepProgress> steps,
