@@ -54,7 +54,11 @@ IPC中间JSON层重新转义导致正文SHA失配的问题已修复，保留原�
 
 首次实际HDD MAX在创建child或发出写入前，被full基线与窄profile计划的指纹不匹配拦截；[原始拒绝证据](../artifacts/test-results/v062/hdd-max-first-rejected.json)保留。已改为用覆盖两种profile的raw事实先验证旧指纹，再转换授权锚点；拒绝merged／覆盖不足基线，保留身份、成员、角色及参数检查。[App 462项](../artifacts/test-results/v062/final/App-structure-profile.trx)、[事实profile／成员51项](../artifacts/test-results/v062/final/Infrastructure-structure-profile-02.trx)、[Agent 180项](../artifacts/test-results/v062/final/Agent-structure-profile-02.trx)通过，实际WDC重试尚待执行。首轮补验的4个失败均为测试样本未模拟实际变更或旧profile合同，原日志保留。29.5分钟20 Hz监控的[部分记录](../artifacts/test-results/v062/monitor-before-restart.json)为三个有效目标各35,382样本、drop=0、正常结束；因修复需重启Agent，将重新计连续8小时，不能拼接为一次通过。
 
-独立可见WinUI Graph同负载比较（3条×1200点，20 Hz输入／最多10 Hz呈现）已运行两轮，原始结果在[第一次](../artifacts/test-results/v062/final/graph-benchmark-01.log)／[第二次](../artifacts/test-results/v062/final/graph-benchmark-02.log)。第二次新Graph主线程最大4.627 ms，但托管分配仅减少42.33%，未达减半门槛；继续修复，尚不记通过。该测量只覆盖同步SetSeries，完整MonitorPage可见／隐藏实测另行完成。
+独立可见WinUI Graph同负载比较保留[第一次](../artifacts/test-results/v062/final/graph-benchmark-01.log)／[第二次](../artifacts/test-results/v062/final/graph-benchmark-02.log)两边同10 Hz的控制实验，单次分配减少42.33%。这不是整条绘图路径每秒减半的判定口径；源码中20 Hz采样时旧页最小50 ms、新页最小100 ms。按相同3条×1200点、同20 Hz输入和同60秒窗，[实际页面频率比较](../artifacts/test-results/v062/final/graph-benchmark-03.log)旧／新实际调用954／594次，托管分配14,971,080／5,387,601 B/s，减少64.01%；新Graph最大6.456 ms。延迟跳过的呈现槽据实记录，未将名义频率当实际次数。该结果仅归属同步SetSeries，不包括异步布局、原生／GPU内存及Page其它工作。
+
+完整产品的[MonitorPage实测](../artifacts/test-results/v062/monitor-page-measurement.json)使用20 Hz、两个勾选的有效序列：60秒测量窗中可见260次Poll，均值2.306 ms、最大10.440 ms，0次超过16 ms；158次同revision时图窗复制／重建均为0。隐藏277次Poll，图窗复制、渲染、图元增删均为0；统计到2,136 B其它托管分配，未称整个隐藏回调零分配。[App正常关闭重开](../artifacts/test-results/v062/monitor-page-measure-finished.json)保持Agent 25380及同一session，[持久检查点](../artifacts/test-results/v062/monitor-after-app-reopen.json)三个目标继续采样、drop=0。WDC清空造成的3.836秒编辑gap已正常结束，未冒充无中断采样；连续8小时尚未完成。
+
+后续真实HDD MAX已完成并验证Clear RAW，但创建池前被Windows物理provider返回的CanPool=false拦截；[部分完成记录](../artifacts/test-results/v062/hdd-max-repaired-partial.json)仅一个child、无Pending，未创建池／VD。完整刷新仍显示OS磁盘RAW零分区、物理provider几乎全部容量已分配且CannotPoolReason=7；正补受控provider-cache刷新，不放宽可入池或授权校验。WDC当前临时RAW，任务收口前仍须恢复约定末态。
 
 旧MAX历史144.454／102.418 s实际为Prepared job创建至终态，包含确认停留且不包含此前Prepare；缺少原生写调用开始／返回，不能据此精确计算本版70%非写开销／50%端到端降幅。对应历史读取／阶段原始数据仍保留，新的同口径性能比较待完成。
 

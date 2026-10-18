@@ -122,6 +122,8 @@ public sealed partial class MonitorPage : Page
         base.OnNavigatedTo(e);
         var generation = ++_navigationGeneration;
         _viewModel = (WorkspaceViewModel)e.Parameter;
+        if (MonitorUiMeasurement.IsEnabled)
+            Monitoring.WindowCopiedForMeasurement = MonitorUiMeasurement.WindowCopied;
         MonitorRoot.Loaded += MonitorRoot_Loaded;
         try
         {
@@ -561,7 +563,9 @@ public sealed partial class MonitorPage : Page
     {
         try
         {
-            PollCore();
+            var measurement = MonitorUiMeasurement.BeginPoll();
+            try { PollCore(); }
+            finally { MonitorUiMeasurement.EndPoll(measurement); }
         }
         catch (Exception ex)
         {
@@ -586,9 +590,10 @@ public sealed partial class MonitorPage : Page
 
     private void PollCore()
     {
-        if (!IsLoaded || Visibility != Visibility.Visible || !App.Window.AppWindow.IsVisible
-            || App.Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter { State: Microsoft.UI.Windowing.OverlappedPresenterState.Minimized })
-            return;
+        var visible = IsLoaded && Visibility == Visibility.Visible && App.Window.AppWindow.IsVisible
+            && App.Window.AppWindow.Presenter is not Microsoft.UI.Windowing.OverlappedPresenter { State: Microsoft.UI.Windowing.OverlappedPresenterState.Minimized };
+        MonitorUiMeasurement.PollVisibility(visible, Monitoring.SampleRateHz);
+        if (!visible) return;
         var latest = Monitoring.GetLatest();
         foreach (var (instance, point) in latest)
         {
@@ -645,6 +650,7 @@ public sealed partial class MonitorPage : Page
             ActivityGraph.SetSeries(series, revision, _displayRevision);
             _lastWindowRevision = revision; _lastDisplayRevision = _displayRevision;
         }
+        else MonitorUiMeasurement.PollSameRevision();
         UpdateDiagnosticsAndStorageEvents();
     }
 

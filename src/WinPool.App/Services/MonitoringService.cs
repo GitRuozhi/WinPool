@@ -290,6 +290,10 @@ public sealed class MonitoringService : IDisposable
 
     public long WindowRevision { get { lock (_sync) return _windowRevision; } }
 
+    // Attached only by the opt-in, bounded App UI measurement. Keeping the hook
+    // here also observes the actual copy rather than its callers' intentions.
+    internal Action<int>? WindowCopiedForMeasurement { get; set; }
+
     public IReadOnlyDictionary<string, MonitorSamplePoint[]> GetWindows(IEnumerable<string> visibleSeries)
     {
         lock (_sync)
@@ -300,7 +304,10 @@ public sealed class MonitoringService : IDisposable
                 if (!_windows.TryGetValue(name, out var points)) continue;
                 var revision = _seriesRevisions.GetValueOrDefault(name);
                 if (!_displayWindows.TryGetValue(name, out var cached) || cached.Revision != revision)
+                {
                     _displayWindows[name] = cached = (revision, points.ToArray());
+                    WindowCopiedForMeasurement?.Invoke(points.Count);
+                }
                 selected[name] = cached.Points;
             }
             return selected;
