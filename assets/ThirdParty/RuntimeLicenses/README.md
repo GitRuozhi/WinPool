@@ -63,4 +63,4 @@ WinPool retains all rights to its own code. The files in this directory reproduc
 
 - SQLitePCLRaw.bundle_e_sqlite3/core/provider.e_sqlite3 2.1.11 and lib.e_sqlite3 2.1.12: Apache-2.0, Copyright 2014-2024 SourceGear, LLC. Original native SQLite is public domain: https://sqlite.org/copyright.html. No SQLitePCLRaw component has been modified.
 
-7-Zip 26.03 is covered separately in ../7zip/License.txt and ../7zip/NOTICE.txt in the runtime layout.
+7-Zip 26.04 is covered separately in ../7zip/License.txt and ../7zip/NOTICE.txt in the runtime layout.

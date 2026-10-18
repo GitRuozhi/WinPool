@@ -20,16 +20,16 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\WinPool.App\Assets\CAppIcon.ico" Link="Assets\CAppIcon.ico" />
-    <Content Include="..\..\assets\ThirdParty\7zip\26.03\x64\7za.exe"
+    <Content Include="..\..\assets\ThirdParty\7zip\26.04\x64\7za.exe"
              Link="Tools\7zip\7za.exe"
              CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\assets\ThirdParty\7zip\26.03\License.txt"
+    <Content Include="..\..\assets\ThirdParty\7zip\26.04\License.txt"
              Link="Tools\7zip\License.txt"
              CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\assets\ThirdParty\7zip\26.03\NOTICE.txt"
+    <Content Include="..\..\assets\ThirdParty\7zip\26.04\NOTICE.txt"
              Link="Tools\7zip\NOTICE.txt"
              CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\assets\ThirdParty\7zip\26.03\LGPL-2.1.txt"
+    <Content Include="..\..\assets\ThirdParty\7zip\26.04\LGPL-2.1.txt"
              Link="Tools\7zip\LGPL-2.1.txt"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

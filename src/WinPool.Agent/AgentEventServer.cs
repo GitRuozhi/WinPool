@@ -88,8 +88,7 @@ public sealed class AgentEventSubscription(
 
 public sealed class CurrentUserAgentEventServer
 {
-    private static readonly JsonSerializerOptions JsonOptions =
-        new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = IpcJson.CreateOptions();
     private readonly AgentEventHub _hub;
     private readonly AgentEventPipeEndpoint _endpoint;
     private readonly int _agentProcessId;

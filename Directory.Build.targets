@@ -24,17 +24,33 @@
     <ItemGroup>
       <WinPoolAppRuntimeFiles Include="$(WinPoolLocalTreeRoot)App\**\*" />
       <WinPoolAgentRuntimeFiles Include="$(WinPoolLocalTreeRoot)Agent\**\*" />
+      <WinPoolExpectedRuntimeFiles Include="@(WinPoolAppRuntimeFiles->'$(MSBuildThisFileDirectory)artifacts\$(Configuration)\%(RecursiveDir)%(Filename)%(Extension)');@(WinPoolAgentRuntimeFiles->'$(MSBuildThisFileDirectory)artifacts\$(Configuration)\%(RecursiveDir)%(Filename)%(Extension)')" />
+      <WinPoolMissingRuntimeFiles Include="@(WinPoolExpectedRuntimeFiles)"
+                                 Condition="!Exists('%(WinPoolExpectedRuntimeFiles.Identity)')" />
+      <WinPoolActualRuntimeFiles Include="$(MSBuildThisFileDirectory)artifacts\$(Configuration)\**\*"
+                                Exclude="$(MSBuildThisFileDirectory)artifacts\$(Configuration)\Data\**\*" />
+      <WinPoolUnexpectedRuntimeFiles Include="@(WinPoolActualRuntimeFiles)" Exclude="@(WinPoolExpectedRuntimeFiles)" />
     </ItemGroup>
     <MakeDir Directories="$(MSBuildThisFileDirectory)artifacts\build" />
     <WriteLinesToFile File="$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).inputs"
                       Lines="@(WinPoolAppRuntimeFiles->'%(FullPath)|%(ModifiedTime)');@(WinPoolAgentRuntimeFiles->'%(FullPath)|%(ModifiedTime)')"
                       Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <PropertyGroup>
+      <!-- Copies retain source timestamps. Comparing every copied framework
+           file with the newest aggregate input makes the target perpetually
+           stale. The stamp/identity represent the completed union instead. -->
+      <WinPoolRuntimeMergeOutputs>$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).stamp;$(MSBuildThisFileDirectory)artifacts\build\runtime-$(Configuration).identity.json</WinPoolRuntimeMergeOutputs>
+      <!-- A member mismatch supplies a deliberately missing output, forcing a
+           merge. An empty Outputs would instead tell MSBuild to skip the target.
+           This marker is never created; Data is user-owned and excluded above. -->
+      <WinPoolRuntimeMergeOutputs Condition="'@(WinPoolMissingRuntimeFiles)' != '' or '@(WinPoolUnexpectedRuntimeFiles)' != ''">$(WinPoolRuntimeMergeOutputs);$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).needs-merge</WinPoolRuntimeMergeOutputs>
+    </PropertyGroup>
   </Target>
   <Target Name="MergeLocalAppAndAgentRuntime"
           AfterTargets="CollectLocalRuntimeMergeInputs"
           Condition="'$(MSBuildProjectName)' == 'WinPool.App'"
           Inputs="@(WinPoolAppRuntimeFiles);@(WinPoolAgentRuntimeFiles);$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).inputs;$(WinPoolMergeRuntimeScript);$(MSBuildThisFileFullPath);$(MSBuildThisFileDirectory)build\Record-BuildIdentity.ps1"
-          Outputs="$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).stamp;@(WinPoolAppRuntimeFiles->'$(MSBuildThisFileDirectory)artifacts\$(Configuration)\%(RecursiveDir)%(Filename)%(Extension)');@(WinPoolAgentRuntimeFiles->'$(MSBuildThisFileDirectory)artifacts\$(Configuration)\%(RecursiveDir)%(Filename)%(Extension)')">
+          Outputs="$(WinPoolRuntimeMergeOutputs)">
     <Exec Command="$(WinPoolMergeRuntimeCommand)" />
     <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)build\Record-BuildIdentity.ps1&quot; -RuntimeRoot &quot;$(MSBuildThisFileDirectory)artifacts\$(Configuration)&quot; -IdentityPath &quot;$(MSBuildThisFileDirectory)artifacts\build\runtime-$(Configuration).identity.json&quot;" />
     <Touch Files="$(MSBuildThisFileDirectory)artifacts\build\runtime-merge-$(Configuration).stamp" AlwaysCreate="true" />

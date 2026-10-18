@@ -40,7 +40,11 @@ Persistence的[197项完整结果](../artifacts/test-results/v062/final/WinPool.
 | 生产轮转生命周期 | 封存1,102,274,560 B／2,810,001 | 56,121,804 B | 生命周期170.576 s |
 | 7z参数比较 | 129,351,680 B／330,000 | 64m／2线程7,272,628 B；128m／4线程7,273,814 B | 15.520／15.767 s |
 
-生产参数为`-mx=9 -m0=lzma2 -md=64m -ms=on -mmt=2`，比较中峰值内存718,884,864 B，对照1,304,961,024 B，少44.91%，保留当前参数。前两项校验解压哈希，第三项执行`7z t`；TRX未记录哈希字面值。这些测量不替代8小时20 Hz实际监控。
+上述原始完整门使用7za 26.03。生产参数为`-mx=9 -m0=lzma2 -md=64m -ms=on -mmt=2`，比较中峰值内存718,884,864 B，对照1,304,961,024 B，少44.91%，保留当前参数。前两项校验解压哈希，第三项执行`7z t`；TRX未记录哈希字面值。这些测量不替代8小时20 Hz实际监控。
+
+依赖核查中发现[7-Zip官方26.04说明](https://www.7-zip.org/history.txt)包含安全修复，随包x64独立7za已更新至26.04；[官方asset摘要与下载校验](../artifacts/test-results/v062/final/7zip-2604-input.json)一致，旧26.03源文件已按规则保留到项目根Old。归档相关补验仍待新运行树完成，旧测量不冒充26.04结果。[本次NuGet公告查询](../artifacts/test-results/v062/final/dependency-advisories.json)未列出已知易受攻击包，只代表该数据源此次查询范围。
+
+实际Medium启动已确认App与Agent均为普通权限，但发现IPC中间JSON层重新转义导致正文SHA失配，影响本机清单加载和模拟保存；修复与相关补验进行中，不将启动窗口出现当作正常加载通过。UAC返回Win32取消1223后，原App与Agent保持存活、closing=false，界面恢复，随后经托盘正常退出。[构建保留fixture](../artifacts/test-results/v062/final/runtime-preservation-repairs.log)已通过，实际无变更构建仍待新targets核验。[Release分析器](../artifacts/test-results/v062/final/analyzers-release.log)无警告／错误，0文件变更；命令临时设Configuration=Release，避免默认Debug缺少引用导致工作区不完整。
 
 <a id="v061-fixes"></a>
 

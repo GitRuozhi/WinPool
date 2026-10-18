@@ -516,7 +516,12 @@ WDC 授权依据：`DESKTOP-BLE6H18` 的 `WDC WD40EZAZ-00SF3B0`，`physical:uid:
 ```powershell
 dotnet restore WinPool.slnx
 dotnet build WinPool.slnx -c Release --no-restore -m:1
-dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity warn
+# dotnet format没有Configuration参数；临时用进程环境选择已构建的Release，结束恢复。
+$previousConfiguration = $env:Configuration
+try {
+    $env:Configuration = 'Release'
+    dotnet format analyzers WinPool.slnx --no-restore --verify-no-changes --severity warn
+} finally { $env:Configuration = $previousConfiguration }
 # 对当前 solution 中各测试项目运行一次 Release --no-build --no-restore，并写独立 TRX。
 # 在本版 Windows 验收批次启用现有手动测量环境开关，恢复测试环境后再跑 GUI。
 ./build/Package-WinPool.ps1 -TestedScope "填写同一 build 的实际验证范围"

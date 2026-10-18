@@ -7,6 +7,27 @@ namespace WinPool.Ipc.Tests;
 
 public sealed class IpcPayloadTransferTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RawJsonEscapesSurviveSmallAndChunkedEnvelopes(bool chunked)
+    {
+        const string rawBody = """{"quoted":"a\"b","path":"C:\\data\\新目录","escapes":"\u4e2d\u6587\u0022\u005c","html":"<>&+'"}""";
+        using var document = JsonDocument.Parse("{\"body\":" + rawBody + ",\"padding\":\""
+            + new string('x', chunked ? IpcProtocol.MaximumFrameBytes : 0) + "\"}");
+        var expected = new IpcEnvelope(IpcProtocol.CurrentVersion, Guid.NewGuid(), Guid.NewGuid(),
+            AgentControlMessageTypes.SaveSimulationDocument, DateTimeOffset.UtcNow, document.RootElement.Clone());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var gate = new SemaphoreSlim(1, 1);
+        await using var wire = new MemoryStream();
+        await IpcPayloadTransfer.WriteAsync(wire, expected, gate, timeout.Token);
+        wire.Position = 0;
+        await using var reader = new IpcPayloadTransfer();
+        var actual = await reader.ReadAsync(wire, timeout.Token);
+        Assert.Equal(rawBody, actual.Payload.GetProperty("body").GetRawText());
+        Assert.Equal(expected.Payload.GetRawText(), actual.Payload.GetRawText());
+    }
+
     [Fact]
     public async Task CancellationBeforeOwningAFrameDoesNotReportAStartedRequest()
     {

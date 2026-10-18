@@ -29,8 +29,7 @@ public sealed record AgentControlResponsePayload(
 /// </summary>
 public sealed class AgentControlProtocolCodec
 {
-    private static readonly JsonSerializerOptions SerializerOptions =
-        new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions SerializerOptions = IpcJson.CreateOptions();
 
     public AgentHandshakeRequest DecodeHandshake(IpcEnvelope envelope)
     {

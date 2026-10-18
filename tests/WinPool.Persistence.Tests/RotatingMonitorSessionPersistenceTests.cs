@@ -1339,7 +1339,7 @@ public sealed class RotatingMonitorSessionPersistenceTests
                 "assets",
                 "ThirdParty",
                 "7zip",
-                "26.03",
+                "26.04",
                 "x64",
                 "7za.exe");
             Assert.True(File.Exists(sevenZip));

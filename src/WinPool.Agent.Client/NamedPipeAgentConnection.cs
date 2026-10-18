@@ -103,8 +103,7 @@ public sealed class AgentProcessLauncher(string agentExecutablePath)
 
 public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposable
 {
-    private static readonly JsonSerializerOptions JsonOptions =
-        new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = IpcJson.CreateOptions();
 
     private readonly string endpointPath;
     private readonly IAgentProcessLauncher launcher;

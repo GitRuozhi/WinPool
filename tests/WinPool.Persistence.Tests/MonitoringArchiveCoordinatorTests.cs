@@ -684,7 +684,7 @@ public sealed class MonitoringArchiveCoordinatorTests
                 "assets",
                 "ThirdParty",
                 "7zip",
-                "26.03",
+                "26.04",
                 "x64",
                 "7za.exe");
             Assert.True(File.Exists(sevenZipPath), $"Missing bundled 7-Zip asset: {sevenZipPath}");

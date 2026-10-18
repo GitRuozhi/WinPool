@@ -11,7 +11,7 @@ public sealed class IpcFrameTooLargeException(int length) : IOException(
 
 public static class IpcFrameCodec
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions SerializerOptions = IpcJson.CreateOptions();
 
     public static async ValueTask WriteAsync(
         Stream stream,

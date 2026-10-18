@@ -26,7 +26,7 @@ public sealed class IpcPayloadTransfer : IAsyncDisposable
     private static readonly SemaphoreSlim ReservationGate = new(1, 1);
     private static readonly SemaphoreSlim TemporaryBudget = new(128, 128);
     private static readonly SemaphoreSlim ParseGate = new(1, 1);
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Options = IpcJson.CreateOptions();
     private readonly Dictionary<Guid, Incoming> incoming = [];
     private readonly Dictionary<Guid, Guid> rejectedIncoming = [];
     private readonly SemaphoreSlim? responseFrameGate;
