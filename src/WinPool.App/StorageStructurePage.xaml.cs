@@ -27,7 +27,6 @@ public sealed partial class StorageStructurePage : EditorPageBase
     private string? _selectedPoolDiskId;
     private string? _selectedPoolVdiskId;
     private string? _selectedPoolTierId;
-    private TopologyEditInteraction _interaction = null!;
     private bool _formBuilt;
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
     private bool _filling;
@@ -215,6 +214,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
+        var started = Stopwatch.GetTimestamp();
         _simulationPreviewPageActive = true;
         base.OnNavigatedTo(e);
         string? targetStableId = null;
@@ -229,26 +229,31 @@ public sealed partial class StorageStructurePage : EditorPageBase
         }
 
         var restoredForm = RestoreNavigationDraft(targetStableId);
-        _interaction = new TopologyEditInteraction(
-            IsTopologyNodeSelected,
-            OnTopologySelected,
-            CanEditDraft,
-            OnDiskDropped,
-            () => CanEditDraft,
-            CanDropDisk,
-            ContextMenuFactory: CreateTopologyContextMenu, CanCreatePoolNow: CanCreatePoolNow);
+        StorageOperationTiming.Record("workspace.editor.navigation.session-restored", started,
+            stepId: ViewModel.ActiveDocument.Id, scope: "structure-editor", generation: ViewModel.ActiveDocument.Revision);
+        var phaseStarted = Stopwatch.GetTimestamp();
         LocalizeChrome();
         EnsureForm();
-        RefreshAll();
+        FillPoolForm();
         if (restoredForm is not null) RestoreFormInputs(restoredForm);
+        StorageOperationTiming.Record("workspace.editor.navigation.form-applied", phaseStarted,
+            stepId: ViewModel.ActiveDocument.Id, scope: "structure-editor", generation: ViewModel.ActiveDocument.Revision);
+        phaseStarted = Stopwatch.GetTimestamp();
+        var topologyBuilds = TryRestoreNavigationTopology() ? 0 : RefreshTopology();
+        StorageOperationTiming.Record("workspace.editor.navigation.topology-attached", phaseStarted,
+            stepId: ViewModel.ActiveDocument.Id, scope: "structure-editor",
+            generation: ViewModel.ActiveDocument.Revision, captureCount: topologyBuilds);
+        phaseStarted = Stopwatch.GetTimestamp();
         UpdateButtonState();
+        StorageOperationTiming.Record("workspace.editor.navigation.buttons-applied", phaseStarted,
+            stepId: ViewModel.ActiveDocument.Id, scope: "structure-editor", generation: ViewModel.ActiveDocument.Revision);
+        StorageOperationTiming.Record("workspace.editor.navigation-applied", started,
+            stepId: ViewModel.ActiveDocument.Id, scope: "structure-editor",
+            generation: ViewModel.ActiveDocument.Revision, captureCount: topologyBuilds);
     }
 
     internal void RefreshExecutionMode()
     {
-        _interaction = new TopologyEditInteraction(IsTopologyNodeSelected, OnTopologySelected,
-            CanEditDraft, OnDiskDropped, () => CanEditDraft, CanDropDisk,
-            ContextMenuFactory: CreateTopologyContextMenu, CanCreatePoolNow: CanCreatePoolNow);
         RefreshTopology();
         UpdateButtonState();
     }
@@ -1489,7 +1494,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
             visible.Add("Retired");
         }
 
-        _interaction = new TopologyEditInteraction(IsTopologyNodeSelected, OnTopologySelected, CanEditDraft, OnDiskDropped, () => CanEditDraft, CanDropDisk,
+        // Drag roles belong to the rendered structure. Busy/unknown permission is
+        // checked live by CanEditNow, CanDropDisk and the final drop callback.
+        var interaction = new TopologyEditInteraction(IsTopologyNodeSelected, OnTopologySelected, true, OnDiskDropped, () => CanEditDraft, CanDropDisk,
             ContextMenuFactory: CreateTopologyContextMenu, CanCreatePoolNow: CanCreatePoolNow);
         var display = _working;
         var root = EditWorkspace.ProjectPoolWorkspaceRoot(
@@ -1500,15 +1507,24 @@ public sealed partial class StorageStructurePage : EditorPageBase
             showSourceTierTemplates: !ViewModel.IsUsingSimulatedInventory,
             sourceFacts: EditingSession.BaselineSourceFacts);
         var projected = EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, "edit-pool-row");
+        var currentControl = TopologyControl.Content as TopologyNodeControl;
         var reused = renameBaseline is not null
-            && TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> { Count: 1 } roots
-            && roots[0].TryApplyRename(projected, renameBaseline, display);
+            && currentControl?.ViewModel.TryApplyRename(projected, renameBaseline, display) == true;
         var rootViewModel = reused
-            ? ((IReadOnlyList<TopologyNodeViewModel>)TopologyControl.ItemsSource)[0]
-            : new TopologyNodeViewModel(projected, ViewModel, display, _interaction, isLayoutRoot: true);
+            ? currentControl!.ViewModel
+            : new TopologyNodeViewModel(projected, ViewModel, display, interaction, isLayoutRoot: true);
         rootViewModel.SetSurfaceViewportWidth(_viewportWidth);
         ApplyPendingModificationStates(rootViewModel);
-        if (!reused) TopologyControl.ItemsSource = new[] { rootViewModel };
+        var control = reused ? currentControl! : new TopologyNodeControl
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ViewModel = rootViewModel
+        };
+        if (!reused) TopologyControl.Content = control;
+        _renderedTopology = new(control,
+            display, EditingSession.Baseline, ViewModel.ActiveDocument.SourceFacts,
+            ViewModel.Localization.EffectiveLanguage, UnallocatedIgnoreBytes, ShowHotSpareSwitch.IsOn,
+            ShowRetiredSwitch.IsOn, ViewModel.IsUsingSimulatedInventory, ViewModel.IsRealMode, CanEditDraft);
         return reused ? 0 : 1;
     }
 
@@ -1680,9 +1696,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         FillPoolForm();
         var topologyBuilds = 0;
         if (ReferenceEquals(priorWorking, _working)
-            && TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots)
+            && TopologyControl.Content is TopologyNodeControl currentControl)
         {
-            foreach (var root in roots) root.RefreshSelection();
+            currentControl.ViewModel.RefreshSelection();
         }
         else topologyBuilds = RefreshTopology();
         UpdateButtonState();
@@ -2186,10 +2202,9 @@ public sealed partial class StorageStructurePage : EditorPageBase
         var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
         TopologyControl.Width = width;
         _viewportWidth = width;
-        if (TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots
-            && roots.Count > 0)
+        if (TopologyControl.Content is TopologyNodeControl control)
         {
-            roots[0].SetSurfaceViewportWidth(width);
+            control.ViewModel.SetSurfaceViewportWidth(width);
         }
     }
 
@@ -3475,8 +3490,8 @@ public sealed partial class StorageStructurePage : EditorPageBase
             Text("退役图层可在模拟池、新建草稿池或可编辑的现有空池中预览。", "Preview the retired layer in a simulated pool, a new draft pool, or an eligible existing empty pool."));
         UpdateFieldResets();
         UpdateNameActionStates();
-        if (TopologyControl.ItemsSource is IEnumerable<TopologyNodeViewModel> roots)
-            foreach (var root in roots) ApplyPendingModificationStates(root);
+        if (TopologyControl.Content is TopologyNodeControl control)
+            ApplyPendingModificationStates(control.ViewModel);
         foreach (var grid in _sectionHeaders.Keys) ApplySectionCollapse(grid);
         UpdateApplyAnimation(hasUnapplied && PendingActionCount > 0);
     }
@@ -3803,6 +3818,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void ShowHotSpareSwitch_Toggled(object sender, RoutedEventArgs e)
     {
+        if (_filling) return;
         // The switch only previews an empty hot-spare layer for dragging;
         // a layer that holds disks is drawn regardless.
         RefreshTopology();
@@ -3810,6 +3826,7 @@ public sealed partial class StorageStructurePage : EditorPageBase
 
     private void ShowRetiredSwitch_Toggled(object sender, RoutedEventArgs e)
     {
+        if (_filling) return;
         RefreshTopology();
     }
 

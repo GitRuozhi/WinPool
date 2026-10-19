@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Diagnostics;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Windows;
@@ -101,6 +102,7 @@ public sealed partial class WorkspaceViewModel
         IsRealGraphObscured = obscure || retained;
         RealOperationPhase = nextPhase;
         RealOperationOwner = nextOwner;
+        var notificationStarted = Stopwatch.GetTimestamp();
         if (busy || retained)
             _notificationService.Publish(GlobalNotificationSeverity.Info,
                 IsUsingSimulatedInventory ? chinese ? "编辑操作" : "Editing operation"
@@ -109,7 +111,12 @@ public sealed partial class WorkspaceViewModel
                 new GlobalNotificationOptions { OccurrenceKey = EditorProgressKey, IsProgress = true,
                     AutoDismiss = false, RecordInHistory = false });
         else _notificationService.DismissByKey(EditorProgressKey);
+        StorageOperationTiming.Record("editor.activity.notification", notificationStarted,
+            stepId: ActiveDocument.Id, scope: busy ? "busy" : "idle");
+        var presentationStarted = Stopwatch.GetTimestamp();
         RealOperationActivityChanged?.Invoke();
+        StorageOperationTiming.Record("editor.activity.presentation", presentationStarted,
+            stepId: ActiveDocument.Id, scope: busy ? "busy" : "idle");
         if (!busy)
         {
             EnsureRealOperationRecoveryWatch();

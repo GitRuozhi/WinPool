@@ -1409,8 +1409,10 @@ public sealed partial class MainPage : Page
 
     private async Task RescanAsync()
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         await ViewModel.RecheckRealOperationsAsync();
         await ViewModel.ScanAsync();
+        StorageOperationTiming.Record("inventory.refresh.ui", started, scope: "Storage");
     }
 
     private Task ExportAsync() => RunDocumentTransferAsync(importing: false);

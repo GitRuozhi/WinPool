@@ -34,19 +34,25 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     private TopologyEditInteraction _interaction = null!;
     private double _viewportWidth = WorkspaceViewModel.DefaultSurfaceViewportWidth;
     private bool _filling;
-    private bool _renameInProgress;
+    private bool _renameInProgress => EditingSession.RenameInProgress;
     private bool _formatModeControlsReady;
     private bool _narrowLayout;
     private bool _showPropertiesInNarrowLayout;
     private GridLength _widePropertiesWidth = new(EditorFormMetrics.SidebarWidth);
     private ContentDialog? _resizeDialog;
     private CancellationTokenSource? _resizeCancellation;
-    private bool _resizePromptOpen;
+    private SimulationEditingSession? _resizePromptOwner;
     private int _resizePromptVersion;
+    private readonly Dictionary<(WorkspaceViewModel Workspace, SystemId System), RenderedPartitionTopology> _navigationTopologies = [];
+    private long _navigationTopologySequence;
+    private sealed record RenderedPartitionTopology(TopologyNodeControl Control,
+        StorageSnapshot Working, WinPoolFacts? Facts, LanguagePreference Language, long IgnoreBytes,
+        bool Simulation, bool RealMode, long Sequence);
 
     public DiskPartitionPage()
     {
         InitializeComponent();
+        NavigationCacheMode = NavigationCacheMode.Required;
         ApplyPropertyEditorMetrics();
         Unloaded += (_, _) => CancelResizePrompt();
         _formatModeControlsReady = true;
@@ -58,8 +64,13 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
+        var started = Stopwatch.GetTimestamp();
         CancelResizePrompt();
         base.OnNavigatedTo(e);
+        _selectedDiskId = null;
+        _selectedPartitionId = null;
+        _selectedUnallocatedOffset = null;
+        _selectedUnallocatedSize = null;
         if (e.Parameter is EditorNavigationParameter parameter)
         {
             ViewModel = parameter.ViewModel;
@@ -73,10 +84,33 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             ViewModel = (WorkspaceViewModel)e.Parameter;
         }
 
+        // A cached page keeps its controls and rendered views, not a former navigation's edit callback context.
+        EditingSession = new SimulationEditingSession();
         _working = ViewModel.ActiveSnapshot;
         _interaction = new TopologyEditInteraction(IsTopologyNodeSelected, OnTopologySelected, false, ContextMenuFactory: CreateTopologyContextMenu);
+        StorageOperationTiming.Record("workspace.editor.navigation.session-restored", started,
+            stepId: ViewModel.ActiveDocument.Id, scope: "partition-editor", generation: ViewModel.ActiveDocument.Revision);
+        var phaseStarted = Stopwatch.GetTimestamp();
         LocalizeChrome();
-        RefreshAll();
+        StorageOperationTiming.Record("workspace.editor.navigation.localized", phaseStarted,
+            stepId: ViewModel.ActiveDocument.Id, scope: "partition-editor", generation: ViewModel.ActiveDocument.Revision);
+        phaseStarted = Stopwatch.GetTimestamp();
+        TrimNavigationTopologies();
+        var topologyBuilds = TryRestoreNavigationTopology() ? 0 : RefreshTopology();
+        StorageOperationTiming.Record("workspace.editor.navigation.topology-attached", phaseStarted,
+            stepId: ViewModel.ActiveDocument.Id, scope: "partition-editor",
+            generation: ViewModel.ActiveDocument.Revision, captureCount: topologyBuilds);
+        phaseStarted = Stopwatch.GetTimestamp();
+        FillForm();
+        StorageOperationTiming.Record("workspace.editor.navigation.form-applied", phaseStarted,
+            stepId: ViewModel.ActiveDocument.Id, scope: "partition-editor", generation: ViewModel.ActiveDocument.Revision);
+        phaseStarted = Stopwatch.GetTimestamp();
+        UpdateButtonState();
+        StorageOperationTiming.Record("workspace.editor.navigation.buttons-applied", phaseStarted,
+            stepId: ViewModel.ActiveDocument.Id, scope: "partition-editor", generation: ViewModel.ActiveDocument.Revision);
+        StorageOperationTiming.Record("workspace.editor.navigation-applied", started,
+            stepId: ViewModel.ActiveDocument.Id, scope: "partition-editor",
+            generation: ViewModel.ActiveDocument.Revision, captureCount: topologyBuilds);
     }
 
     internal void RefreshExecutionMode()
@@ -505,9 +539,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             _selectedDiskId = partition?.OsDiskStableId ?? node.Unit.ParentStableId;
         }
 
-        if (TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots)
+        if (TopologyControl.Content is TopologyNodeControl control)
         {
-            foreach (var root in roots) root.RefreshSelection();
+            control.ViewModel.RefreshSelection();
         }
         FillForm();
         UpdateButtonState();
@@ -553,10 +587,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         var width = Math.Max(MinTopologyWidth, e.NewSize.Width - TopologyWidthMargin);
         TopologyControl.Width = width;
         _viewportWidth = width;
-        if (TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> roots
-            && roots.Count > 0)
+        if (TopologyControl.Content is TopologyNodeControl control)
         {
-            roots[0].SetSurfaceViewportWidth(width);
+            control.ViewModel.SetSurfaceViewportWidth(width);
         }
     }
 
@@ -564,15 +597,50 @@ public sealed partial class DiskPartitionPage : EditorPageBase
     {
         var root = EditWorkspace.ProjectPartitionWorkspaceRoot(_working, UnallocatedIgnoreBytes);
         var projected = EditWorkspace.ToManageView(root, ViewModel.ActiveDocument.SystemId, EditWorkspace.PartitionRowStableId);
+        var currentControl = TopologyControl.Content as TopologyNodeControl;
         var reused = renameBaseline is not null
-            && TopologyControl.ItemsSource is IReadOnlyList<TopologyNodeViewModel> { Count: 1 } roots
-            && roots[0].TryApplyRename(projected, renameBaseline, _working);
+            && currentControl?.ViewModel.TryApplyRename(projected, renameBaseline, _working) == true;
         var rootViewModel = reused
-            ? ((IReadOnlyList<TopologyNodeViewModel>)TopologyControl.ItemsSource)[0]
+            ? currentControl!.ViewModel
             : new TopologyNodeViewModel(projected, ViewModel, _working, _interaction, isLayoutRoot: true);
         rootViewModel.SetSurfaceViewportWidth(_viewportWidth);
-        if (!reused) TopologyControl.ItemsSource = new[] { rootViewModel };
+        var control = reused ? currentControl! : new TopologyNodeControl
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ViewModel = rootViewModel
+        };
+        if (!reused) TopologyControl.Content = control;
+        _navigationTopologies[(ViewModel, ViewModel.ActiveDocument.SystemId)] = new(
+            control, _working,
+            ViewModel.ActiveDocument.SourceFacts, ViewModel.Localization.EffectiveLanguage, UnallocatedIgnoreBytes,
+            ViewModel.IsUsingSimulatedInventory, ViewModel.IsRealMode, ++_navigationTopologySequence);
+        TrimNavigationTopologies();
         return reused ? 0 : 1;
+    }
+
+    private bool TryRestoreNavigationTopology()
+    {
+        var key = (ViewModel, ViewModel.ActiveDocument.SystemId);
+        if (!_navigationTopologies.TryGetValue(key, out var cached) || !ReferenceEquals(cached.Working, _working)
+            || !ReferenceEquals(cached.Facts, ViewModel.ActiveDocument.SourceFacts)
+            || cached.Language != ViewModel.Localization.EffectiveLanguage || cached.IgnoreBytes != UnallocatedIgnoreBytes
+            || cached.Simulation != ViewModel.IsUsingSimulatedInventory || cached.RealMode != ViewModel.IsRealMode) return false;
+        cached.Control.ViewModel.SetSurfaceViewportWidth(_viewportWidth);
+        cached.Control.ViewModel.RefreshSelection();
+        TopologyControl.Content = cached.Control;
+        _navigationTopologies[key] = cached with { Sequence = ++_navigationTopologySequence };
+        return true;
+    }
+
+    private void TrimNavigationTopologies()
+    {
+        var live = ViewModel.SystemCatalog.Systems.Select(document => document.SystemId).ToHashSet();
+        foreach (var key in _navigationTopologies.Keys.Where(key =>
+                     !ReferenceEquals(key.Workspace, ViewModel) || !live.Contains(key.System)).ToArray())
+            _navigationTopologies.Remove(key);
+        foreach (var key in _navigationTopologies.OrderByDescending(pair => pair.Value.Sequence).Skip(2)
+                     .Select(pair => pair.Key).ToArray())
+            _navigationTopologies.Remove(key);
     }
 
     private void FillForm()
@@ -2026,7 +2094,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
             return;
         }
 
-        _renameInProgress = true;
+        var namingSession = EditingSession;
+        namingSession.RenameInProgress = true;
         try
         {
             if (ViewModel.CanSubmitRealOperation)
@@ -2048,7 +2117,7 @@ public sealed partial class DiskPartitionPage : EditorPageBase
         }
         finally
         {
-            _renameInProgress = false;
+            namingSession.RenameInProgress = false;
         }
     }
 
@@ -2755,10 +2824,14 @@ public sealed partial class DiskPartitionPage : EditorPageBase
 
     private async Task ResizeAsync(bool extend)
     {
-        if (_resizePromptOpen) return;
-        _resizePromptOpen = true;
+        var session = EditingSession;
+        if (ReferenceEquals(_resizePromptOwner, session)) return;
+        _resizePromptOwner = session;
         try { await ResizeCoreAsync(extend); }
-        finally { _resizePromptOpen = false; }
+        finally
+        {
+            if (ReferenceEquals(_resizePromptOwner, session)) _resizePromptOwner = null;
+        }
     }
 
     private async Task ResizeCoreAsync(bool extend)
@@ -3031,6 +3104,8 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 or InvalidOperationException
                 or ArgumentException)
         {
+            if (!ReferenceEquals(EditingSession, submittedSession) || ViewModel.ActiveDocument.Id != documentId)
+                return false;
             PublishOperationException(
                 failTitle ?? Text("操作失败", "Operation failed"),
                 "disk-partition-editor",
@@ -3039,6 +3114,9 @@ public sealed partial class DiskPartitionPage : EditorPageBase
                 showNotification: true);
             return false;
         }
+
+        if (!ReferenceEquals(EditingSession, submittedSession) || ViewModel.ActiveDocument.Id != documentId)
+            return false;
 
         if (result.Status == WinPool.Application.ApplicationStatus.OutcomeUnknown)
         {

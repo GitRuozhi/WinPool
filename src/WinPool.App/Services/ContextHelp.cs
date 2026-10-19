@@ -18,6 +18,8 @@ public static class ContextHelp
     {
         public string Purpose { get; set; } = string.Empty;
         public string DisabledReason { get; set; } = string.Empty;
+        public ToolTip? ToolTip;
+        public bool TracksLoaded;
     }
 
     private static readonly ConditionalWeakTable<FrameworkElement, HelpState> States = new();
@@ -72,7 +74,7 @@ public static class ContextHelp
         return host;
     }
 
-    internal static ToolTip CreateToolTip(string text) => new()
+    private static ToolTip CreateToolTip(string text) => new()
     {
         Content = new TextBlock
         {
@@ -82,20 +84,34 @@ public static class ContextHelp
         }
     };
 
+    internal static void ApplyToolTip(FrameworkElement element, ref ToolTip? toolTip, string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            if (ToolTipService.GetToolTip(element) is not null) ToolTipService.SetToolTip(element, null);
+            return;
+        }
+
+        toolTip ??= CreateToolTip(text);
+        var content = (TextBlock)toolTip.Content;
+        if (content.Text != text) content.Text = text;
+        if (!ReferenceEquals(ToolTipService.GetToolTip(element), toolTip)) ToolTipService.SetToolTip(element, toolTip);
+    }
+
     private static void Apply(FrameworkElement element, HelpState state)
     {
         var directText = element is not Control { IsEnabled: false } || string.IsNullOrEmpty(state.DisabledReason)
             ? state.Purpose
             : state.DisabledReason;
-        AutomationProperties.SetHelpText(element, directText);
-        ToolTipService.SetToolTip(element, string.IsNullOrEmpty(state.Purpose) ? null : CreateToolTip(state.Purpose));
+        if (AutomationProperties.GetHelpText(element) != directText) AutomationProperties.SetHelpText(element, directText);
+        ApplyToolTip(element, ref state.ToolTip, state.Purpose);
 
         var host = FindHost(element);
         host?.SetHelp(state.Purpose, state.DisabledReason);
-        if (host is null)
+        if (host is null && !state.TracksLoaded)
         {
-            element.Loaded -= Element_Loaded;
             element.Loaded += Element_Loaded;
+            state.TracksLoaded = true;
         }
     }
 
@@ -106,7 +122,7 @@ public static class ContextHelp
             return;
         }
 
-        FindHost(element)?.SetHelp(state.Purpose, state.DisabledReason);
+        Apply(element, state);
     }
 
     private static ContextHelpHost? FindHost(DependencyObject element)

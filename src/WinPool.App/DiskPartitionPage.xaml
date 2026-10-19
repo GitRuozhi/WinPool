@@ -46,27 +46,10 @@
                     HorizontalScrollMode="Enabled"
                     SizeChanged="TopologyScrollViewer_SizeChanged"
                     VerticalScrollBarVisibility="Auto">
-                    <ItemsControl
+                    <ContentControl
                         x:Name="TopologyControl"
-                        HorizontalAlignment="Stretch">
-                        <ItemsControl.ItemContainerStyle>
-                            <Style TargetType="ContentPresenter">
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                            </Style>
-                        </ItemsControl.ItemContainerStyle>
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Vertical" Spacing="6" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <controls:TopologyNodeControl
-                                    HorizontalAlignment="Stretch"
-                                    ViewModel="{Binding}" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch" />
                 </ScrollViewer>
 
             </Grid>

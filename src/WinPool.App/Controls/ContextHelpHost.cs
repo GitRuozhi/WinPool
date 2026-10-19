@@ -18,6 +18,7 @@ public sealed class ContextHelpHost : Grid
     private bool _loaded;
     private string _purpose = string.Empty;
     private string _disabledReason = string.Empty;
+    private ToolTip? _toolTip;
 
     public ContextHelpHost()
     {
@@ -103,8 +104,9 @@ public sealed class ContextHelpHost : Grid
         var text = _target is Control { IsEnabled: false } && !string.IsNullOrEmpty(_disabledReason)
             ? _disabledReason
             : string.Empty;
-        AutomationProperties.SetHelpText(this, string.IsNullOrEmpty(text) ? _purpose : text);
-        ToolTipService.SetToolTip(this, string.IsNullOrEmpty(text) ? null : ContextHelp.CreateToolTip(text));
+        var helpText = string.IsNullOrEmpty(text) ? _purpose : text;
+        if (AutomationProperties.GetHelpText(this) != helpText) AutomationProperties.SetHelpText(this, helpText);
+        ContextHelp.ApplyToolTip(this, ref _toolTip, text);
     }
 
     private static string Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();

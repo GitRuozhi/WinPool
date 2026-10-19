@@ -1066,28 +1066,44 @@ public sealed partial class MainWindow : Window
         }
 
         _systemSelectorRefreshPending = false;
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var system = ViewModel.SelectedSystem;
+        var entries = ViewModel.SystemCatalog.Entries;
+        var rebuild = ActiveSystemSelector.Items.Count != entries.Count
+            || entries.Where((entry, index) => ActiveSystemSelector.Items[index] is not ComboBoxItem item
+                || !Equals(item.Tag, entry.Id)).Any();
+        var changed = rebuild;
         _updatingSystemSelector = true;
         try
         {
-            ActiveSystemSelector.Items.Clear();
+            if (rebuild) ActiveSystemSelector.Items.Clear();
             ComboBoxItem? selected = null;
-            foreach (var candidate in ViewModel.SystemCatalog.Entries)
+            for (var index = 0; index < entries.Count; index++)
             {
+                var candidate = entries[index];
                 var prefix = candidate.IsLocal
                     ? (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[本机]" : "[Local]")
                     : (ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn ? "[模拟]" : "[Simulation]");
-                var item = new ComboBoxItem
+                var item = rebuild ? new ComboBoxItem
                 {
-                    Content = $"{prefix} {candidate.DisplayName}",
                     Tag = candidate.Id,
                     MaxWidth = 280,
                     HorizontalContentAlignment = HorizontalAlignment.Left
-                };
-                ActiveSystemSelector.Items.Add(item);
+                } : (ComboBoxItem)ActiveSystemSelector.Items[index];
+                var text = $"{prefix} {candidate.DisplayName}";
+                if (!Equals(item.Content, text))
+                {
+                    item.Content = text;
+                    changed = true;
+                }
+                if (rebuild) ActiveSystemSelector.Items.Add(item);
                 if (candidate.Id.Equals(system?.Id, StringComparison.OrdinalIgnoreCase)) selected = item;
             }
-            ActiveSystemSelector.SelectedItem = selected;
+            if (!ReferenceEquals(ActiveSystemSelector.SelectedItem, selected))
+            {
+                ActiveSystemSelector.SelectedItem = selected;
+                changed = true;
+            }
             ActiveSystemSelector.Visibility = (!_workspaceInitializationComplete && !_startupPreviewDisplayed)
                 || system is null
                 ? Visibility.Collapsed
@@ -1101,6 +1117,9 @@ public sealed partial class MainWindow : Window
             _updatingSystemSelector = false;
         }
         QueueTitleBarPassthroughRegionUpdate();
+        if (changed)
+            StorageOperationTiming.Record("workspace.system-selector.applied", started,
+                stepId: system?.Id, scope: "system-selector", captureCount: rebuild ? entries.Count : 0);
     }
 
     private async void ActiveSystemSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)

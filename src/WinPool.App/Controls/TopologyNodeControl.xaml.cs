@@ -51,7 +51,18 @@ public sealed partial class TopologyNodeControl : UserControl
         _pendingAccentBrush = PendingMark.Fill;
         ContextHelp.Set(ExpandButton, "展开或折叠此结构节点。 / Expand or collapse this structure node.");
         ContextHelp.SetDisabledReason(ExpandButton, "当前节点没有可展开的子项。 / This node has no child items to expand.");
-        Loaded += (_, _) => { UpdateSelectionVisual(); UpdateAvailabilityGeometry(); UpdatePendingOutline(); };
+        Loaded += (_, _) =>
+        {
+            if (ViewModel is { } viewModel)
+            {
+                viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+                viewModel.PropertyChanged += ViewModel_PropertyChanged;
+            }
+            Bindings.Initialize();
+            UpdateSelectionVisual();
+            UpdateAvailabilityGeometry();
+            UpdatePendingOutline();
+        };
         ActualThemeChanged += (_, _) => UpdateSelectionVisual();
         PointerPressed += TopologyNodeControl_PointerPressed;
         PointerMoved += TopologyNodeControl_PointerMoved;
@@ -60,6 +71,8 @@ public sealed partial class TopologyNodeControl : UserControl
         PointerCaptureLost += (_, _) => CancelInternalDrag();
         Unloaded += (_, _) =>
         {
+            if (ViewModel is { } viewModel) viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            Bindings.StopTracking();
             CancelInternalDrag();
             _pendingBorderAnimation?.SetActive(false);
             if (ReferenceEquals(s_hoveredControl, this))
@@ -68,6 +81,7 @@ public sealed partial class TopologyNodeControl : UserControl
             }
             _isPointerOver = false;
             _hasKeyboardFocus = false;
+            _wasSelected = false;
         };
     }
 
@@ -87,11 +101,11 @@ public sealed partial class TopologyNodeControl : UserControl
         {
             oldValue.PropertyChanged -= control.ViewModel_PropertyChanged;
         }
-        if (args.NewValue is TopologyNodeViewModel newValue)
+        if (control.IsLoaded && args.NewValue is TopologyNodeViewModel newValue)
         {
             newValue.PropertyChanged += control.ViewModel_PropertyChanged;
         }
-        control.Bindings.Update();
+        if (control.IsLoaded) control.Bindings.Update();
         if (args.NewValue is TopologyNodeViewModel currentValue)
         {
             control._pendingBorderAnimation = new PendingBorderAnimation(

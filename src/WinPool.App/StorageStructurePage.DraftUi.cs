@@ -12,10 +12,14 @@ namespace WinPool_App;
 public sealed partial class StorageStructurePage
 {
     private readonly StackPanel PendingActionsPanel = new() { Spacing = 6 };
+    private bool _pendingActionsDialogOpen;
     private readonly List<Action> _localizeForm = [];
     private readonly Dictionary<Grid, (Button Button, FontIcon Arrow, bool Collapsed)> _sectionHeaders = [];
     private readonly Dictionary<(WorkspaceViewModel Workspace, SystemId System), NavigationDraft> _navigationDrafts = [];
     private (WorkspaceViewModel Workspace, SystemId System)? _activeNavigationKey;
+    private RenderedTopology? _renderedTopology;
+    private RenderedTopology? _restoredTopology;
+    private long _navigationTopologySequence;
     private bool _committingLiveForm;
     private bool _formHistoryCaptured;
     private PendingBorderAnimation? _applyAnimation;
@@ -27,7 +31,15 @@ public sealed partial class StorageStructurePage
         string[] Numbers, bool Dirty, bool ShowHotSpare, bool ShowRetired, bool HistoryCaptured);
     private sealed record NavigationDraft(SimulationEditingSession Session, string? Pool, string? Disk,
         string? VirtualDisk, string? Tier, FormInputs Inputs, string[] InitializedMaximums,
-        Dictionary<string, string> NameDefaults, bool HasChanges, long ContentRevision, long BindingGeneration);
+        Dictionary<string, string> NameDefaults, bool HasChanges, long ContentRevision, long BindingGeneration,
+        RenderedTopology? Topology);
+    private sealed record RenderedTopology(TopologyNodeControl Control,
+        StorageSnapshot Working, StorageSnapshot Baseline, WinPoolFacts? Facts,
+        LanguagePreference Language, long IgnoreBytes, bool HotSpare, bool Retired,
+        bool Simulation, bool RealMode, bool CanEdit)
+    {
+        public long Sequence { get; init; }
+    }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
@@ -39,7 +51,15 @@ public sealed partial class StorageStructurePage
             _navigationDrafts[key] = new(EditingSession, _selectedPoolId, _selectedPoolDiskId,
                 _selectedPoolVdiskId, _selectedPoolTierId, CaptureFormInputs(),
                 _capacityDefaultModesInitialized.ToArray(), new(_nameDefaults, StringComparer.OrdinalIgnoreCase),
-                HasUncommittedChanges(), EditingSession.ContentRevision, EditingSession.BindingGeneration);
+                HasUncommittedChanges(), EditingSession.ContentRevision, EditingSession.BindingGeneration,
+                _renderedTopology is { } rendered ? rendered with { Sequence = ++_navigationTopologySequence } : null);
+        // Retain at most two inactive rendered views. Draft ownership and history stay in their existing sessions.
+        var live = ViewModel.SystemCatalog.Systems.Select(document => document.SystemId).ToHashSet();
+        var retained = 0;
+        foreach (var pair in _navigationDrafts.Where(pair => pair.Value.Topology is not null)
+                     .OrderByDescending(pair => pair.Value.Topology!.Sequence).ToArray())
+            if (!ReferenceEquals(pair.Key.Workspace, ViewModel) || !live.Contains(pair.Key.System) || retained++ >= 2)
+                _navigationDrafts[pair.Key] = pair.Value with { Topology = null };
         _applyAnimation?.Dispose();
         _applyAnimation = null;
         _pendingAnimation?.Dispose();
@@ -51,6 +71,8 @@ public sealed partial class StorageStructurePage
     {
         var key = (ViewModel, ViewModel.SelectedSystem.SystemId);
         _activeNavigationKey = key;
+        _restoredTopology = null;
+        _renderedTopology = null;
         var fresh = ViewModel.IsUsingSimulatedInventory
             ? EditWorkspace.NormalizeTierCapacities(ViewModel.ActiveSnapshot)
             : ViewModel.ActiveSnapshot;
@@ -74,7 +96,9 @@ public sealed partial class StorageStructurePage
                 _capacityDefaultModesInitialized.UnionWith(prior.InitializedMaximums);
                 foreach (var item in prior.NameDefaults) _nameDefaults[item.Key] = item.Value;
                 inputs = prior.Inputs;
+                _restoredTopology = prior.Topology;
             }
+            _navigationDrafts[key] = prior with { Topology = null };
         }
         else
         {
@@ -101,6 +125,26 @@ public sealed partial class StorageStructurePage
             }
         }
         return inputs;
+    }
+
+    private bool TryRestoreNavigationTopology()
+    {
+        var cached = _restoredTopology;
+        _restoredTopology = null;
+        if (cached is null || !ReferenceEquals(cached.Working, _working)
+            || !ReferenceEquals(cached.Baseline, EditingSession.Baseline)
+            || !ReferenceEquals(cached.Facts, ViewModel.ActiveDocument.SourceFacts)
+            || cached.Language != ViewModel.Localization.EffectiveLanguage || cached.IgnoreBytes != UnallocatedIgnoreBytes
+            || cached.HotSpare != ShowHotSpareSwitch.IsOn || cached.Retired != ShowRetiredSwitch.IsOn
+            || cached.Simulation != ViewModel.IsUsingSimulatedInventory || cached.RealMode != ViewModel.IsRealMode
+            || cached.CanEdit != CanEditDraft) return false;
+        var root = cached.Control.ViewModel;
+        root.SetSurfaceViewportWidth(_viewportWidth);
+        root.RefreshSelection();
+        ApplyPendingModificationStates(root);
+        TopologyControl.Content = cached.Control;
+        _renderedTopology = cached;
+        return true;
     }
 
     private IEnumerable<ComboBox> FormCombos() => TierGroups().SelectMany(group =>
@@ -234,7 +278,7 @@ public sealed partial class StorageStructurePage
             : Text($"{PendingActionCount} 动作等待实施", $"{PendingActionCount} actions waiting");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(PendingActionsButton, "StructurePendingActionsButton");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PendingActionsButton, PendingActionsButtonLabel.Text);
-        PendingActionsButton.IsEnabled = true;
+        PendingActionsButton.IsEnabled = !_pendingActionsDialogOpen;
         var active = PendingActionCount > 0;
         _pendingAnimation ??= new PendingBorderAnimation(PendingButtonHost, PendingDefaultOutline,
             PendingThemeOutline, "structure-pending-count");
@@ -245,16 +289,28 @@ public sealed partial class StorageStructurePage
 
     private async void PendingActions_Click(object sender, RoutedEventArgs e)
     {
-        RefreshPendingActions();
-        var dialog = new ContentDialog
+        if (_pendingActionsDialogOpen) return;
+        _pendingActionsDialogOpen = true;
+        PendingActionsButton.IsEnabled = false;
+        ContentDialog? dialog = null;
+        try
         {
-            XamlRoot = XamlRoot, RequestedTheme = ActualTheme,
-            Title = Text("待实施动作", "Pending actions"), CloseButtonText = ViewModel.Localization["Close"],
-            Content = new ScrollViewer { MaxHeight = 520, Content = PendingActionsPanel,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
-        };
-        try { await dialog.ShowAsync(); }
-        finally { ((ScrollViewer)dialog.Content).Content = null; }
+            RefreshPendingActions();
+            dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot, RequestedTheme = ActualTheme,
+                Title = Text("待实施动作", "Pending actions"), CloseButtonText = ViewModel.Localization["Close"],
+                Content = new ScrollViewer { MaxHeight = 520, Content = PendingActionsPanel,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
+            };
+            await DialogCoordinator.ShowAsync(dialog);
+        }
+        finally
+        {
+            if (dialog?.Content is ScrollViewer scroll) scroll.Content = null;
+            _pendingActionsDialogOpen = false;
+            UpdatePendingActionCount();
+        }
     }
 
     private void UpdateApplyAnimation(bool active)
