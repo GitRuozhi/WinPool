@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-2026-10-19：**源码已推进V0.62／0.6.2.0，已批准计划进入W6本机验收。** 一次完整自动门已执行，原始结果为2517项：2464通过、53失败、0跳过。53项均在Infrastructure，修复后按影响范围补验；不能把补验次数累加成完整门用例数。实盘批次、8小时监控及实际候选验收仍未完成。原始构建、TRX与性能证据集中于[本次目录](../artifacts/test-results/v062/)，局部通过不等于V0.62完成。
+2026-10-19：**源码已推进V0.62／0.6.2.0，已批准计划进入W6本机验收。** 一次完整自动门已执行，原始结果为2517项：2464通过、53失败、0跳过。53项均在Infrastructure，修复后按影响范围补验；不能把补验次数累加成完整门用例数。实盘收尾及实际候选验收仍未完成。用户已接手非本机测试与长期20 Hz监控，待提供结果，不阻本执行方其余收口。原始构建、TRX与性能证据集中于[本次目录](../artifacts/test-results/v062/)，局部通过不等于V0.62完成。
 
 实施前最新两份独立全量验收记录均为2499 passed／1 failed／4 skip。方法与边界见[Review索引](Review/README.md)，本地[汇总A](../artifacts/acceptance-20261018/automated-summary.json)／[汇总B](../artifacts/test-results/acceptance-20261018/acceptance-test-summary.json)可读。唯一失败是旧私有字段源码断言；其历史结论不代表本次新二进制已验证。
 
@@ -26,65 +26,47 @@ V0.61的R1–R3修复及当次候选开发机验收继续作为历史有效证�
 
 ### V0.62 本机验收进行中
 
-[原始完整门清单](../artifacts/test-results/v062/final/complete-gate-runs.json)覆盖11个保留测试项目；Infrastructure按宿主与其它用例互斥拆成两次进程运行，以免共享全局宿主互相干扰。App、Agent、连接层、架构、Application、Domain、Execution、IPC、Monitoring及Persistence均通过；Infrastructure原始为966通过、53失败。修复包括窄事实profile对应的测试证据、PowerShell测试外层的进度流处理，以及生产目标比较中排除独立校验的HostCall传输标识；真实存储身份与参数仍完整比较。[相关补验](../artifacts/test-results/v062/final/Infrastructure-repairs.trx)为624通过、0失败、1门控跳过，含带真实宿主调用标识的正向执行、只读恢复及目标篡改拒绝。该跳过用例在原始完整门已实际通过。
+**截至2026-10-19，本机验收尚未完成。** 下表区分已测场景与剩余门，原始失败、修复前测量和中止批次均保留在[证据目录](../artifacts/test-results/v062/)。本轮只按影响补验，不把多个批次相加为一次全套通过；最终候选仍须绑定稳定源码、构建文件hash与实际ZIP。
 
-[Release构建](../artifacts/test-results/v062/final/Release-build-02.log)及[修复构建](../artifacts/test-results/v062/final/repair-build.log)均为0警告、0错误。修复构建身份含未提交受控修改，不能称为clean `4229118`；最终候选将另绑定稳定源码与文件hash。
+#### 当前事实
 
-只读SQLite检查将数据库绝对路径编码成file URI，避免`#`或`%`被误作片段／转义而打开错误文件。[路径及迁移补验62项](../artifacts/test-results/v062/final/Persistence-uri-migration-repairs.trx)全部通过，包括真实路径、解码诱饵库、写入拒绝及源文件集合／hash不变。
+| 范围 | 当前结果与适用边界 | 关键证据 |
+| --- | --- | --- |
+| 原始完整自动门 | 11个测试项目，共2517项：**2464通过、53失败、0跳过**；53项均属Infrastructure（该项目966通过）。宿主与其它Infrastructure用例互斥分进程运行。此后为局部修复与补验，原始完整门不改写为全绿 | [运行清单](../artifacts/test-results/v062/final/complete-gate-runs.json)、[失败与补验对应](../artifacts/test-results/v062/final/complete-gate-failure-followups.json)；补验见下表 |
+| WDC实际功能与独立复核 | 已经产品链完成池／HDD层／MAX VD及GPT、16 MiB MSR、NTFS／64 KiB布局；完成VD脱机／联机、缩512 MiB、临时分区创建／格式化／分配盘符／删除及扩回原大小。独立复核**79项全通过**：6个Completed计划、8个Verified步骤，准确WDC身份及关联；两块Samsung的15个核心对象、稳定字段／关系及角色补充不变，仅排除SizeRemaining和采集元数据。复核消费保存的实际完整Storage刷新与journal，不是另跑一次原生采集。**该时点仍为池／VD上的F:，不是约定独立E:末态** | [79项及来源hash／边界](../artifacts/test-results/v062/wdc-independent-verification-13.json)、[完整刷新原文](../artifacts/test-results/v062/wdc-independent-full-document-13.json) |
+| 普通真实改名 | 池名／卷标往返共4次，plan均Completed、step均Verified。UI总耗时中位数**4509.8815 ms**、最大**5180.0796 ms**，该小样本符合计划5 s／7 s门；包括产品准备至应用，不冒充Windows写命令耗时，不替代结构MAX对比 | [四次计时与耐久journal](../artifacts/test-results/v062/wdc-name-roundtrips-journals-07.json) |
+| 最新GUI性能场景 | 同一App7752／Agent9688、无遮挡：已加载3 MiB热切换30次**86.8849–184.5905 ms**；该负载后530 KB热切换10次**25.9731–31.7555 ms**，鼠标选择10次最大**25.7278 ms**；均无完整根重建。530 KB连续10次合法改名：反馈最大**40.8394 ms**、本地候选最大**71.6742 ms**、编辑页应用最大**92.863 ms**。这些场景达到对应预算；计时不含延迟XAML绘制，后续修复仍需确认适用性 | [3 MiB切换](../artifacts/test-results/v062/gui-loaded-switch-selector-reuse-30-16.json)、[530 KB切换](../artifacts/test-results/v062/gui-loaded-switch-530k-selector-10-18.json)、[鼠标选择](../artifacts/test-results/v062/gui-530k-selection-selector-reuse-20.json)、[合法改名](../artifacts/test-results/v062/gui-simulation-renames-530k-selector-reuse-19.json)、[无遮挡界面](../artifacts/test-results/v062/gui-530k-before-selection-20.png) |
+| 本轮实际刷新 | 同一App7752／Agent9688、监控关闭，完整Storage热读取10次中位**851.99045 ms**／最大**966.711 ms**；管理页实际刷新至UI应用中位**1065.28615 ms**／最大**1409.1762 ms**，达到预算。完整Hardware页面10次读取中位**2980.7062 ms**／最大**3654.786 ms**，**未达到2.5 s中位门**，不能由较早独立盘批次替代 | [实际管理页刷新](../artifacts/test-results/v062/gui-manual-refresh-ui-10-22.json)、[实际Hardware刷新](../artifacts/test-results/v062/gui-hardware-refresh-provider-10-23.json) |
+| 同值状态与同语言 | 正常App15400的UI dispatcher内，预热后100次同参activity、100次同语言刷新：已观察的root／children／columns／rows／session／非空候选及revision引用和值均不变，可订阅事件为0；分别1.256／36.841 ms，含准备与还原的观察总长68.592 ms。预热与还原各一次活动事件单列。Rows不支持CollectionChanged时只比较引用，**未直接计数短暂未发布的topology／reducer，不能据此声称精确方法计数为0** | [辅助源码](../artifacts/test-results/v062/workspace-state-hook/StartupHook.cs)、[实际结果及limitations](../artifacts/test-results/v062/workspace-state-hook/result.json)。[另一次100次同名GUI输入](../artifacts/test-results/v062/gui-same-name-input-100.json)仅证明该输入场景，不替代同值通知合同 |
+| 模拟数据与大消息 | GUI导出／再导入按来源匹配874对象、1092关系，字段／关系及改名一致，原13份开发文档revision／SHA不变。接近64 MiB的跨进程fixture核对typed改名、CAS／重复提交及保存／加载／导入导出；GUI取消反馈约74.4 ms | [GUI语义核对](../artifacts/test-results/v062/gui-3m-export-reimport-verified.json)、[64 MiB fixture](../artifacts/test-results/v062/ipc-near-limit-114-05/summary.json)、[取消活动控件计时](../artifacts/test-results/v062/gui-near-limit-cancel-feedback-07.json) |
+| Monitor与Graph | 同20 Hz输入、3×1200点、60 s窗，实际SetSeries调用旧／新954／594次，托管分配14,971,080／5,387,601 B/s，减少64.01%，新Graph最大6.456 ms；仅归属同步SetSeries。完整MonitorPage可见260次Poll最大10.440 ms，同revision的158次无图窗复制／重建；隐藏277次无复制／渲染／图元增删，仍有2,136 B其它托管分配。App关闭重开接原Agent及短批采样drop=0已核对，**连续8小时尚未开始** | [Graph同负载比较](../artifacts/test-results/v062/final/graph-benchmark-03.log)、[实际页面](../artifacts/test-results/v062/monitor-page-measurement.json)、[App重开后](../artifacts/test-results/v062/monitor-after-app-reopen.json)、[短批正常停止](../artifacts/test-results/v062/monitor-after-normal-stop-observed.json) |
+| 构建、依赖与提权 | 最新GUI实例构建51.62 s、0警告／错误，仍含受控工作区修改。无变更构建13.496 s、MergeSkipped=true，stamp／identity内容与时间戳不变；Release分析器0警告／错误、0文件改动。随包7za 26.04下载hash与官方asset一致；此次NuGet公告查询无已知漏洞条目。用户点击UAC“是”的High接续成功；另一次系统返回取消1223后原进程存活并恢复，用户未见提示，**不能称人工点击“否”已验收** | [实例构建](../artifacts/test-results/v062/final/selector-refresh-runtime-build.log)、[无变更构建](../artifacts/test-results/v062/final/no-change-build-02.json)、[分析器](../artifacts/test-results/v062/final/analyzers-release.log)、[7za摘要](../artifacts/test-results/v062/final/7zip-2604-input.json)、[依赖查询](../artifacts/test-results/v062/final/dependency-advisories.json)、[UAC接续](../artifacts/test-results/v062/uac-accepted-processes.json) |
 
-Persistence原始[197项完整结果](../artifacts/test-results/v062/final/WinPool.Persistence.Tests.trx)通过。随包7za更新至26.04后，[归档相关69项补验](../artifacts/test-results/v062/final/Persistence-7zip2604-repairs.trx)全部通过、无跳过，包含重新开启执行的三项实际测量；下表均为26.04结果：
+大消息fixture的66,623,922 B完整envelope含16,421对象，轻控制最大22.061 ms；发送取消27.131 ms、接收取消OutcomeUnknown反馈0.066 ms、暂存释放663.295 ms，两端最终无受控暂存文件。客户端／服务端峰值private约4.20／3.01 GB；2 MiB传输buffer不是对象图内存上限，强制GC后的数值不代表自动回收。该fixture未启动完整产品Agent，不能替代真实GUI生命周期与开发数据验收。
 
-| 测量 | 输入／样本 | 归档大小 | 实测耗时 |
-| --- | ---: | ---: | ---: |
-| 1 GiB直接归档 | 1,102,270,464 B／2,810,000 | 56,735,681 B | 压缩149.637 s |
-| 生产轮转生命周期 | 封存1,102,274,560 B／2,810,001 | 56,554,050 B | 生命周期171.813 s |
-| 7z参数比较 | 129,351,680 B／330,000 | 64m／2线程7,285,107 B；128m／4线程7,291,055 B | 15.750／16.007 s |
+#### 原始完整门之后的相关补验
 
-原始完整门中的26.03数字保留在原TRX，不作为26.04证明。生产参数为`-mx=9 -m0=lzma2 -md=64m -ms=on -mmt=2`，本次参数比较峰值工作集718,917,632 B，对照1,304,518,656 B，少44.89%，保留当前参数。前两项校验解压哈希，第三项执行`7z t`；TRX未记录哈希字面值。这些测量不替代8小时20 Hz实际监控。
+以下均为各自改动范围的证据，存在重叠，不累计成全套用例数；有记录的测试DLL／依赖hash见相邻`*.hashes.json`。`Infrastructure-repairs`与`Infrastructure-cmdlet-discovery-02`缺当次hash，最终构建须补验其14个保留方法（52个展开用例）及记录依赖；不得事后用当前hash冒充旧产物。原53项已对应50项同case后续通过、2项退役、1个旧Fact由2项行为Theory替换，候选适用映射仍须收口。
 
-依赖核查中发现[7-Zip官方26.04说明](https://www.7-zip.org/history.txt)包含安全修复，随包x64独立7za已更新至26.04；[官方asset摘要与下载校验](../artifacts/test-results/v062/final/7zip-2604-input.json)一致，旧26.03源文件已按规则保留到项目根Old。[本次NuGet公告查询](../artifacts/test-results/v062/final/dependency-advisories.json)未列出已知易受攻击包，只代表该数据源此次查询范围。
+| 修复范围 | 已有结果与证据 |
+| --- | --- |
+| 原53项失败、宿主回执比较 | [Infrastructure 624通过／0失败／1门控跳过](../artifacts/test-results/v062/final/Infrastructure-repairs.trx)；该跳过用例在原始完整门已通过。修复保留准确目标／参数校验，HostCall传输身份另行独立核验 |
+| IPC正文SHA | 保留原始JSON字节，未跳过或重算hash；[Agent 180](../artifacts/test-results/v062/final/WinPool.Agent.Tests-wire-repairs.trx)、[Agent.Client 26](../artifacts/test-results/v062/final/WinPool.Agent.Client.Tests-wire-repairs.trx)、[IPC 19](../artifacts/test-results/v062/final/WinPool.Ipc.Tests-wire-repairs.trx)均通过 |
+| 窄profile、冻结指纹及NoWindowsCall恢复 | `ce11d73`补足严格层关联所需输入，[36项](../artifacts/test-results/v062/final/Infrastructure-narrow-tier-proof-01.trx)通过；`f643772`保留冻结v1指纹合同后，[117项](../artifacts/test-results/v062/final/Infrastructure-frozen-profile-contract-01.trx)通过、无跳过。较早profile／provider／StorageJob回归保留在[final目录](../artifacts/test-results/v062/final/)，不以缩小身份／角色／成员证明换性能 |
+| 目录／完整显示与草稿恢复 | [Agent原85通过／3失败](../artifacts/test-results/v062/final/Agent-recovery-display-01.trx)，修fixture后[仅补3项通过](../artifacts/test-results/v062/final/Agent-recovery-display-02.trx)；[事实合并13](../artifacts/test-results/v062/final/Application-recovery-display-01.trx)、[持久化19](../artifacts/test-results/v062/final/Persistence-recovery-display-01.trx)、[目录恢复62](../artifacts/test-results/v062/final/App-local-recovery-catalog.trx)、[草稿重入20](../artifacts/test-results/v062/final/App-navigation-cache-01.trx)通过。App单测不编译页面，不能代替GUI |
+| 模拟本地候选与保存 | [协调器31](../artifacts/test-results/v062/final/Infrastructure-local-editor.trx)、[名称复用与保存40](../artifacts/test-results/v062/final/Infrastructure-name-reuse.trx)通过；纯Rename复用仍受baseline／revision／事实血缘限制，64 MiB校验、typed intent及CAS保持 |
+| SQLite路径、迁移与7za | 原始[Persistence 197项](../artifacts/test-results/v062/final/WinPool.Persistence.Tests.trx)通过；URI路径／迁移[62项](../artifacts/test-results/v062/final/Persistence-uri-migration-repairs.trx)通过，含`#`／`%`路径、诱饵库与原件hash；7za 26.04归档[69项](../artifacts/test-results/v062/final/Persistence-7zip2604-repairs.trx)通过、无跳过，含三项实际测量 |
 
-IPC中间JSON层重新转义导致正文SHA失配的问题已修复，保留原始JSON字节而不重算或跳过hash。相关补验为[Agent 180项](../artifacts/test-results/v062/final/WinPool.Agent.Tests-wire-repairs.trx)、[Agent.Client 26项](../artifacts/test-results/v062/final/WinPool.Agent.Client.Tests-wire-repairs.trx)、[IPC 19项](../artifacts/test-results/v062/final/WinPool.Ipc.Tests-wire-repairs.trx)，全部通过。修复后的实际Medium界面已正常加载本机清单。
+7za 26.04的1 GiB直接归档压缩149.637 s、归档56,735,681 B；生产轮转生命周期171.813 s、归档56,554,050 B，均校验解压哈希（TRX未记哈希字面值）。参数对照执行`7z t`：64m／2线程15.750 s、峰值工作集718,917,632 B；128m／4线程16.007 s、1,304,518,656 B。保留`-mx=9 -m0=lzma2 -md=64m -ms=on -mmt=2`；26.03旧测量不冒充26.04结果，这些手动测量不替代8小时监控。
 
-实际提权中，一次UAC返回Win32取消1223后，原App与Agent保持存活、closing=false，界面恢复，随后经托盘正常退出；用户未看到该次提示，不能称为人工点击“否”验证。另一次用户明确点击“是”，旧Medium App／Agent正常退出，新High App／Agent接续成功，见[进程与权限证据](../artifacts/test-results/v062/uac-accepted-processes.json)。
+#### 待完成与不能扩大的结论
 
-[构建保留fixture](../artifacts/test-results/v062/final/runtime-preservation-repairs.log)和[实际无变更构建](../artifacts/test-results/v062/final/no-change-build-02.json)通过：MergeSkipped=true，stamp／identity内容及时间戳不变，耗时13.496 s。[Release分析器](../artifacts/test-results/v062/final/analyzers-release.log)无警告／错误，0文件变更；命令临时设Configuration=Release，避免默认Debug缺少引用导致工作区不完整。补验产物与后续候选的依赖适用映射尚待收口，原完整门hash清单不能自动代表后续修复。
-
-[接近64 MiB的独立跨进程验证](../artifacts/test-results/v062/ipc-near-limit-114-05/summary.json)已通过，输入完整envelope为66,623,922 B，包含16,421对象；保存、加载、typed改名、CAS／重复提交、导出、再导入后对象／字段／关系语义均核对。连续轻控制最大22.061 ms；发送取消反馈27.131 ms，接收取消返回OutcomeUnknown的反馈0.066 ms、暂存释放663.295 ms，两端最终均无受控暂存文件。客户端／服务端峰值private分别约4.20／3.01 GB，不能把2 MiB传输buffer预算当作对象图内存上限；强制GC后的值也不声称为自动回收。该fixture不启动完整产品Agent，不替代GUI取消、生命周期或实际开发数据验收。
-
-首次实际HDD MAX在创建child或发出写入前，被full基线与窄profile计划的指纹不匹配拦截；[原始拒绝证据](../artifacts/test-results/v062/hdd-max-first-rejected.json)保留。已改为用覆盖两种profile的raw事实先验证旧指纹，再转换授权锚点；拒绝merged／覆盖不足基线，保留身份、成员、角色及参数检查。[App 462项](../artifacts/test-results/v062/final/App-structure-profile.trx)、[事实profile／成员51项](../artifacts/test-results/v062/final/Infrastructure-structure-profile-02.trx)、[Agent 180项](../artifacts/test-results/v062/final/Agent-structure-profile-02.trx)通过，实际WDC重试尚待执行。首轮补验的4个失败均为测试样本未模拟实际变更或旧profile合同，原日志保留。29.5分钟20 Hz监控的[部分记录](../artifacts/test-results/v062/monitor-before-restart.json)为三个有效目标各35,382样本、drop=0、正常结束；因修复需重启Agent，将重新计连续8小时，不能拼接为一次通过。
-
-独立可见WinUI Graph同负载比较保留[第一次](../artifacts/test-results/v062/final/graph-benchmark-01.log)／[第二次](../artifacts/test-results/v062/final/graph-benchmark-02.log)两边同10 Hz的控制实验，单次分配减少42.33%。这不是整条绘图路径每秒减半的判定口径；源码中20 Hz采样时旧页最小50 ms、新页最小100 ms。按相同3条×1200点、同20 Hz输入和同60秒窗，[实际页面频率比较](../artifacts/test-results/v062/final/graph-benchmark-03.log)旧／新实际调用954／594次，托管分配14,971,080／5,387,601 B/s，减少64.01%；新Graph最大6.456 ms。延迟跳过的呈现槽据实记录，未将名义频率当实际次数。该结果仅归属同步SetSeries，不包括异步布局、原生／GPU内存及Page其它工作。
-
-完整产品的[MonitorPage实测](../artifacts/test-results/v062/monitor-page-measurement.json)使用20 Hz、两个勾选的有效序列：60秒测量窗中可见260次Poll，均值2.306 ms、最大10.440 ms，0次超过16 ms；158次同revision时图窗复制／重建均为0。隐藏277次Poll，图窗复制、渲染、图元增删均为0；统计到2,136 B其它托管分配，未称整个隐藏回调零分配。[App正常关闭重开](../artifacts/test-results/v062/monitor-page-measure-finished.json)保持Agent 25380及同一session，[持久检查点](../artifacts/test-results/v062/monitor-after-app-reopen.json)三个目标继续采样、drop=0。WDC清空造成的3.836秒编辑gap已正常结束，未冒充无中断采样；连续8小时尚未完成。
-
-后续真实HDD MAX已完成并验证Clear RAW，但创建池前被Windows物理provider返回的CanPool=false拦截；[部分完成记录](../artifacts/test-results/v062/hdd-max-repaired-partial.json)仅一个child、无Pending，未创建池／VD。完整刷新仍显示OS磁盘RAW零分区、物理provider几乎全部容量已分配且CannotPoolReason=7。已实现仅准确RAW成员明确不可入池时的一次受控provider-cache刷新，保留身份／角色／几何与已验证清盘回执校验；正常可入池路径不增加刷新。补验发现并修复资格原因变化误判硬件编辑、已知子写完成后只读异常误标Unknown的问题。[Agent相关100项](../artifacts/test-results/v062/final/Agent-provider-discovery-03.trx)、[草稿与授权195项](../artifacts/test-results/v062/final/App-poolability-draft.trx)、[固定写脚本／采集90项](../artifacts/test-results/v062/final/Infrastructure-cmdlet-discovery-02.trx)通过。写脚本另记录24处实际写cmdlet的单调边界，只接纳匹配HostCall的完成回执；不把整份provider脚本耗时当作原生写入时间。此前失败记录保留，均按影响补验，不重跑完整门。实际设备复验待新构建；WDC当前临时RAW，任务收口前仍须恢复约定末态。
-
-[实际GUI的3 MiB文档导出／再导入](../artifacts/test-results/v062/gui-3m-export-reimport-verified.json)已完成；按来源身份匹配874个对象，完整比较字段及1092条关系，最终改名保留，原13份开发文档revision／SHA均未变。取消接近64 MiB导入时，[直接读取原活动控件](../artifacts/test-results/v062/gui-near-limit-cancel-feedback-07.json)确认约74.4 ms关闭；另一次约600 ms包含取消后重新搜索整棵UIA树，不混作产品处理耗时。结构页重复刷新已合并并补现有分段计时，[模拟协调器31项](../artifacts/test-results/v062/final/Infrastructure-local-editor.trx)通过；实际530 KB／3 MiB延迟仍待测量，不能用功能通过替代。
-
-第二批20 Hz监控[已正常停止](../artifacts/test-results/v062/monitor-after-normal-stop-observed.json)，约37.8分钟、三目标45249／45326／45326条有效样本、drop=0；保留WDC真实编辑缺口，不能与其它短批次拼为8小时。退出准备曾因App正在关闭而取消，确认提示后重试正常退出，不据此认定宿主死锁；最终稳定构建仍须重新执行8小时项。
-
-受控刷新随后在实际WDC生效，[恢复作业](../artifacts/test-results/v062/wdc-cache-resume-progress-03.json)已验证新池与HDD层。第一个MAX候选由Windows明确拒绝后，后验查询误将Storage模块适配的`Completed`显示值转成UInt16；尚缺第二轮未变闭包／终态作业证明，产品保留待核对屏障且未发后续写。已改为读取原始CIM UInt16，保留未知数值并拒绝缺失／文本状态，[相关33项](../artifacts/test-results/v062/final/Infrastructure-storage-job-reader.trx)通过，实盘显式对账待新构建。当前WDC为该池的唯一成员，尚无VD；这替代上段临时RAW的现场状态，不代表完成或约定末态。
-
-[3 MiB实际连续10次改名](../artifacts/test-results/v062/gui-3m-rename-measurements-02.json)中，反馈最大17.612 ms、本地候选发布最大762.231 ms；编辑页绑定最大1179.404 ms，不等于延迟绘制完成。改名后的Workspace／编辑页仍各构造完整VM；现已对严格相同baseline与纯Rename链复用节点并更新全部snapshot上下文，排序／结构变化保持重建；纯选择复用根。[协调器与保存40项](../artifacts/test-results/v062/final/Infrastructure-name-reuse.trx)通过，优化后的实际GUI仍待测量。新建[MAX旧基线保守下界](../artifacts/test-results/v062/max-baseline-bounds.json)仅从准确child关联的非重叠阶段推导，后续以新墙钟／非写上界验证，不能把旧job含人工时长当精确基准。
-
-上述原始CIM修复已在实盘完成[显式只读对账](../artifacts/test-results/v062/wdc-jobstate-rechecked.json)：已取得两轮未变闭包及终态作业，未创建VD、Pending已清。App随后因恢复刷新后用当前模拟项而非本机目录项校验，仍保留界面屏障；现修正本机目录校验，并在恢复草稿之前调用既有完整恢复闭环，[恢复／同步62项](../artifacts/test-results/v062/final/App-local-recovery-catalog.trx)通过。`43d7954`实际界面已解除遮罩，普通鼠标交互恢复；但剩余草稿仍被正确拦截：Agent把局部raw后验当完整基线，丢失未采集的Samsung及其磁盘／分区／卷，见[待实施原因](../artifacts/test-results/v062/wdc-recovery-pending-reason-ui.txt)。当前正修复显示合并与既有损坏结果的恢复，尚未继续WDC写入。
-
-[节点复用后的10次改名](../artifacts/test-results/v062/gui-simulation-renames-3m-reuse-01.json)中，发布最大13.239 ms、本地候选最大624.722 ms、编辑页绑定最大706.481 ms；10次均未构造新的完整根VM，实际显示与后台保存继续正常。该批使用GUI可访问性动作，尚有上述旧恢复遮罩，鼠标选择测试未进入处理器，未记通过；完整鼠标交互及已加载系统切换需在解除阻塞后验证。
-
-解除遮罩后的[3 MiB真实鼠标选择10次](../artifacts/test-results/v062/gui-3m-selection-phases-02.json)最大115.3 ms、完整根重建0，符合200 ms预算；[系统切换10次](../artifacts/test-results/v062/gui-loaded-switch-01.json)完整编辑页应用502.836–985.922 ms，超过200 ms预算。Workspace仅第一份新副本首建根，其余已加载切换约4.8–6.6 ms；修复聚焦编辑页重复建树，不把首载与热切换混为一项。
-
-[530 KB文档实际改名10次](../artifacts/test-results/v062/gui-simulation-renames-530k-01.json)本地候选最大294.777 ms、发布最大5.513 ms、完整根重建0；首动作反馈852.008 ms，后9次11.386–18.552 ms，首动作尚不符合100 ms预算。该文档[鼠标选择10次](../artifacts/test-results/v062/gui-530k-selection-phases-01.json)9次14.8–21.3 ms，另一次198.8 ms，同样尚未满足100 ms预算。保留失败批次，后续调查并在稳定构建复验，不用热样本覆盖失败结果；仅编辑本次导入副本，未修改原开发文档。
-
-旧MAX历史144.454／102.418 s实际为Prepared job创建至终态，包含确认停留且不包含此前Prepare；缺少原生写调用开始／返回，不能据此精确计算本版70%非写开销／50%端到端降幅。对应历史读取／阶段原始数据仍保留，新的同口径性能比较待完成。
-
-完整显示恢复修复已在[实际剩余草稿](../artifacts/test-results/v062/wdc-display-repair-durable-02.json)生效：3个物理磁盘、2个OS磁盘、6个分区及5个卷均保留。[Agent回归](../artifacts/test-results/v062/final/Agent-recovery-display-01.trx)85通过／3失败；两项旧fixture补同次scope标记、一项将无语义成员顺序按集合比较后，[仅补3项](../artifacts/test-results/v062/final/Agent-recovery-display-02.trx)全部通过。另[事实合并13项](../artifacts/test-results/v062/final/Application-recovery-display-01.trx)、[持久化19项](../artifacts/test-results/v062/final/Persistence-recovery-display-01.trx)、[草稿恢复／编辑策略20项](../artifacts/test-results/v062/final/App-navigation-cache-01.trx)通过；这些App单测不编译页面，不能替代实际GUI。
-
-实盘恢复随后已验证创建MAX VD，但初始化前的`command-os-v1`只读采集及对账各超时约60秒，[当前结果](../artifacts/test-results/v062/wdc-repaired-goal-progress-04.json)保留Unknown／Pending。初始化child未进入PreparingCall／CallIssued，持久证据明确NoWindowsCall；exact-member恢复不接受该Agent前置失败的合同缺口正在修复。当前WDC为池及VD承载盘，尚未初始化／格式化，不是约定E:末态。正常宿主超时回收没有重放写入；具体CIM挂点仍待定位。
-
-新的[530 KB文档10次改名](../artifacts/test-results/v062/gui-simulation-renames-530k-activity-02.json)首动作也满足预算：反馈最大17.501 ms、本地候选最大75.717 ms、编辑页绑定最大124.407 ms。[活动分段](../artifacts/test-results/v062/gui-530k-activity-phases-02.json)通知最大0.410 ms、页面状态更新最大15.601 ms；不能据此抹去旧长批次的超时。[编辑树缓存切换](../artifacts/test-results/v062/gui-loaded-switch-cache-02.json)已不重建根，但连续往返仍越来越慢；[仅查询selector的复测](../artifacts/test-results/v062/gui-loaded-switch-cache-selector-only-03.json)最大1491.769 ms，[App私有内存](../artifacts/test-results/v062/gui-navigation-growth-before-fix-processes.json)达2.60 GB。已找到卸载控件未解除VM及x:Bind订阅的实际泄漏，修复后须重新验证时长与内存，当前不记通过。
-
-“待实施动作”直接打开ContentDialog曾与确认框冲突，导致App退出；当次Prepared job无child、未发写，见[记录](../artifacts/test-results/v062/wdc-display-repair-crash-prepared.json)。已改用既有DialogCoordinator并防同一面板重复挂载，[实际串行弹窗](../artifacts/test-results/v062/pending-dialog-queue-opened-01-ui.txt)正常。为重建UI结束的[20 Hz短批](../artifacts/test-results/v062/monitor-stable-session-stopped-ui-fix-04.json)约3.5分钟，两目标各4230样本、drop=0；仍不能当8小时通过。
+- **最终适用性及交互补验：**busy期间首次建树的拖放角色固化问题已做局部源码修复，待构建与直接验证；稳定构建还须核对中英、明暗、高对比及100%／150%／200% DPI、主要页面操作、实际保存／撤销重做和迁移闭环。用户已人工确认CLI缩放可能导致Codex崩溃，禁止执行方自动调整系统／CLI缩放；已只读确认恢复100%（96 DPI），产品原App／Agent进程仍存活。见[控制台崩溃记录](../artifacts/test-results/v062/cli-console-crash-01.json)。150%／200%与高对比仍待安全方式验证或用户明确边界；已测局部场景不等于所有GUI门通过。
+- **性能旧失败保留：**[早期530 KB首反馈852 ms](../artifacts/test-results/v062/gui-simulation-renames-530k-01.json)、[选择198.8 ms](../artifacts/test-results/v062/gui-530k-selection-phases-01.json)、[编辑树切换增长](../artifacts/test-results/v062/gui-loaded-switch-cache-selector-only-03.json)、[新工具提示批仍一次527 ms](../artifacts/test-results/v062/gui-loaded-switch-tooltip-reuse-rotation-aware-30-14.json)均不删除。后来实际control／工具提示／selector复用的场景结果见上表；遮罩存在时的UIA改名只用于处理成本诊断，不算普通鼠标编辑通过。选择后自动BringIntoView致目标离屏而中止的helper批次同样不冒充产品失败。
+- **两组真实MAX性能对比尚未完成。**旧144.454／102.418 s为Prepared job到终态，含人工确认且漏掉此前Prepare，不能精确证明非写开销降70%／墙钟降50%；[旧基线保守下界](../artifacts/test-results/v062/max-baseline-bounds.json)仅是有条件下界。新组须保留候选数、原生写边界及非写成本，Windows必要耗时不从总长中隐去。
+- **长期监控由用户手动执行并回报；标准↔便携数据根迁移仍由执行方完成。**用户拟20 Hz运行一天，执行方届时先只读核对会话、样本、丢弃、gap与归档，不先重建或清理数据。长时结果待提供，不阻本执行方交付，也不标通过；既有短批不能拼成连续长时结果。执行方仍须覆盖短时可见／隐藏、App重开／Agent重连、CSV／轮转／关闭及迁移后的原文档／必要journal保留。
+- **WDC约定末态未完成：**须经产品受控链退出测试池／VD，恢复准确WDC在线GPT、16 MiB MSR、其余一个NTFS／64 KiB、`WinPool_Test`、`E:`，再独立核对两块受保护Samsung。当前F:的独立复核不替代该末态。
+- **V0.62实际ZIP未完成：**稳定源码／文件hash与按影响补验映射、最终依赖／分析器适用性、配套ZIP排除项／解压hash、从解压目录独占启动及TESTING／未测范围仍待收口。开发机外环境由用户另行测试并回报；本机交付不等待外部排期，整体发布仍未完成，未获推送／tag／发布授权。
 
 <a id="v061-fixes"></a>
 
