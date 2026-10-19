@@ -106,9 +106,8 @@ public sealed partial class WindowsRealStorageBackend
                 var verified = VerifyAfter(step.Command, target, provider, before, after);
                 if (verified is not null)
                 {
-                    var observedSafety = step.Command is SetDiskOnlineCommand diskState
-                        ? await planner.ValidateObservedExactMemberSafetyAsync(after, observed, observationToken, diskState).ConfigureAwait(false)
-                        : await planner.ValidateObservedExactMemberSafetyAsync(after, observed, observationToken).ConfigureAwait(false);
+                    var observedSafety = await planner.ValidateObservedExactMemberSafetyAsync(
+                        after, observed, observationToken, step.Command).ConfigureAwait(false);
                     if (step.Command is SetDiskOnlineCommand)
                         RequireOfflinePartitionProof(after, observed.AsComponentClosure(), observedSafety);
                     var evidence = new WindowsVerifiedStepEvidence(observed.Fingerprint, observed.PhysicalMemberFingerprint,

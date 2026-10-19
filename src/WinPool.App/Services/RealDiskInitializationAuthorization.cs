@@ -63,6 +63,35 @@ public sealed class RealDiskInitializationAuthorization : IRealOperationAuthoriz
         prepared = frozen;
     }
 
+    public async Task<RealOperationIntentRequest?> ObserveInitializedAsync(AgentRealOperationResponse response,
+        StorageSystemDocument fresh, IAgentConnection connection, CancellationToken cancellationToken)
+    {
+        var proposal = Initialization;
+        if (prepared is null || response.Plan.OperationId != prepared.Plan.OperationId
+            || response.Plan.PlanHash != prepared.Plan.PlanHash || response.State != RealOperationState.Succeeded
+            || response.RequiresReconciliation || response.Steps.Count != 1
+            || response.Steps[0].StepId != proposal.Steps[0].Id
+            || response.Steps[0].State != RealOperationStepState.Verified || fresh.SystemId != disk.System)
+            throw new InvalidDataException("Initialization lacks a complete verified result.");
+
+        // Light terminal status proves completion, but deliberately carries no receipt.
+        // Only this confirmed continuation needs the one initialized step's bounded evidence page.
+        var evidence = await RealOperationStatusCache.For(connection).LoadEvidenceAsync(
+            new(response.Plan.OperationId, 0, 1, CorrelationId.New()), cancellationToken);
+        if (evidence is null || evidence.Offset != 0 || evidence.NextOffset is not null || evidence.Window is not null
+            || evidence.Operation.Plan.OperationId != response.Plan.OperationId
+            || evidence.Operation.Plan.PlanHash != response.Plan.PlanHash
+            || evidence.Operation.Steps.Count != 1 || evidence.Operation.Steps[0].StepId != proposal.Steps[0].Id)
+            throw new InvalidDataException("The initialized step's receipt is missing or belongs to another frozen operation.");
+        var result = evidence.Operation.Steps[0].ResultEvidence;
+        var references = evidence.EvidenceReferences?.Where(reference => reference.StepId == proposal.Steps[0].Id
+            && reference.Field == RealEvidenceField.Result).ToArray() ?? [];
+        if (references.Length != 1 || !references[0].InlineComplete || references[0].TotalBytes is <= 0 or > 65536
+            || string.IsNullOrWhiteSpace(result) || System.Text.Encoding.UTF8.GetByteCount(result) != references[0].TotalBytes)
+            throw new InvalidDataException("Initialization layout cannot continue without its complete result receipt (at most 64 KiB); missing or chunked evidence is not accepted.");
+        return ObserveInitialized(evidence.Operation, fresh);
+    }
+
     public RealOperationIntentRequest? ObserveInitialized(AgentRealOperationResponse response, StorageSystemDocument fresh)
     {
         var proposal = Initialization;

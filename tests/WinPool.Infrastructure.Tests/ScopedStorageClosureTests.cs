@@ -52,12 +52,20 @@ public sealed class ScopedStorageClosureTests
             .EnumerateArray().Select(item => item.GetString()));
     }
 
-    [Fact]
-    public async Task AttachedTierUsesItsExactVirtualDiskPoolWhileTemplateKeepsItsDirectPoolParent()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AttachedTierUsesItsExactVirtualDiskPoolWhileTemplateKeepsItsDirectPoolParent(bool tierFirst)
     {
-        var json = await RunFixedClosureAsync("TierAttached");
+        var json = await RunFixedClosureAsync("TierAttached", tierFirst: tierFirst);
         using var result = JsonDocument.Parse(json);
         Assert.False(result.RootElement.GetProperty("ClosureFailed").GetBoolean());
+        var queries = result.RootElement.GetProperty("AssociationQueries").EnumerateArray()
+            .Select(item => item.GetString()).ToArray();
+        Assert.Single(queries, query => query == "virtual-object|MSFT_StoragePool");
+        Assert.Contains("actual-tier-object|MSFT_StoragePool", queries);
+        Assert.Contains("actual-tier-object|MSFT_VirtualDisk", queries);
+        Assert.Contains("template-tier-object|MSFT_StoragePool", queries);
         var objects = result.RootElement.GetProperty("ClosureObjects").EnumerateArray().ToArray();
         Assert.Equal(new[] { "actual-tier-uid", "template-tier-uid" }, objects
             .Where(x => x.GetProperty("ClassName").GetString() == "MSFT_StorageTier")
@@ -70,13 +78,19 @@ public sealed class ScopedStorageClosureTests
     }
 
     [Theory]
-    [InlineData("TierMissingVirtualDisk")]
-    [InlineData("TierAmbiguousVirtualDisk")]
-    [InlineData("TierConflictingPool")]
-    [InlineData("TierVirtualDiskMissingPool")]
-    public async Task AttachedTierMissingAmbiguousOrConflictingParentNeverCompletes(string graph)
+    [InlineData("TierMissingVirtualDisk", false)]
+    [InlineData("TierMissingVirtualDisk", true)]
+    [InlineData("TierAmbiguousVirtualDisk", false)]
+    [InlineData("TierAmbiguousVirtualDisk", true)]
+    [InlineData("TierConflictingPool", false)]
+    [InlineData("TierConflictingPool", true)]
+    [InlineData("TierVirtualDiskMissingPool", false)]
+    [InlineData("TierVirtualDiskMissingPool", true)]
+    [InlineData("TierVirtualDiskAmbiguousPool", false)]
+    [InlineData("TierVirtualDiskAmbiguousPool", true)]
+    public async Task AttachedTierMissingAmbiguousOrConflictingParentNeverCompletes(string graph, bool tierFirst)
     {
-        var json = await RunFixedClosureAsync(graph);
+        var json = await RunFixedClosureAsync(graph, tierFirst: tierFirst);
         using var result = JsonDocument.Parse(json);
         Assert.True(result.RootElement.GetProperty("ClosureFailed").GetBoolean());
         Assert.Contains(result.RootElement.GetProperty("SourceQueryFailures").EnumerateArray(), x =>
@@ -163,7 +177,8 @@ public sealed class ScopedStorageClosureTests
             [new(target, "MSFT_PhysicalDisk", "UniqueId", "physical-uid")]);
     }
 
-    private static async Task<string> RunFixedClosureAsync(string graph, bool narrowed = false, bool priorChildren = false, bool orphan = false, bool priorDisk = false)
+    private static async Task<string> RunFixedClosureAsync(string graph, bool narrowed = false, bool priorChildren = false, bool orphan = false,
+        bool priorDisk = false, bool tierFirst = false)
     {
         // Execute the production fixed closure with a closed synthetic CIM graph. Both CIM
         // entry points are shadowed; any undeclared query throws, and no storage cmdlet runs.
@@ -188,7 +203,7 @@ public sealed class ScopedStorageClosureTests
         if (priorChildren) before!.AddRange([new { ClassName = "MSFT_Partition", IdentityProperty = "Guid", IdentityValue = "old-partition-guid" },
             new { ClassName = "MSFT_Volume", IdentityProperty = "UniqueId", IdentityValue = "old-volume-uid" }]);
         if (priorDisk) before!.Add(new { ClassName = "MSFT_Disk", IdentityProperty = "UniqueId", IdentityValue = "old-disk-uid" });
-        await process.StandardInput.WriteAsync(JsonSerializer.Serialize(new { Graph = graph, Narrowed = narrowed, Orphan = orphan,
+        await process.StandardInput.WriteAsync(JsonSerializer.Serialize(new { Graph = graph, Narrowed = narrowed, Orphan = orphan, TierFirst = tierFirst,
             EvidenceFields = narrowed ? WindowsRealStorageReadProfile.ForId(WindowsRealStorageReadProfile.Required)!.Fields : null,
             ComponentLocators = before }));
         process.StandardInput.Close();
@@ -233,9 +248,15 @@ $TemplateTier = New-MockCim 'MSFT_StorageTier' 'template-tier-uid' 'template-tie
 $ActualTier = New-MockCim 'MSFT_StorageTier' 'actual-tier-uid' 'actual-tier-object'
 $OtherPool = New-MockCim 'MSFT_StoragePool' 'other-pool-uid' 'other-pool-object'
 $WinPoolScopeLocators = @([pscustomobject]@{ ClassName='MSFT_PhysicalDisk'; IdentityProperty='UniqueId'; IdentityValue='physical-uid' })
+if ($fixture.TierFirst) {
+    $WinPoolScopeLocators = @([pscustomobject]@{ ClassName='MSFT_StorageTier'; IdentityProperty='UniqueId'; IdentityValue='actual-tier-uid' }) + $WinPoolScopeLocators
+}
 function Get-CimInstance {
     [CmdletBinding()] param($Namespace, $ClassName, $Filter, $Property)
     [void]$IdentityQueries.Add(([string]$ClassName + '|' + [string]$Filter))
+    if ($Namespace -eq 'root/Microsoft/Windows/Storage' -and $ClassName -eq 'MSFT_StorageTier' -and $Filter -eq "UniqueId = 'actual-tier-uid'") {
+        return $ActualTier
+    }
     if ($ClassName -eq 'MSFT_Partition' -and $Filter -eq "Guid = 'old-partition-guid'") {
         if ($fixture.Orphan) { return New-MockCim 'MSFT_Partition' 'old-partition-guid' 'old-partition-object' }
         return @()
@@ -293,6 +314,7 @@ function Get-CimAssociatedInstance {
         'virtual-object' {
             if ($ResultClassName -eq 'MSFT_StoragePool') {
                 if ($fixture.Graph -eq 'TierVirtualDiskMissingPool') { return @() }
+                if ($fixture.Graph -eq 'TierVirtualDiskAmbiguousPool') { return @($ConcretePool,$OtherPool) }
                 return $ConcretePool
             }
             if ($ResultClassName -eq 'MSFT_PhysicalDisk') { return $Physical }

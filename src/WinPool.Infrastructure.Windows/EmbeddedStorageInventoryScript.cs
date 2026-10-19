@@ -249,6 +249,17 @@ function Get-WinPoolScopeAssociated($item, [string]$class) {
     if (-not $WinPoolScopeAssociations.ContainsKey($key)) { throw 'scope-association-was-not-collected' }
     return @($WinPoolScopeAssociations[$key])
 }
+function Read-WinPoolScopeAssociated($item, [string]$class) {
+    $key = (Get-WinPoolScopeKey $item) + '|' + $class
+    if (-not $WinPoolScopeAssociations.ContainsKey($key)) {
+        $sourceClass = [string]$item.CimClass.CimClassName
+        Write-WinPoolInventoryStage 'association.begin' $sourceClass $class
+        $WinPoolScopeAssociations[$key] = @(Get-CimAssociatedInstance -InputObject $item -ResultClassName $class -ErrorAction Stop)
+        Write-WinPoolInventoryStage 'association.returned' $sourceClass $class
+        $WinPoolScopeQueried[$class] = $true
+    }
+    return @($WinPoolScopeAssociations[$key])
+}
 $WinPoolScopeClasses = @('MSFT_StorageSubSystem','MSFT_StoragePool','MSFT_PhysicalDisk','MSFT_VirtualDisk','MSFT_StorageTier','MSFT_Disk','MSFT_Partition','MSFT_Volume')
 function Get-WinPoolScopeKey($item) {
     if ($null -eq $item -or $null -eq $item.CimClass) { throw 'scope-non-cim-object' }
@@ -340,11 +351,7 @@ try {
         }
         $associations = @{}
         foreach ($resultClass in $related) {
-            Write-WinPoolInventoryStage 'association.begin' $class $resultClass
-            $associations[$resultClass] = @(Get-CimAssociatedInstance -InputObject $item -ResultClassName $resultClass -ErrorAction Stop)
-            Write-WinPoolInventoryStage 'association.returned' $class $resultClass
-            $WinPoolScopeQueried[$resultClass] = $true
-            $WinPoolScopeAssociations[(Get-WinPoolScopeKey $item) + '|' + $resultClass] = @($associations[$resultClass])
+            $associations[$resultClass] = @(Read-WinPoolScopeAssociated $item $resultClass)
             foreach ($associated in $associations[$resultClass]) {
                 Add-WinPoolScopeObject $associated
             }
@@ -373,10 +380,8 @@ try {
             $tierVirtualDisks = @($associations['MSFT_VirtualDisk'])
             if ($tierPools.Count -gt 1 -or $tierVirtualDisks.Count -gt 1) { throw 'scope-tier-pool-parent-unavailable' }
             foreach ($tierVirtualDisk in $tierVirtualDisks) {
-                Write-WinPoolInventoryStage 'association.begin' 'MSFT_VirtualDisk' 'MSFT_StoragePool'
-                $virtualDiskPools = @(Get-CimAssociatedInstance -InputObject $tierVirtualDisk -ResultClassName MSFT_StoragePool -ErrorAction Stop |
+                $virtualDiskPools = @(Read-WinPoolScopeAssociated $tierVirtualDisk 'MSFT_StoragePool' |
                     Where-Object { -not $_.IsPrimordial })
-                Write-WinPoolInventoryStage 'association.returned' 'MSFT_VirtualDisk' 'MSFT_StoragePool'
                 if ($virtualDiskPools.Count -ne 1) { throw 'scope-tier-vdisk-pool-parent-unavailable' }
                 foreach ($parent in $virtualDiskPools) { Add-WinPoolScopeObject $parent }
                 $tierPools += $virtualDiskPools

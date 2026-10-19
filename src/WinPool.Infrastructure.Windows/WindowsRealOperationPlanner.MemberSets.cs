@@ -8,11 +8,19 @@ namespace WinPool.Infrastructure.Windows;
 public sealed partial class WindowsRealOperationPlanner
 {
     internal async Task<WindowsRealStorageSafetyEvidence?> ValidateObservedExactMemberSafetyAsync(WindowsRealStorageTopology topology,
-        RealExactPhysicalMemberSetClosure closure, CancellationToken ct, SetDiskOnlineCommand? diskState = null)
+        RealExactPhysicalMemberSetClosure closure, CancellationToken ct, RealStorageCommand? command = null)
     {
-        var evidence = diskState is null
-            ? await safetyInspector.InspectObservedAsync(topology, closure, ct).ConfigureAwait(false)
-            : await safetyInspector.InspectObservedDiskStateAsync(topology, closure, diskState, ct).ConfigureAwait(false);
+        // These existing metadata checks have no not-yet-applied name condition.
+        // Keep their fresh component/role/encryption proof without treating an
+        // unrelated provider-null MSR as a partition changed by the rename.
+        var evidence = command switch
+        {
+            RenamePoolCommand or RenameVirtualDiskCommand or RenameTierCommand or RenameVolumeCommand =>
+                await safetyInspector.InspectAsync(topology, closure, command, ct).ConfigureAwait(false),
+            SetDiskOnlineCommand diskState =>
+                await safetyInspector.InspectObservedDiskStateAsync(topology, closure, diskState, ct).ConfigureAwait(false),
+            _ => await safetyInspector.InspectObservedAsync(topology, closure, ct).ConfigureAwait(false)
+        };
         if (evidence?.PhysicalMemberRoleEvidence is not { } roles || roles.Count != closure.Members.Count
             || closure.Members.Any(member => roles.SingleOrDefault(role => role.PhysicalStableId == member.PhysicalDiskId) is not { } role
                 || role.InventoryVersion != topology.InventoryVersion || role.PoolStableId != member.PoolMemberRoleEvidence.PoolStableId

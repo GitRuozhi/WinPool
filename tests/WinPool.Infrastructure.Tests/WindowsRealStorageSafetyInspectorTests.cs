@@ -788,6 +788,140 @@ public sealed class WindowsRealStorageSafetyInspectorTests
         Assert.Equal(1, calls);
     }
 
+    [Theory]
+    [InlineData("pool")]
+    [InlineData("virtual-disk")]
+    [InlineData("volume")]
+    public async Task ObservedExactMetadataRenameKeepsFreshSafetyWithoutReadingUnrelatedMsr(string kind)
+    {
+        var fixture = new Fixture();
+        fixture.UseVirtualBacking();
+        fixture.MakeProviderNullMsrSibling();
+        var topology = await fixture.Capture();
+        var closure = topology.RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, "pool:concrete"),
+            [fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId)]);
+        var nativeCalls = 0;
+        var encryptionCalls = 0;
+        var inspector = new WindowsRealStorageSafetyInspector(null, (volumes, _) =>
+        {
+            encryptionCalls++;
+            Assert.Equal("volume:data", Assert.Single(volumes).StableId);
+        }, (_, _) => { nativeCalls++; throw new InvalidDataException("Unrelated MSR must not be queried for a name change."); });
+        RealStorageCommand command = kind switch
+        {
+            "pool" => new RenamePoolCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.StoragePool, "pool:concrete")), "Concrete"),
+            "virtual-disk" => new RenameVirtualDiskCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.VirtualDisk, "vd:synthetic")), "Synthetic VD"),
+            _ => new RenameVolumeCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.Volume, "volume:data")), "Data")
+        };
+        // Names already equal the requested result: post-state checking must not
+        // accidentally call the planner's not-yet-applied rename precondition.
+        var evidence = await new WindowsRealOperationPlanner(safetyInspector: inspector)
+            .ValidateObservedExactMemberSafetyAsync(topology, closure, default, command);
+
+        Assert.Equal(0, nativeCalls);
+        Assert.Equal(1, encryptionCalls);
+        Assert.Null(evidence!.NativePartitionAttributes);
+        var role = Assert.Single(evidence.PhysicalMemberRoleEvidence!);
+        Assert.Equal(topology.InventoryVersion, role.InventoryVersion);
+        Assert.Equal(PhysicalId, role.PhysicalStableId);
+        Assert.Equal("pool:concrete", role.PoolStableId);
+        // The simulation fact builder also supplies the physical member's own
+        // synthetic OS disk. Preserve both bindings in the complete role proof.
+        Assert.Equal([DiskId, PhysicalId + ":os"], role.AssociatedOsDiskIds);
+        foreach (var diskId in role.AssociatedOsDiskIds)
+        {
+            var disk = topology.RequireObject(fixture.Id(StorageObjectKind.OsDisk, diskId));
+            Assert.False(disk.Field("IsBoot")!.Value!.Value.GetBoolean());
+            Assert.False(disk.Field("IsSystem")!.Value!.Value.GetBoolean());
+            var native = Assert.Single(topology.Facts.Relationships.Where(edge => !edge.IsRetained
+                    && edge.FromId == diskId && edge.Kind == "disk-supplement")
+                .Select(edge => topology.Facts.Objects.Single(item => item.Id == edge.ToId)),
+                item => topology.Facts.Sources.Single(source => source.Id == item.SourceRef).ClassName == "Windows.DiskRoles");
+            Assert.Equal(topology.Facts.InventoryCapturedAt,
+                topology.Facts.Sources.Single(source => source.Id == native.SourceRef).CapturedAt);
+            Assert.Equal(disk.Field("Number")!.Value!.Value.GetInt64(), native.Field("DiskNumber")!.Value!.Value.GetInt64());
+            Assert.False(native.Field("IsPageFile")!.Value!.Value.GetBoolean());
+            Assert.False(native.Field("IsCrashDump")!.Value!.Value.GetBoolean());
+        }
+        Assert.False(role.IsBoot || role.IsSystem || role.IsPageFile || role.IsCrashDump);
+    }
+
+    [Theory]
+    [InlineData("outside-target")]
+    [InlineData("unknown-msr-field")]
+    [InlineData("protected-msr-field")]
+    [InlineData("protected-os-role")]
+    [InlineData("encryption-unknown")]
+    public async Task ObservedExactMetadataRenameStillRejectsUnrelatedTargetsAndUnknownOrProtectedSafety(string change)
+    {
+        var fixture = new Fixture();
+        fixture.UseVirtualBacking();
+        fixture.MakeProviderNullMsrSibling();
+        if (change == "unknown-msr-field") fixture.RemoveObjectField(EfiId, "IsShadowCopy");
+        if (change == "protected-msr-field") fixture.MarkSiblingShadowCopy();
+        if (change == "protected-os-role") fixture.MarkOsDiskSystem();
+        var topology = await fixture.Capture();
+        var nativeCalls = 0;
+        var encryptionCalls = 0;
+        var inspector = new WindowsRealStorageSafetyInspector(null, (volumes, _) =>
+        {
+            encryptionCalls++;
+            Assert.Equal("volume:data", Assert.Single(volumes).StableId);
+            if (change == "encryption-unknown") throw new InvalidDataException("The new volume encryption observation is unknown.");
+        }, (_, _) => { nativeCalls++; throw new InvalidOperationException("No unrelated native fallback is allowed."); });
+        var command = new RenamePoolCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.StoragePool,
+            change == "outside-target" ? "pool:foreign" : "pool:concrete")), "Concrete");
+
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        {
+            var closure = topology.RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, "pool:concrete"),
+                [fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId)]);
+            await new WindowsRealOperationPlanner(safetyInspector: inspector)
+                .ValidateObservedExactMemberSafetyAsync(topology, closure, default, command);
+        });
+        Assert.Equal(0, nativeCalls);
+        Assert.Equal(change == "encryption-unknown" ? 1 : 0, encryptionCalls);
+    }
+
+    [Theory]
+    [InlineData("create-msr")]
+    [InlineData("delete-partition")]
+    [InlineData("format")]
+    [InlineData("unspecified")]
+    public async Task ObservedExactNonMetadataCommandsStillRequireFreshNativeMsrEvidence(string kind)
+    {
+        var fixture = new Fixture();
+        fixture.UseVirtualBacking();
+        fixture.MakeProviderNullMsrSibling();
+        var topology = await fixture.Capture();
+        var closure = topology.RequireExactPhysicalMemberSet(fixture.Id(StorageObjectKind.StoragePool, "pool:concrete"),
+            [fixture.Id(StorageObjectKind.PhysicalDisk, PhysicalId)]);
+        var calls = 0;
+        var inspector = new WindowsRealStorageSafetyInspector(null, (_, _) => { }, (identity, _) =>
+        {
+            calls++;
+            Assert.Equal("vd:synthetic", identity.VirtualDiskUniqueId);
+            Assert.Equal("pool:concrete", identity.PoolUniqueId);
+            Assert.Equal(WindowsNativeMsrAttributesReader.MsrRole, identity.PartitionType);
+            return new(identity, 0);
+        });
+        RealStorageCommand? command = kind switch
+        {
+            "create-msr" => new CreatePartitionCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.OsDisk, DiskId)),
+                RealPartitionRole.Msr, 1048576, 16777216),
+            "delete-partition" => fixture.Delete(EfiId),
+            "format" => new FormatVolumeCommand(RealTargetReference.ForExisting(fixture.Id(StorageObjectKind.Partition, DataId)),
+                RealFileSystem.Ntfs, 65536, false, "Data"),
+            _ => null
+        };
+        var evidence = await new WindowsRealOperationPlanner(safetyInspector: inspector)
+            .ValidateObservedExactMemberSafetyAsync(topology, closure, default, command);
+
+        Assert.Equal(1, calls);
+        Assert.Equal(EfiId, evidence!.NativePartitionAttributes!.PartitionStableId);
+        Assert.Equal(topology.InventoryVersion, evidence.NativePartitionAttributes.InventoryVersion);
+    }
+
     [Fact]
     public async Task ExactMultiMemberObservedOfflineStateRequiresAllRolesAndExactNativeProof()
     {
@@ -1101,6 +1235,7 @@ public sealed class WindowsRealStorageSafetyInspectorTests
         private StorageSnapshot snapshot = InitialSnapshot();
         private bool targetShadowCopy;
         private bool siblingShadowCopy = true;
+        private bool providerNullSiblingMsr;
         private bool replaceTargetReadOnly;
         private bool? targetReadOnlyState;
         private readonly Dictionary<string, object?> rawTargetFields = new();
@@ -1150,6 +1285,10 @@ public sealed class WindowsRealStorageSafetyInspectorTests
                 Volumes = snapshot.Volumes.Where(item => item.PartitionStableId != EfiId).ToArray()
             };
         }
+        public void MakeProviderNullMsrSibling() { MakeSiblingMsr(); providerNullSiblingMsr = true; }
+        public void MarkSiblingShadowCopy() => siblingShadowCopy = true;
+        public void MarkOsDiskSystem() => snapshot = snapshot with
+            { OsDisks = snapshot.OsDisks.Select(item => item with { IsSystem = true }).ToArray() };
         public void SetOfflineState(bool diskOffline, bool partitionOffline)
         {
             snapshot = snapshot with { OsDisks = [snapshot.OsDisks[0] with { IsOffline = diskOffline }],
@@ -1165,6 +1304,10 @@ public sealed class WindowsRealStorageSafetyInspectorTests
         public void NativeNullVirtualMsr()
         {
             NativeNullMsr();
+            UseVirtualBacking();
+        }
+        public void UseVirtualBacking()
+        {
             snapshot = snapshot with
             {
                 PhysicalDisks = [snapshot.PhysicalDisks[0] with { PoolStableId = "pool:concrete" }],
@@ -1316,7 +1459,10 @@ public sealed class WindowsRealStorageSafetyInspectorTests
                 return item with { Fields = fields };
             }).Select(item => item with
             {
-                Fields = item.Fields.Where(field => !removedObjectFields.Contains((item.Id, field.Name))).ToImmutableArray()
+                Fields = item.Fields.Where(field => !removedObjectFields.Contains((item.Id, field.Name))).Select(field =>
+                    item.Id == EfiId && providerNullSiblingMsr && ((field.Name is "IsReadOnly" or "AccessPaths" or "DriveLetter")
+                        || !siblingShadowCopy && field.Name == "IsShadowCopy")
+                        ? WinPoolSourceField.Returned<object?>(field.Name, null, field.ValueType, item.SourceRef) : field).ToImmutableArray()
             }).ToImmutableArray();
             var relationships = facts.Relationships;
             // Simulation also exposes primordial members as synthetic OS disks;

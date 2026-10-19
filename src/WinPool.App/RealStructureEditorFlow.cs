@@ -61,6 +61,8 @@ public partial class EditorPageBase
                 throw new InvalidDataException(preparation.Messages.FirstOrDefault()?.DiagnosticText
                     ?? preparation.Messages.FirstOrDefault()?.Code ?? "The structural job could not be prepared.");
             prepared = frozen;
+            bool MatchesSubmittedJob(AgentRealStructureJobResponse value) => value.JobId == jobId
+                && value.GoalHash == frozen.GoalHash && value.SystemId == session.SystemId;
             if (frozen.DraftIntentHash != goal.DraftIntentHash)
                 throw new InvalidDataException("The prepared structural actions differ from the draft to be confirmed.");
             if (generation != session.BindingGeneration || content != session.ContentRevision
@@ -91,6 +93,7 @@ public partial class EditorPageBase
                 status = query.Value as AgentRealStructureJobResponse;
             }
             if (status is null) throw new IOException("The accepted structural job status is unavailable.");
+            if (!MatchesSubmittedJob(status)) throw new InvalidDataException("The structural job status belongs to another goal.");
             while (status.State is RealOperationState.Accepted or RealOperationState.Running)
             {
                 session.RealApplyMessage = string.Join(Environment.NewLine, status.Completed);
@@ -98,18 +101,20 @@ public partial class EditorPageBase
                     ?? Text("正在执行并核对结构目标", "Executing and verifying the structural goal"));
                 if (!await next) throw new IOException("The structural job event stream was disconnected. The goal is retained.");
                 var item = events.Current;
-                if (item is AgentRealStructureJobStatusEvent changed && changed.Status.JobId == jobId
+                if (item is AgentRealStructureJobStatusEvent changed && MatchesSubmittedJob(changed.Status)
                     && changed.Status.Revision >= status.Revision)
                     status = changed.Status;
                 else if (item is AgentStateReseedEvent)
                 {
                     var query = await connection.SendAsync(new QueryAgentRealStructureJobRequest(jobId, CorrelationId.New()), CancellationToken.None);
-                    if (query.Value is AgentRealStructureJobResponse recovered) status = recovered;
+                    if (query.Value is AgentRealStructureJobResponse recovered && MatchesSubmittedJob(recovered)
+                        && recovered.Revision >= status.Revision) status = recovered;
                 }
                 next = events.MoveNextAsync().AsTask();
             }
             var terminalRead = await connection.SendAsync(new QueryAgentRealStructureJobRequest(jobId, CorrelationId.New()), CancellationToken.None);
-            if (terminalRead.Value is AgentRealStructureJobResponse terminal) status = terminal;
+            if (terminalRead.Value is AgentRealStructureJobResponse terminal && MatchesSubmittedJob(terminal)
+                && terminal.Revision >= status.Revision) status = terminal;
             ViewModel.ObserveStructureJob(status);
             session.RealApplyMessage = string.Join(Environment.NewLine, status.Completed.Append(status.Code ?? ""));
             if (status.Children.LastOrDefault() is { Value: var childId } && childId != Guid.Empty)
@@ -124,25 +129,30 @@ public partial class EditorPageBase
                 }
             }
             var succeeded = status.State == RealOperationState.Succeeded && !status.RequiresReconciliation;
-            if (generation == session.BindingGeneration && session.SystemId == ViewModel.ActiveDocument.SystemId)
+            var sessionRestored = false;
+            LastRealInventoryRefreshSucceeded = false;
+            if (generation == session.BindingGeneration && content == session.ContentRevision
+                && ReferenceEquals(connection, ViewModel.AgentConnection) && productSession == ViewModel.RealProductSessionId)
             {
                 LastRealInventoryRefreshSucceeded = await ViewModel.ReadPublishedRealInventoryAsync();
-                if (LastRealInventoryRefreshSucceeded && !status.RequiresReconciliation)
+                // The submitted draft owns this result even when another system is selected.
+                // The catalog publishes local facts without replacing a selected simulation.
+                if (LastRealInventoryRefreshSucceeded && ReferenceEquals(connection, ViewModel.AgentConnection)
+                    && productSession == ViewModel.RealProductSessionId
+                    && ViewModel.SystemCatalog.Systems.SingleOrDefault(document => document.IsLocal
+                        && document.SystemId == session.SystemId) is { } local)
                 {
-                    if (succeeded) session.Bind(ViewModel.ActiveDocument, ViewModel.ActiveSnapshot);
-                    else if (status.RemainingGoal is { } remaining)
-                        session.RebaseVerified(ViewModel.ActiveDocument, new(remaining.Working,
-                            remaining.PoolIntents.ToDictionary(item => item.PoolId, item => item.Intent, StringComparer.Ordinal),
-                            session.MaximumSizeFields.ToHashSet(StringComparer.Ordinal)));
-                    if (!succeeded) session.RealStructureResumeJobId = jobId;
-                    OnRealInventoryRefreshed();
+                    sessionRestored = session.TryRestoreStructureJob(status, local, generation, content, emptyDraft: false);
+                    if (sessionRestored && ReferenceEquals(EditingSession, session)
+                        && session.SystemId == ViewModel.ActiveDocument.SystemId)
+                        OnRealInventoryRefreshed();
                 }
             }
             PublishOperationFeedback(succeeded ? GlobalNotificationSeverity.Info : GlobalNotificationSeverity.Warning,
                 succeeded ? Text("真实结构应用完成", "Structural changes completed")
                     : Text("结构应用停止，剩余目标已保留", "Structural changes stopped; remaining goals retained"),
                 session.RealApplyMessage, "real", status.Code ?? "agent.structure.result", $"JobId: {jobId:D}");
-            return succeeded && LastRealInventoryRefreshSucceeded;
+            return succeeded && sessionRestored;
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException
             or ArgumentException or NotSupportedException or JsonException or TimeoutException)

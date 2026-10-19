@@ -12,6 +12,114 @@ public sealed class RealDiskInitializationAuthorizationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task LightTerminalStatusLoadsOnlyItsReceiptBeforeConfiguringReservedPartition(bool createMsr)
+    {
+        var fixture = new Fixture(createMsr);
+        fixture.Prepare();
+        var connection = new EvidenceConnection(_ => fixture.EvidencePage());
+        var cache = RealOperationStatusCache.For(connection);
+        cache.Remember(fixture.Prepared);
+        var receipt = fixture.Receipt();
+        var light = new AgentRealOperationStatusResponse(receipt.Plan.OperationId, 7, receipt.State,
+            [receipt.Steps[0] with { ResultEvidence = null }], receipt.Code, false,
+            SystemId: receipt.Plan.SystemId, PlanHash: receipt.Plan.PlanHash, Targets: receipt.Plan.Targets);
+        var terminal = Assert.IsType<AgentRealOperationResponse>(await cache.ResolveAsync(light, CancellationToken.None));
+        Assert.Null(terminal.Steps[0].ResultEvidence);
+
+        var continuation = Assert.IsType<RealOperationIntentRequest>(await fixture.Authorization.ObserveInitializedAsync(
+            terminal, fixture.Fresh(), connection, CancellationToken.None));
+
+        var load = Assert.IsType<LoadAgentRealOperationEvidenceRequest>(Assert.Single(connection.Requests));
+        Assert.Equal(receipt.Plan.OperationId, load.OperationId);
+        Assert.Equal(0, load.Offset);
+        Assert.Equal(1, load.Limit);
+        Assert.Null(load.StepId);
+        Assert.Null(load.Field);
+        Assert.Equal(new[] { fixture.Disk, fixture.MsrTarget }, continuation.Targets);
+        Assert.Equal(fixture.MsrTarget, Assert.IsType<DeletePartitionCommand>(continuation.Steps[0].Command).Partition.Existing);
+        Assert.Equal(createMsr ? 2 : 1, continuation.Steps.Count);
+        if (createMsr)
+        {
+            var replacement = Assert.IsType<CreatePartitionCommand>(continuation.Steps[1].Command);
+            Assert.Equal(fixture.Disk, replacement.Disk.Existing);
+            Assert.Equal(RealPartitionRole.Msr, replacement.Role);
+            Assert.Equal(1L << 20, replacement.OffsetBytes);
+            Assert.Equal(16L << 20, replacement.SizeBytes);
+        }
+        fixture.Authorization.ValidateFrozen(continuation, fixture.Frozen(continuation, "after-initialize"));
+        // Receipt loading is explicit and does not turn ordinary terminal cache entries into history carriers.
+        Assert.Null((await cache.ResolveAsync(light, CancellationToken.None))!.Steps[0].ResultEvidence);
+    }
+
+    [Theory]
+    [InlineData("operation")]
+    [InlineData("plan-hash")]
+    [InlineData("step")]
+    [InlineData("unverified")]
+    [InlineData("reconciliation")]
+    [InlineData("missing-response")]
+    [InlineData("missing-result")]
+    [InlineData("missing-reference")]
+    [InlineData("chunked")]
+    [InlineData("oversized")]
+    [InlineData("byte-count")]
+    [InlineData("next-page")]
+    [InlineData("wrong-member-proof")]
+    public async Task ContinuationRejectsForeignIncompleteOrUnboundedReceiptPages(string change)
+    {
+        var fixture = new Fixture(true);
+        fixture.Prepare();
+        var terminal = fixture.Receipt();
+        var receipt = change switch
+        {
+            "operation" => terminal with { Plan = terminal.Plan with { OperationId = OperationId.New() } },
+            "plan-hash" => terminal with { Plan = terminal.Plan with { PlanHash = "foreign" } },
+            "step" => terminal with { Steps = [terminal.Steps[0] with { StepId = "other-step" }] },
+            "unverified" => terminal with { Steps = [terminal.Steps[0] with { State = RealOperationStepState.Failed }] },
+            "reconciliation" => terminal with { RequiresReconciliation = true },
+            "missing-result" => terminal with { Steps = [terminal.Steps[0] with { ResultEvidence = null }] },
+            "oversized" => terminal with { Steps = [terminal.Steps[0] with
+                { ResultEvidence = terminal.Steps[0].ResultEvidence + new string(' ', 65537) }] },
+            "wrong-member-proof" => fixture.Receipt(change: "member"),
+            _ => terminal
+        };
+        var page = fixture.EvidencePage(receipt);
+        page = change switch
+        {
+            "missing-reference" => page with { EvidenceReferences = [] },
+            "chunked" => page with { EvidenceReferences = [page.EvidenceReferences![0] with { InlineComplete = false }] },
+            "byte-count" => page with { EvidenceReferences = [page.EvidenceReferences![0] with { TotalBytes = 1 }] },
+            "next-page" => page with { NextOffset = 1 },
+            _ => page
+        };
+        var connection = new EvidenceConnection(_ => change == "missing-response" ? new AgentAcknowledgement() : page);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Authorization.ObserveInitializedAsync(
+            terminal with { Steps = [terminal.Steps[0] with { ResultEvidence = null }] },
+            fixture.Fresh(), connection, CancellationToken.None));
+
+        Assert.Single(connection.Requests);
+        fixture.Authorization.ValidateProposal(fixture.Initialization);
+    }
+
+    [Theory]
+    [InlineData(RealOperationState.Running)]
+    [InlineData(RealOperationState.OutcomeUnknown)]
+    [InlineData(RealOperationState.Failed)]
+    public async Task NonterminalOrFailedInitializationDoesNotLoadAReceiptOrAuthorizeContinuation(RealOperationState state)
+    {
+        var fixture = new Fixture(true);
+        fixture.Prepare();
+        var connection = new EvidenceConnection(_ => throw new IOException("Receipt must not be requested"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Authorization.ObserveInitializedAsync(
+            fixture.Receipt() with { State = state }, fixture.Fresh(), connection, CancellationToken.None));
+        Assert.Empty(connection.Requests);
+        fixture.Authorization.ValidateProposal(fixture.Initialization);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void VerifiedInitializationAuthorizesOnlyItsProviderMsrNormalization(bool createMsr)
     {
         var fixture = new Fixture(createMsr);
@@ -322,6 +430,18 @@ public sealed class RealDiskInitializationAuthorizationTests
         Assert.Throws<InvalidDataException>(() => fixture.Authorization.ValidateFrozen(fixture.Initialization, fixture.Prepared));
     }
 
+    private sealed class EvidenceConnection(Func<AgentRequest, AgentResponse> reply) : IAgentConnection
+    {
+        public List<AgentRequest> Requests { get; } = [];
+        public Task<ApplicationResult<AgentHandshake>> ConnectAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public IAsyncEnumerable<AgentEvent> WatchAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ApplicationResult<AgentResponse>> SendAsync(AgentRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return Task.FromResult(ApplicationResult<AgentResponse>.Succeeded(reply(request), request.CorrelationId));
+        }
+    }
+
     private sealed class Fixture
     {
         private readonly StorageSnapshot snapshot;
@@ -404,6 +524,14 @@ public sealed class RealDiskInitializationAuthorizationTests
             return frozen with { State = RealOperationState.Succeeded, Steps = [new(Initialization.Steps[0].Id,
                 RealOperationStepState.Verified, null, null,
                 change == "missing-evidence" ? null : JsonSerializer.Serialize(evidence))] };
+        }
+
+        public AgentRealOperationEvidenceResponse EvidencePage(AgentRealOperationResponse? receipt = null)
+        {
+            receipt ??= Receipt();
+            var step = receipt.Steps[0];
+            var bytes = System.Text.Encoding.UTF8.GetByteCount(step.ResultEvidence ?? "");
+            return new(receipt, 0, null, [new(step.StepId, RealEvidenceField.Result, bytes, 7, bytes <= 65536)]);
         }
     }
 }

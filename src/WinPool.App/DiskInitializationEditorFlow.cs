@@ -34,7 +34,8 @@ public partial class EditorPageBase
             if (!await SubmitRealAsync(authorization.Initialization, authorization, ValidateContext)
                 || LastRealOperationResponse is not { } initialized || !LastRealInventoryRefreshSucceeded) return false;
             ValidateContext();
-            var continuation = authorization.ObserveInitialized(initialized, ViewModel.ActiveDocument);
+            var continuation = await authorization.ObserveInitializedAsync(initialized, ViewModel.ActiveDocument,
+                ViewModel.AgentConnection!, CancellationToken.None);
             return continuation is null || await SubmitRealAsync(continuation, authorization, ValidateContext);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or ArgumentException or JsonException)
