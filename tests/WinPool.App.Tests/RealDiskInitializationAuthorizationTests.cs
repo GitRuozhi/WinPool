@@ -530,7 +530,7 @@ public sealed class RealDiskInitializationAuthorizationTests
         {
             receipt ??= Receipt();
             var step = receipt.Steps[0];
-            var bytes = System.Text.Encoding.UTF8.GetByteCount(step.ResultEvidence ?? "");
+            var bytes = global::System.Text.Encoding.UTF8.GetByteCount(step.ResultEvidence ?? "");
             return new(receipt, 0, null, [new(step.StepId, RealEvidenceField.Result, bytes, 7, bytes <= 65536)]);
         }
     }
