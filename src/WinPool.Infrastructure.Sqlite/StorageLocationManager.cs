@@ -283,6 +283,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
         ArgumentNullException.ThrowIfNull(plan);
 
         var enteredGate = false;
+        var applyPhase = "validate-plan";
         try
         {
             await switchGate.WaitAsync(cancellationToken);
@@ -376,6 +377,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
             Exception? postCommitCleanupFailure = null;
             try
             {
+                applyPhase = "copy-and-verify-staging";
                 await CopySnapshotAsync(
                     plannedSwitch.Source,
                     stagingRoot,
@@ -390,6 +392,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     DatabaseFileName);
                 var sourceWalPendingAtStaging = File.Exists(sourceDatabasePath + "-wal")
                     && new FileInfo(sourceDatabasePath + "-wal").Length > 0;
+                applyPhase = "audit-source-core";
                 var stagedSourceDatabaseAudit = IsSqliteDatabase(sourceDatabasePath)
                     ? await migrationAuditor.CaptureAsync(
                         sourceDatabasePath,
@@ -400,6 +403,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     SqliteMigrationAuditReport stagedDatabaseAudit;
                     try
                     {
+                        applyPhase = "audit-staged-core";
                         stagedDatabaseAudit = await migrationAuditor.CaptureAsync(
                             Path.Combine(stagingRoot, DatabaseFileName),
                             cancellationToken);
@@ -429,8 +433,10 @@ public sealed class StorageLocationManager : IStorageLocationManager
                                 : "The staged core database differs from the source; create a new plan.");
                     }
                 }
+                applyPhase = "verify-staged-monitoring";
                 await VerifyMonitoringDatabaseAsync(stagingRoot, cancellationToken);
 
+                applyPhase = "quiesce-and-check-real-barrier";
                 await using var writeLease = await writeCoordinator.QuiesceAndFlushAsync(
                     correlationId,
                     cancellationToken);
@@ -446,7 +452,9 @@ public sealed class StorageLocationManager : IStorageLocationManager
                         "A real operation changed while the location switch was in progress.");
                 }
 
+                applyPhase = "drain-source-database-handles";
                 DrainSourceDatabaseHandles(plan.SourceRoot);
+                applyPhase = "checkpoint-and-revalidate-source";
                 await CheckpointCoreDatabaseAsync(plan.SourceRoot, cancellationToken);
 
             // Flush happens while acquiring the lease. Re-snapshot afterwards so
@@ -467,6 +475,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
 
                 var sourceWalPending = File.Exists(sourceDatabasePath + "-wal")
                     && new FileInfo(sourceDatabasePath + "-wal").Length > 0;
+                applyPhase = "verify-core-identity-after-quiesce";
                 var sourceDatabaseAudit = IsSqliteDatabase(sourceDatabasePath)
                     ? await migrationAuditor.CaptureAsync(
                         sourceDatabasePath,
@@ -494,8 +503,10 @@ public sealed class StorageLocationManager : IStorageLocationManager
                         stagingRoot,
                         cancellationToken);
                 }
+                applyPhase = "verify-source-monitoring";
                 await VerifyMonitoringDatabaseAsync(plan.SourceRoot, cancellationToken);
 
+                applyPhase = "revalidate-target";
                 currentTargetSnapshot = await SnapshotSourceAsync(
                     plan.TargetRoot,
                     cancellationToken);
@@ -512,18 +523,21 @@ public sealed class StorageLocationManager : IStorageLocationManager
                 // outside authority before any replacement can move that root.
                 if (!File.Exists(pointerPath))
                 {
+                    applyPhase = "establish-source-pointer";
                     await new AtomicStorageLocationPointerCommitter().CommitAsync(
                         pointerPath,
                         plan.SourceMode,
                         cancellationToken);
                 }
 
+                applyPhase = "replace-target";
                 ReplaceTargetWithStaging(
                     plan.TargetRoot,
                     stagingRoot,
                     rollbackRoot);
                 targetWasReplaced = true;
 
+                applyPhase = "verify-replaced-target";
                 var targetSnapshot = await SnapshotSourceAsync(
                     plan.TargetRoot,
                     cancellationToken);
@@ -542,6 +556,7 @@ public sealed class StorageLocationManager : IStorageLocationManager
                     cancellationToken);
                 EnsureSameManifest(sourceSnapshot, targetSnapshot, "target");
 
+                applyPhase = "commit-target-pointer";
                 await pointerCommitter.CommitAsync(
                     pointerPath,
                     plan.TargetMode,
@@ -614,6 +629,9 @@ public sealed class StorageLocationManager : IStorageLocationManager
         }
         catch (Exception ex) when (IsExpectedStorageException(ex))
         {
+            DiagnosticLog.AppendFailure(plan.SourceRoot, "data-location.jsonl",
+                "storage.location.apply_failed", ex,
+                $"phase={applyPhase}; correlation={correlationId.Value:D}; targetMode={plan.TargetMode}; targetRoot={plan.TargetRoot}");
             return Result<StorageLocationState>(
                 ApplicationStatus.Failed,
                 correlationId,

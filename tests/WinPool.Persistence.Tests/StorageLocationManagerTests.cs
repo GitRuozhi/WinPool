@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using WinPool.Application;
 using WinPool.Domain;
 using WinPool.Infrastructure.Sqlite;
@@ -9,6 +10,41 @@ namespace WinPool.Persistence.Tests;
 
 public sealed class StorageLocationManagerTests
 {
+    [Theory]
+    [InlineData(1, "audit-source-core")]
+    [InlineData(2, "audit-staged-core")]
+    public async Task ApplyFailureRecordsPhaseAndOriginalExceptionWhileRetainingSource(int failingAudit, string phase)
+    {
+        using var locations = TemporaryLocations.Create();
+        locations.WriteStandard(StorageLocationManager.DatabaseFileName, "original source");
+        var auditor = new DelegatingAuditor((call, _, report) => call == failingAudit
+            ? throw new IOException("migration audit failed", new UnauthorizedAccessException("audit access denied"))
+            : report);
+        var manager = locations.CreateManager(new RecordingCoordinator(), auditor: auditor);
+        var plan = Assert.IsType<StorageLocationSwitchPlan>((await manager.PlanSwitchAsync(
+            StorageLocationMode.Portable, CorrelationId.New(), CancellationToken.None)).Value);
+        var correlation = CorrelationId.New();
+
+        var result = await manager.ApplySwitchAsync(plan, correlation, CancellationToken.None);
+
+        Assert.Equal(ApplicationStatus.Failed, result.Status);
+        Assert.Contains(result.Messages, message => message.Code == "storage.location.apply_failed");
+        Assert.False(File.Exists(locations.PointerPath));
+        Assert.False(Directory.Exists(locations.PortableRoot));
+        Assert.Equal("original source", ReadCoreMarker(Path.Combine(locations.StandardRoot, StorageLocationManager.DatabaseFileName)));
+        Assert.Equal(StorageLocationMode.Standard, (await manager.GetCurrentAsync(CorrelationId.New(), CancellationToken.None)).Value!.Mode);
+        var diagnostic = Path.Combine(DataRootLayout.DiagnosticsDirectory(locations.StandardRoot), "data-location.jsonl");
+        using var entry = JsonDocument.Parse(Assert.Single(await File.ReadAllLinesAsync(diagnostic)));
+        Assert.Equal("storage.location.apply_failed", entry.RootElement.GetProperty("source").GetString());
+        var exception = entry.RootElement.GetProperty("exception").GetString()!;
+        Assert.Contains("migration audit failed", exception);
+        Assert.Contains("audit access denied", exception);
+        var context = entry.RootElement.GetProperty("diagnostic").GetString()!;
+        Assert.Contains("phase=" + phase, context);
+        Assert.Contains(correlation.Value.ToString("D"), context);
+        Assert.Contains(locations.PortableRoot, context);
+    }
+
     [Theory]
     [InlineData(8)] // Prepared
     [InlineData(9)] // Accepted
