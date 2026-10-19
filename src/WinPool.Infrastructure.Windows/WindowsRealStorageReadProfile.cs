@@ -26,7 +26,7 @@ public sealed class WindowsRealStorageReadProfile
             ["MSFT_StoragePool"] = Split("UniqueId ObjectId FriendlyName IsPrimordial Size AllocatedSize LogicalSectorSize PhysicalSectorSize ProvisioningTypeDefault"),
             ["MSFT_VirtualDisk"] = Split("UniqueId ObjectId FriendlyName Size ResiliencySettingName ProvisioningType NumberOfColumns Interleave NumberOfDataCopies PhysicalDiskRedundancy AllocatedSize FootprintOnPool WriteCacheSize"),
             ["MSFT_StorageTier"] = Split("UniqueId ObjectId FriendlyName MediaType ResiliencySettingName ProvisioningType NumberOfColumns Interleave NumberOfDataCopies PhysicalDiskRedundancy Size FootprintOnPool AllocatedSize"),
-            ["MSFT_Disk"] = Split("UniqueId ObjectId FriendlyName Number Path Guid BusType Size PartitionStyle LogicalSectorSize PhysicalSectorSize IsOffline IsReadOnly IsClustered IsBoot IsSystem NumberOfPartitions LargestFreeExtent AllocatedSize"),
+            ["MSFT_Disk"] = Split("UniqueId ObjectId FriendlyName SerialNumber Number Path Guid BusType Size PartitionStyle LogicalSectorSize PhysicalSectorSize IsOffline IsReadOnly IsClustered IsBoot IsSystem NumberOfPartitions LargestFreeExtent AllocatedSize"),
             ["MSFT_Partition"] = Split("ObjectId Guid DiskId DiskNumber PartitionNumber Offset Size Type GptType MbrType IsBoot IsSystem IsHidden IsOffline IsReadOnly IsShadowCopy DriveLetter AccessPaths"),
             ["MSFT_Volume"] = Split("UniqueId ObjectId Path DriveLetter FileSystem FileSystemLabel AllocationUnitSize Size" + (id is Resize or OsResize ? " SizeRemaining" : ""))
         };
@@ -80,8 +80,9 @@ public sealed class WindowsRealStorageReadProfile
 
     public bool IncludesFingerprintField(string className, string field)
     {
-        // These newly collected values are prerequisites of the strict tier-member
-        // projection, not additions to the persisted v1 command fingerprint domain.
+        // Newly collected native identity/projection prerequisites do not change
+        // the persisted v1 command fingerprint domain. The physical serial remains bound there.
+        if (className == "MSFT_Disk" && field.Equals("SerialNumber", StringComparison.OrdinalIgnoreCase)) return false;
         if ((Id is Metadata or Os or OsResize) && className == "MSFT_PhysicalDisk"
             && field.Equals("MediaType", StringComparison.OrdinalIgnoreCase)) return false;
         if (Id == Metadata && className == "MSFT_VirtualDisk")

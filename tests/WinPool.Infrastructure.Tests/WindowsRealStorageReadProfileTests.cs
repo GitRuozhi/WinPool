@@ -137,12 +137,14 @@ foreach ($text in $scripts) {
         {
             "physical" => item with { Fields = item.Fields.Add(Number("MediaType", 3)) },
             "virtual" => item with { Fields = item.Fields.AddRange(virtualDependencies) },
+            "disk" => item with { Fields = item.Fields.Add(Text("SerialNumber", "serial")) },
             _ => item
         }).ToArray();
         Assert.Equal(frozenHash, Hash(enriched));
         foreach (var (id, changed) in new[]
         {
             ("physical", Text("UniqueId", "replacement-uid")),
+            ("physical", Text("SerialNumber", "replacement-serial")),
             ("disk", Flag("IsBoot", true)),
             ("virtual", Text("FriendlyName", "outside-rename")),
             ("disk", Number("PartitionStyle", 2))
@@ -154,6 +156,31 @@ foreach ($text in $scripts) {
             } : item).ToArray();
             Assert.NotEqual(frozenHash, Hash(changedFacts));
         }
+    }
+
+    [Theory]
+    [InlineData(WindowsRealStorageReadProfile.Required)]
+    [InlineData(WindowsRealStorageReadProfile.Resize)]
+    public void NativeDiskSerialReadDependencyKeepsFrozenDomainAndPhysicalSerialIdentity(string profileId)
+    {
+        var profile = WindowsRealStorageReadProfile.ForId(profileId)!;
+        WinPoolSourceField Serial(string value) => WinPoolSourceField.Returned("SerialNumber", value, FactValueType.String, "source");
+        WinPoolSourceObject[] original =
+        [
+            new("physical", FactObjectType.PhysicalDisk, "source", "physical-source", true, [Serial("physical-serial")]),
+            new("disk", FactObjectType.Disk, "source", "disk-source", true,
+                [WinPoolSourceField.Returned("UniqueId", "disk-uid", FactValueType.String, "source")])
+        ];
+        string Hash(IReadOnlyList<WinPoolSourceObject> values) => Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(
+                WindowsRealStorageTopology.CanonicalComponent("machine", values, [],
+                    returnedNullAsJsonNull: true, powerShellStrings: true, profile: profile))));
+        var frozenHash = Hash(original);
+        var enriched = new[] { original[0], original[1] with { Fields = original[1].Fields.Add(Serial("physical-serial")) } };
+        Assert.Equal(frozenHash, Hash(enriched));
+        Assert.Equal(frozenHash, Hash([enriched[0], enriched[1] with
+            { Fields = enriched[1].Fields.SetItem(1, Serial("changed-os-serial")) }]));
+        Assert.NotEqual(frozenHash, Hash([enriched[0] with { Fields = [Serial("changed-physical-serial")] }, enriched[1]]));
     }
 
     [Theory]

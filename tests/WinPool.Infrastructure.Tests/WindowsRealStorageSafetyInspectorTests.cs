@@ -710,6 +710,72 @@ public sealed class WindowsRealStorageSafetyInspectorTests
         Assert.Equal(1, calls);
     }
 
+    [Theory]
+    [InlineData(WindowsRealStorageReadProfile.Required)]
+    [InlineData(WindowsRealStorageReadProfile.Resize)]
+    [InlineData(WindowsRealStorageReadProfile.Metadata)]
+    [InlineData(WindowsRealStorageReadProfile.Os)]
+    [InlineData(WindowsRealStorageReadProfile.OsResize)]
+    public async Task DirectDiskCommandProfileRetainsNativeMsrSerialAndExactBinding(string profileId)
+    {
+        var fixture = new Fixture();
+        fixture.RemoveSibling();
+        fixture.NativeNullMsr();
+        var topology = fixture.CaptureProfile(profileId);
+        var disk = topology.Snapshot.OsDisks.Single(item => item.StableId == DiskId);
+        Assert.Equal(PhysicalId, disk.PhysicalDiskStableId);
+        Assert.Null(disk.VirtualDiskStableId);
+        Assert.Equal("SERIAL-1", topology.RequireObject(fixture.Id(StorageObjectKind.OsDisk, DiskId))
+            .Field("SerialNumber")!.Value!.Value.GetString());
+        var calls = 0;
+        var inspector = new WindowsRealStorageSafetyInspector(null, (_, _) => { }, (identity, _) =>
+        {
+            calls++;
+            Assert.Equal("SERIAL-1", identity.SerialNumber);
+            Assert.Equal(@"\\.\PHYSICALDRIVE7", identity.DiskPath);
+            Assert.Null(identity.VirtualDiskUniqueId);
+            Assert.Equal(WindowsNativeMsrAttributesReader.MsrRole, identity.PartitionType);
+            Assert.Equal(Guid.Parse("8c4b7c34-04ba-46b1-80d7-9d967441a02d"), identity.PartitionGuid);
+            return WindowsNativeMsrAttributesReader.ParseLayout(NativeLayout(identity), identity);
+        });
+        var proof = (await inspector.ValidateWithEvidenceAsync(topology, fixture.Closure(topology),
+            fixture.Delete(DataId), CancellationToken.None))!.NativePartitionAttributes!;
+        Assert.Equal(1, calls);
+        Assert.Equal(topology.InventoryVersion, proof.InventoryVersion);
+        Assert.Equal(DataId, proof.PartitionStableId);
+        Assert.Equal("ProviderPathGptGuidAndPhysicalSerial", proof.NativeBindingMethod);
+        Assert.Equal(0UL, proof.Attributes);
+    }
+
+    [Theory]
+    [InlineData(WindowsRealStorageReadProfile.Required, "missing")]
+    [InlineData(WindowsRealStorageReadProfile.Required, "different")]
+    [InlineData(WindowsRealStorageReadProfile.Resize, "missing")]
+    [InlineData(WindowsRealStorageReadProfile.Resize, "different")]
+    [InlineData(WindowsRealStorageReadProfile.Metadata, "missing")]
+    [InlineData(WindowsRealStorageReadProfile.Metadata, "different")]
+    [InlineData(WindowsRealStorageReadProfile.Os, "missing")]
+    [InlineData(WindowsRealStorageReadProfile.Os, "different")]
+    [InlineData(WindowsRealStorageReadProfile.OsResize, "missing")]
+    [InlineData(WindowsRealStorageReadProfile.OsResize, "different")]
+    public async Task DirectDiskCommandProfileRejectsMissingOrDifferentNativeSerial(string profileId, string serialFault)
+    {
+        var fixture = new Fixture();
+        fixture.RemoveSibling();
+        fixture.NativeNullMsr();
+        var topology = fixture.CaptureProfile(profileId, serialFault);
+        var calls = 0;
+        var inspector = new WindowsRealStorageSafetyInspector(null, (_, _) => { }, (identity, _) =>
+        {
+            calls++;
+            return new(identity, 0);
+        });
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => inspector.ValidateWithEvidenceAsync(
+            topology, fixture.Closure(topology), fixture.Delete(DataId), CancellationToken.None));
+        Assert.Contains(serialFault == "missing" ? "SerialNumber" : "physical serial is inconsistent", error.Message);
+        Assert.Equal(0, calls);
+    }
+
     [Fact]
     public async Task H07SingleMemberVirtualDiskMsrPreservesProviderBackingEvidence()
     {
@@ -1254,6 +1320,28 @@ public sealed class WindowsRealStorageSafetyInspectorTests
         public DeletePartitionCommand Delete(string id) => new(
             RealTargetReference.ForExisting(Id(StorageObjectKind.Partition, id)));
         public Task<WindowsRealStorageTopology> Capture() => reader.CaptureAsync(CancellationToken.None);
+        public WindowsRealStorageTopology CaptureProfile(string profileId, string? diskSerialFault = null)
+        {
+            var document = Document();
+            var facts = document.SourceFacts!;
+            var profile = WindowsRealStorageReadProfile.ForId(profileId)!;
+            var sources = facts.Sources.ToDictionary(item => item.Id);
+            var objects = facts.Objects.Select(item =>
+            {
+                var fields = profile.Fields.TryGetValue(sources[item.SourceRef].ClassName, out var names)
+                    ? item.Fields.Where(field => names.Contains(field.Name, StringComparer.OrdinalIgnoreCase)).ToImmutableArray()
+                    : item.Fields;
+                if (item.Id == DiskId)
+                {
+                    if (diskSerialFault == "missing") fields = fields.Where(field => field.Name != "SerialNumber").ToImmutableArray();
+                    else if (diskSerialFault == "different") fields = fields.Select(field => field.Name == "SerialNumber"
+                        ? WinPoolSourceField.Returned("SerialNumber", "OTHER-SERIAL", field.ValueType, field.SourceRef) : field).ToImmutableArray();
+                }
+                return item with { Fields = fields };
+            }).ToImmutableArray();
+            return new WindowsRealStorageTopology(document with { SourceFacts = facts with { Objects = objects } },
+                "synthetic-machine-binding", Now, profileId);
+        }
         public WindowsRealStorageTopologyReader Reader => reader;
         public RealTargetClosure Closure(WindowsRealStorageTopology topology) =>
             topology.RequireSinglePhysicalClosure([Id(StorageObjectKind.Partition, DataId)]);
