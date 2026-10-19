@@ -1,6 +1,6 @@
 # WinPool 验证与验收
 
-## V0.63 首个公开测试版（构建与启动抽查通过，待发布）
+## V0.63 首个公开测试版（已发布，三类人工验证继续保留）
 
 2026-10-19用户明确批准版本增加0.01、提交推送、重编译并公开发布。用户已初步测试认为可靠，三类人工验证仍未全部完成，决定先公开测试；这不等于这些项目已经通过。
 
@@ -13,7 +13,8 @@
 | 便携包 | `WinPool-V0.63-win-x64.zip`，617个运行文件＋`TESTING.md`共618个；两侧运行树、标准树与实际ZIP解压文件hash一致，无PDB／开发数据／日志／源码脚本；[打包回执](../artifacts/test-results/v063-release/package-created.json)、[解压文件清单](../artifacts/test-results/v063-release/package-extracted.json) |
 | ZIP SHA-256 | `a47c0c75039e27ea6a2ee126e7ec9c8cf74b265be7e2e88074686b360c2a5e39`，独立`.sha256`随包；App／Agent签名均NotSigned |
 | 实际包启动 | App 1892／Agent 24600均Medium、准确来自解压包；欢迎页进入主窗口，自动Storage／Hardware显示成功，设置页V0.63可见，真实编辑与持续监控均Off，正常托盘退出后两进程0；Standard数据位置保留。[结果](../artifacts/test-results/v063-release/smoke-result.json)、[进程身份](../artifacts/test-results/v063-release/ready-identities.json)、[设置截图](../artifacts/test-results/v063-release/settings.png)；仅启动抽查，不替代全流程／长时／DPI验收 |
-| 公开发布 | 用户已明确授权main推送、V0.63 tag、ZIP及校验文件上传，拟发布[GitHub Pre-release](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)；公开下载后再登记核对结果 |
+| 公开发布 | 2026-10-19 12:18:52（UTC+8）已发布[GitHub Pre-release](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)，非draft，ZIP＋校验文件共2项资产；main及V0.63 tag已推送。tag指向`026b492b06021ec8e8d52c0033fc6dc3d7e1f237`，与二进制构建`49bf45b`受控输入完全一致，仅补验收文档 |
+| 公开下载核对 | 未携带登录凭证从公开下载URL重新下载2项资产；ZIP为104,408,948 B，SHA-256与本地包、GitHub资产digest及校验文件一致；发布正文仅换行格式不同、内容一致。[发布记录](../artifacts/test-results/v063-release/release-final.json)、[公开下载核对](../artifacts/test-results/v063-release/public-download-verification.json)；后续文档提交不改变已发布二进制或tag |
 
 **继续保留：**外部系统／设备环境、连续至少8小时20 Hz监控（用户拟一天）、150%／200% DPI仍待用户完成并提供结果；具体步骤见[活动Plan](Plan.md)。后续发现问题按影响补验，已公开资产不静默覆盖。
 

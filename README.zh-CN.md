@@ -4,7 +4,7 @@
 
 WinPool 是 Windows 桌面存储管理软件，可查看存储拓扑、编辑模拟系统、监控设备，并通过受控流程执行已支持的本机存储操作。
 
-**WinPool V0.63 正在准备首个公开测试版。** 欢迎大家下载使用，也欢迎反馈问题和建议。[V0.63 发布页面](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)将提供程序包，问题和建议可以[提交到这里](https://github.com/GitRuozhi/WinPool/issues)。
+**WinPool V0.63 首个公开测试版已发布。** 欢迎大家下载使用，也欢迎反馈问题和建议。前往[V0.63 发布页面](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)下载程序包，问题和建议可以[提交到这里](https://github.com/GitRuozhi/WinPool/issues)。
 
 V0.62 的开发与已授权本机验收已经完成并[归档](docs/Archive/20261019-v062-local-completed/README.md)。开发者初步手工测试的结果可靠，但其他系统和硬件环境、长时间连续 20 Hz 监控、150%／200% 显示缩放还没有全部测完。这三项继续保留在[计划](docs/Plan.md)中，开发者已决定先开放公开测试。实际验证范围和程序包身份见[Quality](docs/Quality.md)，唯一版本源为[Directory.Build.props](Directory.Build.props)。
 
@@ -27,7 +27,7 @@ V0.62 的开发与已授权本机验收已经完成并[归档](docs/Archive/2026
 
 产品使用Windows自带的Windows PowerShell 5.1；运行便携包不要求另装PowerShell 7或开发SDK。项目实测兼容与上游.NET正式支持分开记录；.NET 10支持列表未列Windows 10 Pro 22H2。
 
-公开测试包将在[发布页面](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)提供内含 `TESTING.md` 的 ZIP 及独立 SHA-256 校验文件，完整解压后运行。遇到问题或有改进建议，欢迎[告诉我们](https://github.com/GitRuozhi/WinPool/issues)；请附上版本、Windows／设备环境、复现步骤及相关错误，方便排查。
+公开测试包在[发布页面](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)提供内含 `TESTING.md` 的 ZIP 及独立 SHA-256 校验文件，完整解压后运行。遇到问题或有改进建议，欢迎[告诉我们](https://github.com/GitRuozhi/WinPool/issues)；请附上版本、Windows／设备环境、复现步骤及相关错误，方便排查。
 
 在 Windows、PowerShell 与 `global.json` 指定的 SDK 环境中构建：
 

@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-**当前源码版本为V0.63，正在准备首个公开测试版。** V0.62实施与已授权本机验收已[归档](Archive/20261019-v062-local-completed/README.md)；本轮仅推进版本及发布，不修改产品行为。[活动Plan](Plan.md)保留发布操作及三类用户人工验证。下文记录技术所有权，验证事实归[Quality](Quality.md)，版本源为`Directory.Build.props`；产品语义归[Product](Product.md)，早期细节保留在[原件](Archive/20261017-v061-document-baseline/Development-before.md)。
+**当前源码版本为V0.63，首个公开测试版已发布。** V0.62实施与已授权本机验收已[归档](Archive/20261019-v062-local-completed/README.md)；本轮仅推进版本及发布，未修改产品行为。[活动Plan](Plan.md)保留三类用户人工验证及已完成发布记录。下文记录技术所有权，验证事实归[Quality](Quality.md)，版本源为`Directory.Build.props`；产品语义归[Product](Product.md)，早期细节保留在[原件](Archive/20261017-v061-document-baseline/Development-before.md)。
 
 ## 模块与所有权
 
@@ -105,7 +105,7 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 | 产品语义、能力和路线 | Product；对象与控件专项按链接查阅 |
 | 技术所有权、数据、构建 | Development |
 | 验证规则、命令及当前证据索引 | Quality |
-| 阶段顺序、固定决定、状态 | 唯一[Plan](Plan.md)，当前V0.63公开测试发布已获批准，三类人工验证继续保留；全部结束后移入Archive |
+| 阶段顺序、固定决定、状态 | 唯一[Plan](Plan.md)，当前V0.63公开测试已发布，三类人工验证继续保留；全部结束后移入Archive |
 | 重要已完成变化 | CHANGELOG |
 | 授权、文件处置、Git | AGENTS |
 

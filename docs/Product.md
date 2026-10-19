@@ -1,6 +1,6 @@
 # WinPool 产品方向
 
-**当前源码版本为V0.63／0.6.3.0，正在准备首个公开测试版。** 欢迎所有用户使用并[反馈问题和建议](https://github.com/GitRuozhi/WinPool/issues)，程序包发布入口为[V0.63 Release](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)。V0.62实施与已授权本机验收已完成并[归档](Archive/20261019-v062-local-completed/README.md)。用户初步手工测试认为结果可靠，但外部环境、长期20 Hz监控、150%／200% DPI三类验证尚未全部完成；用户已明确允许先发布公开测试版，三项继续保留，不标记为通过，见[活动Plan](Plan.md)。第一目标是减少冗余、防御性重复和代码之外的工作，第二目标是性能。实现与实测覆盖分别记录，实际结果归[Quality](Quality.md)。[V0.61阶段记录](Archive/20261018-v061-completed/Plan.md)保留为历史。
+**V0.63／0.6.3.0首个公开测试版已发布。** 欢迎所有用户使用并[反馈问题和建议](https://github.com/GitRuozhi/WinPool/issues)，程序包下载入口为[V0.63 Release](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)。V0.62实施与已授权本机验收已完成并[归档](Archive/20261019-v062-local-completed/README.md)。用户初步手工测试认为结果可靠，但外部环境、长期20 Hz监控、150%／200% DPI三类验证尚未全部完成；用户已明确允许先发布公开测试版，三项继续保留，不标记为通过，见[活动Plan](Plan.md)。第一目标是减少冗余、防御性重复和代码之外的工作，第二目标是性能。实现与实测覆盖分别记录，实际结果归[Quality](Quality.md)。[V0.61阶段记录](Archive/20261018-v061-completed/Plan.md)保留为历史。
 
 本文件维护产品语义和范围；模块实现归[Development](Development.md)，逐日结果已原样[归档](Archive/20261017-v061-document-baseline/Product-before.md)。
 
@@ -93,7 +93,7 @@ WinPool 是 Windows 存储拓扑、管理编辑和监控桌面软件。保留 Wi
 | --- | --- |
 | V0.61 | 已有主要改造和便携候选；后续验收的性能／验证残项见Quality，不宣称当前全部闭环 |
 | V0.62（本机阶段完成） | 开发与已授权本机验收已归档；原始结果和验证边界见Quality |
-| V0.63（首个公开测试版准备中） | 重编译当前实现并公开便携包；用户负责的外部环境、长期监控、DPI继续待结果，已获准不阻此次公开测试，见[活动Plan](Plan.md) |
+| V0.63（首个公开测试版已发布） | 已重编译并发布便携包；用户负责的外部环境、长期监控、DPI继续待结果，不阻此次公开测试，见[活动Plan](Plan.md) |
 | V0.64–V0.69（确需时） | 根据公开测试反馈修复问题、补充验证；首稿在V0.70之前开放测试 |
 | V0.70及以后 | 收紧功能、集成与质量收口；签名MSIX和正式发布按实际需要另定，不用它们阻塞首稿 |
 | V1.x／V2.0 | 1.x聚焦已有管理／监控与交付；2.0才讨论完整测试、开发及AI工作区 |
