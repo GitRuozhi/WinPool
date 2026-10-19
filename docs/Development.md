@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-**当前源码版本为V0.62，唯一活动[Plan](Plan.md)已批准、处于本机验收。** 下文记录当前代码的技术所有权，验证状态归[Quality](Quality.md)，实现不等于验收通过。阶段历史见[V0.61记录](Archive/20261018-v061-completed/Plan.md)，版本源为`Directory.Build.props`。产品语义归[Product](Product.md)，历史细节保留在[原件](Archive/20261017-v061-document-baseline/Development-before.md)。
+**当前源码版本为V0.62，实施与已授权本机验收已完成并[归档](Archive/20261019-v062-local-completed/README.md)。** [活动Plan](Plan.md)只列用户验证及发布待办，不自动重开已完成阶段。下文记录技术所有权，验证事实归[Quality](Quality.md)，版本源为`Directory.Build.props`；产品语义归[Product](Product.md)，早期细节保留在[原件](Archive/20261017-v061-document-baseline/Development-before.md)。
 
 ## 模块与所有权
 

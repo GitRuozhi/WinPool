@@ -4,7 +4,7 @@
 
 WinPool is a Windows desktop application for viewing storage topology, editing simulated systems, monitoring devices, and performing supported local storage operations through a controlled workflow.
 
-**The source version is V0.62, currently undergoing developer-machine acceptance under the approved [active plan](docs/Plan.md). No public release has been made.** See [Quality](docs/Quality.md) for actual results, candidate identity and outstanding external verification. The [V0.61 stage record](docs/Archive/20261018-v061-completed/Plan.md) is preserved as history; [Directory.Build.props](Directory.Build.props) is the version source.
+**The source version is V0.62. Implementation and authorized local acceptance are complete and [archived](docs/Archive/20261019-v062-local-completed/README.md); no public release has been made.** The [remaining plan](docs/Plan.md) covers user-provided verification and release. See [Quality](docs/Quality.md) for results and candidate identity; [Directory.Build.props](Directory.Build.props) is the version source.
 
 ## Using WinPool
 
