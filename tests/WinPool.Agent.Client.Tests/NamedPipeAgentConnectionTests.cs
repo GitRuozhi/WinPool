@@ -1054,7 +1054,7 @@ public sealed partial class NamedPipeAgentConnectionTests
     }
 
     [Fact]
-    public async Task CallerCancellationAfterRequestWriteReturnsUnknownAndNextRequestReconnects()
+    public async Task CallerCancellationAfterRequestWriteReturnsUnknownAndEventRecoveryAcceptsNextRequest()
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
@@ -1101,7 +1101,12 @@ public sealed partial class NamedPipeAgentConnectionTests
             null,
             new TrueAgentProcessLiveness());
 
-        Assert.True((await connection.ConnectAsync(CancellationToken.None)).IsSuccess);
+        using var recoveryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Assert.True((await connection.ConnectAsync(recoveryTimeout.Token)).IsSuccess);
+        await using var events = connection.WatchAsync(recoveryTimeout.Token)
+            .GetAsyncEnumerator(recoveryTimeout.Token);
+        Assert.True(await events.MoveNextAsync());
+        Assert.IsType<AgentStateReseedEvent>(events.Current);
         using var requestCancellation = new CancellationTokenSource(
             TimeSpan.FromMilliseconds(100));
         var request = connection.SendAsync(
@@ -1114,6 +1119,7 @@ public sealed partial class NamedPipeAgentConnectionTests
         operations.ReleaseMainWindow.TrySetResult();
         firstServerCancellation.Cancel();
         await firstServerTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitForTransportStateAsync(AgentEventTransportState.Disconnected);
 
         using var secondServerCancellation = new CancellationTokenSource();
         var secondServer = new CurrentUserAgentControlServer(
@@ -1124,11 +1130,18 @@ public sealed partial class NamedPipeAgentConnectionTests
             Environment.ProcessId,
             coordinator);
         var secondServerTask = secondServer.RunAsync(secondServerCancellation.Token);
+        // Server exit does not mean the client has consumed the old pipe EOF.
+        // Wait for its actual recovery handshake + snapshot before sending one
+        // new request. The cancelled request remains Unknown and is not replayed.
+        await WaitForTransportStateAsync(AgentEventTransportState.Reconnected);
         var recovered = await connection.SendAsync(
             new GetAgentSnapshotRequest(CorrelationId.New()),
-            CancellationToken.None);
+            recoveryTimeout.Token);
 
-        Assert.True(recovered.IsSuccess);
+        Assert.True(recovered.IsSuccess,
+            $"Recovered status={recovered.Status}; codes={string.Join(',', recovered.Messages.Select(message => message.Code))}; "
+            + $"activeHandshake={connection.ActiveHandshake?.AgentInstanceId}/{connection.ActiveHandshake?.ProcessId}; "
+            + $"firstServer={firstServerTask.Status}; secondServer={secondServerTask.Status}");
         secondServerCancellation.Cancel();
         try
         {
@@ -1138,6 +1151,13 @@ public sealed partial class NamedPipeAgentConnectionTests
         {
         }
         Directory.Delete(directory, recursive: true);
+
+        async Task WaitForTransportStateAsync(AgentEventTransportState expected)
+        {
+            while (await events.MoveNextAsync())
+                if (events.Current is AgentEventTransportStateEvent state && state.State == expected) return;
+            Assert.Fail($"The Agent event stream ended before {expected}.");
+        }
     }
 
     [Fact]
