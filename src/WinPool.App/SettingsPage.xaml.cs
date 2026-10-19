@@ -145,7 +145,6 @@ public sealed partial class SettingsPage : Page
                 or InvalidOperationException
                 or OperationCanceledException)
         {
-            await RestartAgentAfterAbortedSwitchAsync();
             PublishDataLocationFailure(
                 ViewModel.Localization.EffectiveLanguage == LanguagePreference.ZhCn,
                 exception.GetType().Name);
@@ -181,7 +180,7 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        if (ViewModel.AgentConnection is null)
+        if (ViewModel.AgentConnection is not NamedPipeAgentConnection connection)
         {
             PublishDataLocationFailure(zh, "agent-unavailable");
             return;
@@ -189,99 +188,112 @@ public sealed partial class SettingsPage : Page
 
         using var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         if (!await ((MainWindow)App.Window).PrepareWorkspaceForAgentShutdownAsync(shutdownTimeout.Token)) return;
-        var shutdown = await ViewModel.AgentConnection.SendAsync(
-            new RequestAgentShutdownRequest(
-                ShutdownReason.StorageLocationSwitch,
-                CorrelationId.New()),
-            shutdownTimeout.Token);
-        if (!AgentShutdownReceiptPolicy.AllowsDataLocationSwitch(shutdown))
+        IDisposable? reconnectPause = null;
+        DataLocationSwitchRuntime.AgentMigrationExclusion? agentExclusion = null;
+        var pointerCommitted = false;
+        try
         {
-            PublishDataLocationFailure(zh, "agent-shutdown-incomplete");
-            return;
-        }
+            reconnectPause = await connection.PauseReconnectAsync(shutdownTimeout.Token);
+            var handshake = connection.ActiveHandshake
+                ?? throw new IOException("The connected Agent process witness is unavailable.");
+            using var oldAgent = DataLocationSwitchRuntime.CaptureAgentProcess(handshake);
+            var shutdown = await connection.SendAsync(
+                new RequestAgentShutdownRequest(
+                    ShutdownReason.StorageLocationSwitch,
+                    CorrelationId.New()),
+                shutdownTimeout.Token);
+            if (!AgentShutdownReceiptPolicy.AllowsDataLocationSwitch(shutdown))
+            {
+                PublishDataLocationFailure(zh, "agent-shutdown-incomplete");
+                return;
+            }
 
-        if (!await DataLocationSwitchRuntime.WaitForAgentExitAsync(shutdownTimeout.Token))
-        {
-            PublishDataLocationFailure(zh, "agent-exit-timeout");
-            return;
-        }
+            if (!await DataLocationSwitchRuntime.WaitForAgentExitAsync(oldAgent, shutdownTimeout.Token))
+            {
+                PublishDataLocationFailure(zh, "agent-exit-timeout");
+                return;
+            }
 
-        using var agentExclusion = DataLocationSwitchRuntime.TryAcquireAgentMigrationExclusion();
-        if (agentExclusion is null)
-        {
-            PublishDataLocationFailure(zh, "agent-restarted-during-handoff");
-            return;
-        }
+            agentExclusion = await DataLocationSwitchRuntime.AcquireAgentMigrationExclusionAsync(shutdownTimeout.Token);
+            if (agentExclusion is null)
+            {
+                PublishDataLocationFailure(zh, "agent-exclusion-timeout");
+                return;
+            }
 
-        using var migrationTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
-        var manager = DataLocationSwitchRuntime.CreateManager(() => !ViewModel.HasUnsavedSimulationChanges);
-        var planResult = await manager.PlanSwitchAsync(
-            requestedMode,
-            CorrelationId.New(),
-            migrationTimeout.Token);
-        if (!planResult.IsSuccess || planResult.Value is null)
-        {
+            using var migrationTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
+            var manager = DataLocationSwitchRuntime.CreateManager(() => !ViewModel.HasUnsavedSimulationChanges);
+            var planResult = await manager.PlanSwitchAsync(
+                requestedMode,
+                CorrelationId.New(),
+                migrationTimeout.Token);
+            if (!planResult.IsSuccess || planResult.Value is null)
+            {
+                PublishDataLocationFailure(zh, "migration-plan-failed", planResult.Messages);
+                return;
+            }
+
+            var plan = planResult.Value;
+            var confirmation = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                RequestedTheme = RequestedTheme,
+                Title = zh ? "确认迁移数据" : "Confirm data migration",
+                Content = zh
+                    ? $"将复制 {plan.FileCount:N0} 个文件（{FormatBytes(plan.TotalBytes)}）。\n\n源：{plan.SourceRoot}\n目标：{plan.TargetRoot}\n清单 SHA-256：{plan.SourceManifestSha256}"
+                    : $"Copy {plan.FileCount:N0} files ({FormatBytes(plan.TotalBytes)}).\n\nSource: {plan.SourceRoot}\nTarget: {plan.TargetRoot}\nManifest SHA-256: {plan.SourceManifestSha256}",
+                PrimaryButtonText = zh ? "迁移并重启" : "Migrate and restart",
+                CloseButtonText = zh ? "取消" : "Cancel",
+                DefaultButton = ContentDialogButton.Close
+            };
+            if (await DialogCoordinator.ShowAsync(confirmation) != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            var applied = await manager.ApplySwitchAsync(
+                plan,
+                CorrelationId.New(),
+                migrationTimeout.Token);
+            if (applied.Value is null
+                || applied.Status is not (ApplicationStatus.Succeeded or ApplicationStatus.PartiallyCompleted))
+            {
+                PublishDataLocationFailure(zh, "migration-apply-failed", applied.Messages);
+                return;
+            }
+
+            pointerCommitted = true;
             agentExclusion.Release();
-            await RestartAgentAfterAbortedSwitchAsync();
-            PublishDataLocationFailure(zh, "migration-plan-failed", planResult.Messages);
-            return;
-        }
-
-        var plan = planResult.Value;
-        var confirmation = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            RequestedTheme = RequestedTheme,
-            Title = zh ? "确认迁移数据" : "Confirm data migration",
-            Content = zh
-                ? $"将复制 {plan.FileCount:N0} 个文件（{FormatBytes(plan.TotalBytes)}）。\n\n源：{plan.SourceRoot}\n目标：{plan.TargetRoot}\n清单 SHA-256：{plan.SourceManifestSha256}"
-                : $"Copy {plan.FileCount:N0} files ({FormatBytes(plan.TotalBytes)}).\n\nSource: {plan.SourceRoot}\nTarget: {plan.TargetRoot}\nManifest SHA-256: {plan.SourceManifestSha256}",
-            PrimaryButtonText = zh ? "迁移并重启" : "Migrate and restart",
-            CloseButtonText = zh ? "取消" : "Cancel",
-            DefaultButton = ContentDialogButton.Close
-        };
-        if (await DialogCoordinator.ShowAsync(confirmation) != ContentDialogResult.Primary)
-        {
-            agentExclusion.Release();
-            await RestartAgentAfterAbortedSwitchAsync();
-            return;
-        }
-
-        var applied = await manager.ApplySwitchAsync(
-            plan,
-            CorrelationId.New(),
-            migrationTimeout.Token);
-        if (!applied.IsSuccess || applied.Value is null)
-        {
-            agentExclusion.Release();
-            await RestartAgentAfterAbortedSwitchAsync();
-            PublishDataLocationFailure(zh, "migration-apply-failed", applied.Messages);
-            return;
-        }
-
-        agentExclusion.Release();
-        if (!DataLocationSwitchRuntime.StartReplacementApplication())
-        {
-            await RestartAgentAfterAbortedSwitchAsync();
-            ViewModel.NotificationService.Publish(
-                GlobalNotificationSeverity.Error,
-                zh ? "重启 WinPool 失败" : "WinPool restart failed",
-                zh
-                    ? "数据位置已经安全提交，Agent 已按新位置恢复。请手动重启 WinPool，使主界面读取新位置。"
-                    : "The data location was committed safely and the Agent resumed on it. Restart WinPool manually so the UI reads the new location.",
-                "settings",
-                new GlobalNotificationOptions
+            agentExclusion = null;
+            if (!DataLocationSwitchRuntime.StartReplacementApplication())
+            {
+                await DialogCoordinator.ShowAsync(new ContentDialog
                 {
-                    OccurrenceKey = "settings.datalocation.restart",
-                    Code = "settings.datalocation.restart",
-                    SystemId = SettingsSystemId,
-                    Target = SettingsTarget(zh),
-                    Detail = "replacement-application-start-failed"
+                    XamlRoot = XamlRoot,
+                    RequestedTheme = RequestedTheme,
+                    Title = zh ? "重启 WinPool 失败" : "WinPool restart failed",
+                    Content = zh
+                        ? "数据位置已经安全提交，但新界面未能启动。Agent 保持停止。关闭此窗口后，请重新打开 WinPool，使界面和 Agent 使用新位置。"
+                        : "The data location was committed safely, but the replacement window could not start. The Agent remains stopped. Close this window and reopen WinPool so the App and Agent use the new location.",
+                    CloseButtonText = zh ? "关闭 WinPool" : "Close WinPool"
                 });
-            return;
+            }
         }
-
-        ((MainWindow)App.Window).RequestClose(agentAlreadyStopped: true, lastActivePageAlreadySaved: true);
+        finally
+        {
+            agentExclusion?.Dispose();
+            if (pointerCommitted)
+            {
+                // The old repositories and endpoint still name the old root.
+                // Keep reconnect paused until RequestClose disposes them.
+                ((MainWindow)App.Window).RequestClose(agentAlreadyStopped: true, lastActivePageAlreadySaved: true);
+            }
+            else
+            {
+                reconnectPause?.Dispose();
+                if (reconnectPause is not null) await RestartAgentAfterAbortedSwitchAsync();
+            }
+        }
     }
 
     private async Task RestartAgentAfterAbortedSwitchAsync()

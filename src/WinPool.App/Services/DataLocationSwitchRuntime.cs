@@ -19,22 +19,45 @@ internal static class DataLocationSwitchRuntime
             StorageDataLocations.PortableRoot,
             new StoppedAgentWriteCoordinator(simulationSavesFlushed));
 
+    public static Process CaptureAgentProcess(AgentHandshake handshake)
+    {
+        Process? process = null;
+        try
+        {
+            process = Process.GetProcessById(handshake.ProcessId);
+            // Keep the exact OS process handle through shutdown, so PID reuse
+            // cannot turn endpoint removal into evidence that its owner exited.
+            _ = process.SafeHandle;
+            if (process.HasExited
+                || !string.Equals(process.ProcessName, "WinPool.Agent", StringComparison.OrdinalIgnoreCase)
+                || Math.Abs((process.StartTime.ToUniversalTime() - handshake.StartedAtUtc.UtcDateTime).TotalSeconds) > 5)
+                throw new InvalidDataException("The connected Agent process witness is unavailable or changed.");
+            return process;
+        }
+        catch (Exception exception) when (exception is ArgumentException
+            or InvalidOperationException or System.ComponentModel.Win32Exception
+            or UnauthorizedAccessException or IOException or NotSupportedException)
+        {
+            process?.Dispose();
+            throw new IOException("The connected Agent process witness is unavailable or changed.", exception);
+        }
+    }
+
     public static async Task<bool> WaitForAgentExitAsync(
+        Process agentProcess,
         CancellationToken cancellationToken)
     {
-        while (File.Exists(DataRootLayout.AgentEndpointPath(StorageDataLocations.CurrentRoot)))
+        try
         {
-            try
-            {
+            await agentProcess.WaitForExitAsync(cancellationToken);
+            while (File.Exists(DataRootLayout.AgentEndpointPath(StorageDataLocations.CurrentRoot)))
                 await Task.Delay(100, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                return false;
-            }
+            return true;
         }
-
-        return true;
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     public static bool StartReplacementApplication()
@@ -45,8 +68,16 @@ internal static class DataLocationSwitchRuntime
             return false;
         }
 
-        using var process = Process.Start(CreateReplacementStartInfo(executable, Environment.ProcessId));
-        return process is not null;
+        try
+        {
+            using var process = Process.Start(CreateReplacementStartInfo(executable, Environment.ProcessId));
+            return process is not null;
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
+            or IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     internal static ProcessStartInfo CreateReplacementStartInfo(string executable, int previousProcessId)
@@ -66,25 +97,38 @@ internal static class DataLocationSwitchRuntime
         return startInfo;
     }
 
-    public static AgentMigrationExclusion? TryAcquireAgentMigrationExclusion()
+    public static Task<AgentMigrationExclusion?> AcquireAgentMigrationExclusionAsync(
+        CancellationToken cancellationToken)
     {
         var sid = WindowsIdentity.GetCurrent().User?.Value;
         if (string.IsNullOrWhiteSpace(sid))
+            throw new InvalidOperationException("The current Windows SID is unavailable.");
+        return AcquireAgentMigrationExclusionAsync(
+            $"Local\\WinPool.Agent.{IpcIdentity.HashUserSid(sid)[..24]}", cancellationToken);
+    }
+
+    internal static async Task<AgentMigrationExclusion?> AcquireAgentMigrationExclusionAsync(
+        string mutexName,
+        CancellationToken cancellationToken)
+    {
+        var mutex = new Mutex(initiallyOwned: false, mutexName);
+        var ownsMutex = false;
+        try
+        {
+            while (!ownsMutex)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try { ownsMutex = mutex.WaitOne(0); }
+                catch (AbandonedMutexException) { ownsMutex = true; }
+                if (!ownsMutex) await Task.Delay(100, cancellationToken);
+            }
+            return new AgentMigrationExclusion(mutex);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             return null;
         }
-
-        var mutex = new Mutex(
-            initiallyOwned: true,
-            $"Local\\WinPool.Agent.{IpcIdentity.HashUserSid(sid)[..24]}",
-            out var ownsMutex);
-        if (!ownsMutex)
-        {
-            mutex.Dispose();
-            return null;
-        }
-
-        return new AgentMigrationExclusion(mutex);
+        finally { if (!ownsMutex) mutex.Dispose(); }
     }
 
     private sealed class StoppedAgentWriteCoordinator(Func<bool> simulationSavesFlushed) : IStorageWriteQuiescenceCoordinator

@@ -130,6 +130,7 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     private CancellationTokenSource? eventCancellation;
     private Task? eventReaderTask;
     private AgentHandshake? handshake;
+    private TaskCompletionSource? reconnectPaused;
     private int disposeStarted;
     private int activeOperations;
 
@@ -184,7 +185,19 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
     {
         using var operation = EnterOperation(cancellationToken);
         var correlation = CorrelationId.New();
-        await connectionGate.WaitAsync(operation.Token);
+        while (true)
+        {
+            await connectionGate.WaitAsync(operation.Token);
+            Task? resumed;
+            lock (lifetimeSync)
+            {
+                resumed = stream?.IsConnected == true && handshake is not null
+                    ? null : reconnectPaused?.Task;
+            }
+            if (resumed is null) break;
+            connectionGate.Release();
+            await resumed.WaitAsync(operation.Token);
+        }
         try
         {
             ThrowIfDisposed();
@@ -329,6 +342,35 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
         {
             connectionGate.Release();
         }
+    }
+
+    /// <summary>
+    /// Keeps the existing transport available for ordered shutdown/save/ack,
+    /// while preventing a missing Agent from being launched during a handoff.
+    /// A successful handoff leaves this pause owned by the old connection until
+    /// disposal; an aborted handoff disposes the lease before explicit reconnect.
+    /// </summary>
+    public async Task<IDisposable> PauseReconnectAsync(CancellationToken cancellationToken)
+    {
+        using var operation = EnterOperation(cancellationToken);
+        await connectionGate.WaitAsync(operation.Token);
+        try
+        {
+            ThrowIfDisposed();
+            lock (lifetimeSync)
+            {
+                if (reconnectPaused is not null)
+                    throw new InvalidOperationException("An Agent handoff already owns the connection.");
+                reconnectPaused = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                return new ReconnectPause(this, reconnectPaused);
+            }
+        }
+        finally { connectionGate.Release(); }
+    }
+
+    private bool IsReconnectPaused
+    {
+        get { lock (lifetimeSync) return reconnectPaused is not null; }
     }
 
     /// <summary>
@@ -716,7 +758,8 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
         if (!disconnectedUnexpectedly
             || cancellationToken.IsCancellationRequested
-            || IsDisposing)
+            || IsDisposing
+            || IsReconnectPaused)
         {
             return;
         }
@@ -735,6 +778,11 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
             {
                 return;
             }
+
+            // Intentional shutdown is owned by the handoff caller. Do not
+            // publish a gap/reseed or let observers restart its old Agent.
+            // An aborted handoff explicitly reconnects after releasing its lock.
+            if (IsReconnectPaused) return;
 
             PublishTransportState(
                 AgentEventTransportState.Disconnected,
@@ -1127,6 +1175,21 @@ public sealed class NamedPipeAgentConnection : IAgentConnection, IAsyncDisposabl
 
             linkedCancellation.Dispose();
             owner.ExitOperation();
+        }
+    }
+
+    private sealed class ReconnectPause(
+        NamedPipeAgentConnection owner,
+        TaskCompletionSource resumed) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (owner.lifetimeSync)
+            {
+                if (!ReferenceEquals(owner.reconnectPaused, resumed)) return;
+                owner.reconnectPaused = null;
+            }
+            resumed.TrySetResult();
         }
     }
 
