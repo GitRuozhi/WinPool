@@ -175,17 +175,25 @@ function ConvertFrom-U16 {
 }
 
 function Get-SourceSet {
-    param([string]$ClassName, [scriptblock]$Query, [string]$Namespace = 'root/Microsoft/Windows/Storage')
+    param([string]$ClassName, [scriptblock]$Query, [string]$Namespace = 'root/Microsoft/Windows/Storage', [string]$TimingName = '')
     if ($null -ne $WinPoolScopeLocators -and $null -ne $WinPoolEvidenceFields -and
         $ClassName.StartsWith('MSFT_') -and -not $WinPoolScopeQueried.ContainsKey($ClassName)) { return @() }
+    $queryClock = [Diagnostics.Stopwatch]::StartNew()
     try {
         $result = @(& $Query)
+        $queryClock.Stop()
         [void]$sourceQuerySuccesses.Add([ordered]@{ ClassName=$ClassName; Namespace=$Namespace })
         foreach ($observed in $result) { Add-SourceObservation $observed }
         return $result
     } catch {
         [void]$sourceQueryFailures.Add([ordered]@{ ClassName=$ClassName; Namespace=$Namespace; ReasonCode=[string]$_.FullyQualifiedErrorId })
         return @()
+    } finally {
+        $queryClock.Stop()
+        if ($TimingName -ne '') {
+            $key = 'query:' + $TimingName
+            $collectionTimings[$key] = [double]$collectionTimings[$key] + $queryClock.Elapsed.TotalMilliseconds
+        }
     }
 }
 
@@ -454,7 +462,7 @@ $computerSystem = if ($null -ne $WinPoolEvidenceFields) {
 } else { Get-CimInstance -ClassName Win32_ComputerSystem }
 Write-WinPoolInventoryStage 'class.returned' 'Win32_ComputerSystem'
 $subsystemObjects = @(if ($WinPoolDiscoverProviderCache -or $null -eq $WinPoolScopeLocators) {
-    Get-SourceSet 'MSFT_StorageSubSystem' { Get-StorageSubSystem -ErrorAction Stop }
+    Get-SourceSet 'MSFT_StorageSubSystem' { Get-StorageSubSystem -ErrorAction Stop } -TimingName 'class:MSFT_StorageSubSystem'
 })
 
 """;
@@ -487,14 +495,14 @@ if ($WinPoolDiscoverProviderCache) {
 Initialize-WinPoolScope
 Write-WinPoolInventoryStage 'storage-projection.begin'
 if ($null -ne $WinPoolScopeLocators) {
-    $subsystemObjects = @(Get-SourceSet 'MSFT_StorageSubSystem' { Get-WinPoolScopeClass 'MSFT_StorageSubSystem' })
+    $subsystemObjects = @(Get-SourceSet 'MSFT_StorageSubSystem' { Get-WinPoolScopeClass 'MSFT_StorageSubSystem' } -TimingName 'class:MSFT_StorageSubSystem')
 }
-$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-WinPoolStorageClass 'MSFT_PhysicalDisk' })
-$poolObjects = @(Get-SourceSet 'MSFT_StoragePool' { Get-WinPoolStorageClass 'MSFT_StoragePool' })
+$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-WinPoolStorageClass 'MSFT_PhysicalDisk' } -TimingName 'class:MSFT_PhysicalDisk')
+$poolObjects = @(Get-SourceSet 'MSFT_StoragePool' { Get-WinPoolStorageClass 'MSFT_StoragePool' } -TimingName 'class:MSFT_StoragePool')
 $nonPrimordialPoolObjects = @($poolObjects | Where-Object { -not $_.IsPrimordial })
-$diskObjects = @(Get-SourceSet 'MSFT_Disk' { Get-WinPoolStorageClass 'MSFT_Disk' })
-$partitionObjects = @(Get-SourceSet 'MSFT_Partition' { Get-WinPoolStorageClass 'MSFT_Partition' })
-$volumeObjects = @(Get-SourceSet 'MSFT_Volume' { Get-WinPoolStorageClass 'MSFT_Volume' })
+$diskObjects = @(Get-SourceSet 'MSFT_Disk' { Get-WinPoolStorageClass 'MSFT_Disk' } -TimingName 'class:MSFT_Disk')
+$partitionObjects = @(Get-SourceSet 'MSFT_Partition' { Get-WinPoolStorageClass 'MSFT_Partition' } -TimingName 'class:MSFT_Partition')
+$volumeObjects = @(Get-SourceSet 'MSFT_Volume' { Get-WinPoolStorageClass 'MSFT_Volume' } -TimingName 'class:MSFT_Volume')
 $logicalDiskObjects = @(if ($null -eq $WinPoolScopeLocators -or $null -eq $WinPoolEvidenceFields) {
     Get-SourceSet 'Win32_LogicalDisk' { Get-CimInstance -ClassName Win32_LogicalDisk -ErrorAction Stop } 'root/cimv2'
 })
@@ -503,8 +511,8 @@ foreach ($className in @('Win32_OperatingSystem','Win32_ComputerSystem')) {
     [void]$sourceQuerySuccesses.Add([ordered]@{ ClassName=$className; Namespace='root/cimv2' })
 }
 # Standalone collections retain tiers or virtual disks even if their associations cannot be read.
-$allVirtualDiskObjects = @(Get-SourceSet 'MSFT_VirtualDisk' { Get-WinPoolStorageClass 'MSFT_VirtualDisk' })
-$allTierObjects = @(Get-SourceSet 'MSFT_StorageTier' { Get-WinPoolStorageClass 'MSFT_StorageTier' })
+$allVirtualDiskObjects = @(Get-SourceSet 'MSFT_VirtualDisk' { Get-WinPoolStorageClass 'MSFT_VirtualDisk' } -TimingName 'class:MSFT_VirtualDisk')
+$allTierObjects = @(Get-SourceSet 'MSFT_StorageTier' { Get-WinPoolStorageClass 'MSFT_StorageTier' } -TimingName 'class:MSFT_StorageTier')
 
 
 foreach ($observed in @($operatingSystem,$computerSystem) + $subsystemObjects + $physicalObjects + $poolObjects + $diskObjects + $partitionObjects + $volumeObjects + $networkDiskObjects) {
@@ -527,7 +535,7 @@ $poolMembersByKey = @{}
 $poolCimMembersByKey = @{}
 foreach ($pool in @($nonPrimordialPoolObjects) + @($poolObjects | Where-Object { $_.IsPrimordial })) {
     $poolKey = Get-AssociationKey $pool ([string]$pool.FriendlyName)
-    $members = @(Get-SourceSet 'MSFT_PhysicalDisk' { if ($null -ne $WinPoolScopeLocators -and $pool.IsPrimordial) { Get-WinPoolScopePrimordialMembers $pool } else { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_PhysicalDisk' } else { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop } } })
+    $members = @(Get-SourceSet 'MSFT_PhysicalDisk' { if ($null -ne $WinPoolScopeLocators -and $pool.IsPrimordial) { Get-WinPoolScopePrimordialMembers $pool } else { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_PhysicalDisk' } else { Get-PhysicalDisk -StoragePool $pool -ErrorAction Stop } } } -TimingName 'association:pool-physical')
     $poolCimMembersByKey[$poolKey] = @($members)
     $memberKeys = foreach ($member in $members) {
         $memberKey = Get-AssociationKey $member "$($member.DeviceId)|$($member.FriendlyName)|$($member.Size)"
@@ -611,6 +619,7 @@ function Test-SupportedSingleHddTierLayout($tier, $virtual) {
 }
 
 function Get-ExactSingleHddTierMemberKey($tier, $virtual, $pool, $virtualTiers) {
+    $proofClock = [Diagnostics.Stopwatch]::StartNew()
     try {
         $tierUniqueId = [string]$tier.UniqueId
         $tierObjectId = [string]$tier.ObjectId
@@ -628,7 +637,15 @@ function Get-ExactSingleHddTierMemberKey($tier, $virtual, $pool, $virtualTiers) 
             -not [string]::Equals([string]$actualTiers[0].UniqueId, $tierUniqueId, [StringComparison]::Ordinal) -or
             -not [string]::Equals([string]$actualTiers[0].ObjectId, $tierObjectId, [StringComparison]::Ordinal)) { return $null }
 
-        $parents = @(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_StoragePool' } else { Get-StoragePool -VirtualDisk $virtual -ErrorAction Stop })
+        $parentClock = [Diagnostics.Stopwatch]::StartNew()
+        try {
+            $parents = @(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_StoragePool' } else { Get-StoragePool -VirtualDisk $virtual -ErrorAction Stop })
+        } finally {
+            if ($null -ne $collectionTimings) {
+                $key = 'query:association:virtual-pool'
+                $collectionTimings[$key] = [double]$collectionTimings[$key] + $parentClock.Elapsed.TotalMilliseconds
+            }
+        }
         if ($parents.Count -ne 1 -or $parents[0].IsPrimordial -isnot [bool] -or $parents[0].IsPrimordial -or
             -not [string]::Equals([string]$parents[0].UniqueId, $poolUniqueId, [StringComparison]::Ordinal) -or
             -not [string]::Equals([string]$parents[0].ObjectId, $poolObjectId, [StringComparison]::Ordinal)) { return $null }
@@ -644,7 +661,15 @@ function Get-ExactSingleHddTierMemberKey($tier, $virtual, $pool, $virtualTiers) 
             -not [string]::Equals([string]$member.MediaType, 'HDD', [StringComparison]::OrdinalIgnoreCase)) { return $null }
 
         Write-WinPoolInventoryStage 'allocated-members.begin' 'MSFT_VirtualDisk' 'MSFT_PhysicalDisk'
-        $allocatedMembers = @(Get-PhysicalDisk -VirtualDisk $virtual -HasAllocations $true -ErrorAction Stop)
+        $allocationClock = [Diagnostics.Stopwatch]::StartNew()
+        try {
+            $allocatedMembers = @(Get-PhysicalDisk -VirtualDisk $virtual -HasAllocations $true -ErrorAction Stop)
+        } finally {
+            if ($null -ne $collectionTimings) {
+                $key = 'query:association:virtual-allocated-physical'
+                $collectionTimings[$key] = [double]$collectionTimings[$key] + $allocationClock.Elapsed.TotalMilliseconds
+            }
+        }
         Write-WinPoolInventoryStage 'allocated-members.returned' 'MSFT_VirtualDisk' 'MSFT_PhysicalDisk'
         if ($allocatedMembers.Count -ne 1 -or
             -not [string]::Equals([string]$allocatedMembers[0].UniqueId, $memberUniqueId, [StringComparison]::Ordinal) -or
@@ -662,6 +687,10 @@ function Get-ExactSingleHddTierMemberKey($tier, $virtual, $pool, $virtualTiers) 
 
         $key = [string](Get-AssociationKey $physicalMatches[0] '')
         if ([string]::IsNullOrWhiteSpace($key) -or $key.StartsWith('fallback:', [StringComparison]::Ordinal)) { return $null }
+        if ($null -ne $collectionTimings) {
+            $timingKey = 'proof:single-hdd-tier:accepted'
+            $collectionTimings[$timingKey] = [double]$collectionTimings[$timingKey] + $proofClock.Elapsed.TotalMilliseconds
+        }
         return $key
     } catch {
         return $null
@@ -674,7 +703,15 @@ function Get-ExactTierMemberKeysByExtent($tier, $virtual) {
         [string]::IsNullOrWhiteSpace([string]$_.UniqueId) -or [string]::IsNullOrWhiteSpace([string]$_.ObjectId)
     }).Count -gt 0) { throw 'tier-extent-physical-facts-unavailable' }
     Write-WinPoolInventoryStage 'tier-extents.begin' 'MSFT_StorageTier' 'GetPhysicalExtent'
-    $result = Invoke-CimMethod -InputObject $tier -MethodName GetPhysicalExtent -ErrorAction Stop
+    $extentClock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $result = Invoke-CimMethod -InputObject $tier -MethodName GetPhysicalExtent -ErrorAction Stop
+    } finally {
+        if ($null -ne $collectionTimings) {
+            $key = 'query:association:tier-physical-extents'
+            $collectionTimings[$key] = [double]$collectionTimings[$key] + $extentClock.Elapsed.TotalMilliseconds
+        }
+    }
     Write-WinPoolInventoryStage 'tier-extents.returned' 'MSFT_StorageTier' 'GetPhysicalExtent'
     if ($null -eq $result.ReturnValue -or [uint32]$result.ReturnValue -ne 0) { throw 'tier-extent-method-failed' }
     $keys = @()
@@ -715,11 +752,11 @@ $storageTiers = @()
 $tierKeysSeen = @{}
 foreach ($pool in $nonPrimordialPoolObjects) {
     $poolKey = Get-AssociationKey $pool ([string]$pool.FriendlyName)
-    foreach ($virtual in @(Get-SourceSet 'MSFT_VirtualDisk' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_VirtualDisk' } else { Get-VirtualDisk -StoragePool $pool -ErrorAction Stop } })) {
+    foreach ($virtual in @(Get-SourceSet 'MSFT_VirtualDisk' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_VirtualDisk' } else { Get-VirtualDisk -StoragePool $pool -ErrorAction Stop } } -TimingName 'association:pool-virtual')) {
         Add-SourceObservation $virtual
         $virtualKey = Get-AssociationKey $virtual "$($virtual.FriendlyName)|$($virtual.Size)"
         $osDiskNumbers = @()
-        foreach ($mappedDisk in @(Get-SourceSet 'MSFT_Disk' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_Disk' } else { Get-Disk -VirtualDisk $virtual -ErrorAction Stop } })) {
+        foreach ($mappedDisk in @(Get-SourceSet 'MSFT_Disk' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_Disk' } else { Get-Disk -VirtualDisk $virtual -ErrorAction Stop } } -TimingName 'association:virtual-osdisk')) {
             $exactDisks = @($diskObjects | Where-Object {
                 [int]$_.Number -eq [int]$mappedDisk.Number -and
                 [string]::Equals([string]$_.UniqueId, [string]$mappedDisk.UniqueId, [StringComparison]::Ordinal) -and
@@ -741,7 +778,7 @@ foreach ($pool in $nonPrimordialPoolObjects) {
 
         $tierKeys = @()
         try {
-            $virtualTiers = @(Get-SourceSet 'MSFT_StorageTier' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_StorageTier' } else { Get-StorageTier -VirtualDisk $virtual -ErrorAction Stop } })
+            $virtualTiers = @(Get-SourceSet 'MSFT_StorageTier' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $virtual 'MSFT_StorageTier' } else { Get-StorageTier -VirtualDisk $virtual -ErrorAction Stop } } -TimingName 'association:virtual-tier')
             foreach ($tier in $virtualTiers) {
                 Add-SourceObservation $tier
                 $tierKey = Get-AssociationKey $tier "$($tier.FriendlyName)|$($tier.MediaType)|$($tier.Size)"
@@ -861,17 +898,30 @@ foreach ($disk in $diskObjects) {
 # association and eligible pool members separately from instance allocations.
 foreach ($pool in $nonPrimordialPoolObjects) {
     $poolKey = Get-AssociationKey $pool ''
-    foreach ($tier in @(Get-SourceSet 'MSFT_StorageTier' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_StorageTier' } else { Get-StorageTier -StoragePool $pool -ErrorAction Stop } })) {
+    foreach ($tier in @(Get-SourceSet 'MSFT_StorageTier' { if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $pool 'MSFT_StorageTier' } else { Get-StorageTier -StoragePool $pool -ErrorAction Stop } } -TimingName 'association:pool-tier')) {
         $tierKey = Get-AssociationKey $tier ''
         if ($tierKeysSeen.ContainsKey($tierKey)) { continue }
         try {
-            $parents = @($(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $tier 'MSFT_StoragePool' } else { Get-StoragePool -StorageTier $tier -ErrorAction Stop }) | Where-Object { -not $_.IsPrimordial })
+            $parentClock = [Diagnostics.Stopwatch]::StartNew()
+            try {
+                $parents = @($(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $tier 'MSFT_StoragePool' } else { Get-StoragePool -StorageTier $tier -ErrorAction Stop }) | Where-Object { -not $_.IsPrimordial })
+            } finally {
+                $key = 'query:association:template-pool'
+                $collectionTimings[$key] = [double]$collectionTimings[$key] + $parentClock.Elapsed.TotalMilliseconds
+            }
             if ($parents.Count -ne 1 -or
                 -not [string]::Equals([string]$parents[0].UniqueId, [string]$pool.UniqueId, [StringComparison]::Ordinal) -or
                 -not [string]::Equals([string]$parents[0].ObjectId, [string]$pool.ObjectId, [StringComparison]::Ordinal)) {
                 throw 'tier-template-pool-not-exact'
             }
-            if (@(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $tier 'MSFT_VirtualDisk' } else { Get-VirtualDisk -StorageTier $tier -ErrorAction Stop }).Count -ne 0) { throw 'tier-owner-association-incomplete' }
+            $ownerClock = [Diagnostics.Stopwatch]::StartNew()
+            try {
+                $owners = @(if ($null -ne $WinPoolScopeLocators) { Get-WinPoolScopeAssociated $tier 'MSFT_VirtualDisk' } else { Get-VirtualDisk -StorageTier $tier -ErrorAction Stop })
+            } finally {
+                $key = 'query:association:template-virtual'
+                $collectionTimings[$key] = [double]$collectionTimings[$key] + $ownerClock.Elapsed.TotalMilliseconds
+            }
+            if ($owners.Count -ne 0) { throw 'tier-owner-association-incomplete' }
             $members = @($poolCimMembersByKey[$poolKey])
             $memberKeys = @()
             foreach ($member in $members) {

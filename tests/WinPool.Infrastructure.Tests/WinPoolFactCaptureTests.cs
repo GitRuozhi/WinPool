@@ -97,6 +97,7 @@ public sealed class WinPoolFactCaptureTests
             $ErrorActionPreference='Stop'
             $ProgressPreference='SilentlyContinue'
             $WinPoolScopeLocators=$null
+            $collectionTimings=[ordered]@{}
             $sourceQueryFailures=[System.Collections.Generic.List[object]]::new()
             $sourceQuerySuccesses=[System.Collections.Generic.List[object]]::new()
             $pool=[pscustomobject]@{IsPrimordial=$false}
@@ -145,7 +146,6 @@ public sealed class WinPoolFactCaptureTests
     {
         var script = EmbeddedStorageInventoryScript.ForPurpose(purpose);
         Assert.Contains("$WinPoolDiscoverProviderCache = $false", script);
-        Assert.Contains("$physicalObjects = @(Get-SourceSet 'MSFT_PhysicalDisk' { Get-WinPoolStorageClass 'MSFT_PhysicalDisk' })", script);
         Assert.Equal(60, WindowsPowerShellRunner.TimeoutSeconds);
     }
 

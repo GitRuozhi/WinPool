@@ -46,13 +46,14 @@ V0.61的R1–R3修复及当次候选开发机验收继续作为历史有效证�
 
 #### 原始完整门之后的相关补验
 
-以下均为各自改动范围的证据，存在重叠，不累计成全套用例数；有记录的测试DLL／依赖hash见相邻`*.hashes.json`。`Infrastructure-repairs`与`Infrastructure-cmdlet-discovery-02`缺当次hash，最终构建须补验其14个保留方法（52个展开用例）及记录依赖；不得事后用当前hash冒充旧产物。原53项已对应50项同case后续通过、2项退役、1个旧Fact由2项行为Theory替换，候选适用映射仍须收口。
+以下均为各自改动范围的证据，存在重叠，不累计成全套用例数；有记录的测试DLL／依赖hash见相邻`*.hashes.json`。`Infrastructure-repairs`与`Infrastructure-cmdlet-discovery-02`缺当次hash，对应14个保留方法（52个展开用例）已与19项层关联用例定点补验并记录新依赖，见下表；不事后用当前hash冒充旧产物。原53项已对应50项同case后续通过、2项退役、1个旧Fact由2项行为Theory替换，候选适用映射仍须收口。
 
 | 修复范围 | 已有结果与证据 |
 | --- | --- |
 | 原53项失败、宿主回执比较 | [Infrastructure 624通过／0失败／1门控跳过](../artifacts/test-results/v062/final/Infrastructure-repairs.trx)；该跳过用例在原始完整门已通过。修复保留准确目标／参数校验，HostCall传输身份另行独立核验 |
 | IPC正文SHA | 保留原始JSON字节，未跳过或重算hash；[Agent 180](../artifacts/test-results/v062/final/WinPool.Agent.Tests-wire-repairs.trx)、[Agent.Client 26](../artifacts/test-results/v062/final/WinPool.Agent.Client.Tests-wire-repairs.trx)、[IPC 19](../artifacts/test-results/v062/final/WinPool.Ipc.Tests-wire-repairs.trx)均通过 |
 | 窄profile、冻结指纹及NoWindowsCall恢复 | `ce11d73`补足严格层关联所需输入，[36项](../artifacts/test-results/v062/final/Infrastructure-narrow-tier-proof-01.trx)通过；`f643772`保留冻结v1指纹合同后，[117项](../artifacts/test-results/v062/final/Infrastructure-frozen-profile-contract-01.trx)通过、无跳过。较早profile／provider／StorageJob回归保留在[final目录](../artifacts/test-results/v062/final/)，不以缩小身份／角色／成员证明换性能 |
+| 补齐旧结果身份与provider阶段计时 | 新增既有raw计时的稳定类别键，事实／调用数及fallback不变；Infrastructure定点构建0警告／错误。[71项](../artifacts/test-results/v062/final/Infrastructure-final-applicability-timing-01.trx)首轮69通过／2失败：抽取函数的fixture未初始化生产Prelude中的计时字典；补齐fixture后[仅补4项通过](../artifacts/test-results/v062/final/Infrastructure-final-applicability-timing-02.trx)，包含原2失败及2个默认采集配置用例，0跳过。保留默认discovery与超时检查，撤除与私有源码整行排版绑定的断言；两轮run／依赖hash均已保存 |
 | 目录／完整显示与草稿恢复 | [Agent原85通过／3失败](../artifacts/test-results/v062/final/Agent-recovery-display-01.trx)，修fixture后[仅补3项通过](../artifacts/test-results/v062/final/Agent-recovery-display-02.trx)；[事实合并13](../artifacts/test-results/v062/final/Application-recovery-display-01.trx)、[持久化19](../artifacts/test-results/v062/final/Persistence-recovery-display-01.trx)、[目录恢复62](../artifacts/test-results/v062/final/App-local-recovery-catalog.trx)、[草稿重入20](../artifacts/test-results/v062/final/App-navigation-cache-01.trx)通过。App单测不编译页面，不能代替GUI |
 | 模拟本地候选与保存 | [协调器31](../artifacts/test-results/v062/final/Infrastructure-local-editor.trx)、[名称复用与保存40](../artifacts/test-results/v062/final/Infrastructure-name-reuse.trx)通过；纯Rename复用仍受baseline／revision／事实血缘限制，64 MiB校验、typed intent及CAS保持 |
 | SQLite路径、迁移与7za | 原始[Persistence 197项](../artifacts/test-results/v062/final/WinPool.Persistence.Tests.trx)通过；URI路径／迁移[62项](../artifacts/test-results/v062/final/Persistence-uri-migration-repairs.trx)通过，含`#`／`%`路径、诱饵库与原件hash；7za 26.04归档[69项](../artifacts/test-results/v062/final/Persistence-7zip2604-repairs.trx)通过、无跳过，含三项实际测量 |
