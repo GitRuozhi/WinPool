@@ -1,6 +1,6 @@
 # WinPool 开发约定
 
-**当前源码版本为V0.62，实施与已授权本机验收已完成并[归档](Archive/20261019-v062-local-completed/README.md)。** [活动Plan](Plan.md)只列用户验证及发布待办，不自动重开已完成阶段。下文记录技术所有权，验证事实归[Quality](Quality.md)，版本源为`Directory.Build.props`；产品语义归[Product](Product.md)，早期细节保留在[原件](Archive/20261017-v061-document-baseline/Development-before.md)。
+**当前源码版本为V0.63，正在准备首个公开测试版。** V0.62实施与已授权本机验收已[归档](Archive/20261019-v062-local-completed/README.md)；本轮仅推进版本及发布，不修改产品行为。[活动Plan](Plan.md)保留发布操作及三类用户人工验证。下文记录技术所有权，验证事实归[Quality](Quality.md)，版本源为`Directory.Build.props`；产品语义归[Product](Product.md)，早期细节保留在[原件](Archive/20261017-v061-document-baseline/Development-before.md)。
 
 ## 模块与所有权
 
@@ -105,10 +105,10 @@ dotnet build WinPool.slnx -c Release --no-restore -m:1
 | 产品语义、能力和路线 | Product；对象与控件专项按链接查阅 |
 | 技术所有权、数据、构建 | Development |
 | 验证规则、命令及当前证据索引 | Quality |
-| 阶段顺序、固定决定、状态 | 唯一[Plan](Plan.md)，当前V0.62已批准实施；完成后移入Archive |
+| 阶段顺序、固定决定、状态 | 唯一[Plan](Plan.md)，当前V0.63公开测试发布已获批准，三类人工验证继续保留；全部结束后移入Archive |
 | 重要已完成变化 | CHANGELOG |
 | 授权、文件处置、Git | AGENTS |
 
 只更新变化事实的归属位置，不复制历史数值、逐日过程或完整对话。`docs/` 根仅放 Product、Development、Quality、CHANGELOG及有活动阶段时的Plan。按需资料分为 [Reference](Reference/README.md) 的专项说明／调查／源码入口、[Review](Review/README.md) 的审查来源、[Design](Design/README.md) 的未来方案和 [Archive](Archive/README.md) 的阶段历史；只有活动 Plan 采纳的部分进入实施范围。结束或被替代的文档按本项目规则原样归档，不伪称完成；普通小修不新增 Plan、报告或副本表。
 
-唯一版本源为`Directory.Build.props`，当前Major=0、Minor=6、Iteration=2，生成V0.62／Version 0.6.2／FileVersion 0.6.2.0；AssemblyVersion继续0.6.0.0。不为工作包单独升版，不创建迭代10；版本推进不等于验收或发布完成。
+唯一版本源为`Directory.Build.props`，当前Major=0、Minor=6、Iteration=3，生成V0.63／Version 0.6.3／FileVersion 0.6.3.0；AssemblyVersion继续0.6.0.0。不为工作包单独升版，不创建迭代10；版本推进不等于全部验收完成。

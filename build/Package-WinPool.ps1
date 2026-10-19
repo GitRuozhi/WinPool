@@ -125,7 +125,10 @@ $signatureSummary = @('App', 'Agent') | ForEach-Object {
     "WinPool.$_.exe=$($signature.Status)"
 }
 $notes = @"
-# WinPool $version 测试候选 / Test candidate
+# WinPool $version 公开测试版 / Public test release
+
+欢迎使用 WinPool！这是面向所有用户的公开测试版本，欢迎试用并分享问题和建议。请先阅读下方运行说明和已知限制。
+Welcome to WinPool! This public test release is open to everyone. Try it, tell us what works, and share problems or suggestions. Please read the running instructions and known limits below.
 
 - 版本 / Version: $version (Windows x64)
 - 源码基线 / Source commit: $baseline

@@ -2,7 +2,17 @@
 
 记录版本行为变化，未完成验收的版本明确标记；过程由Git保存，验收由[Quality](Quality.md)引用。完整旧记录已原样移至[2026-10-17前历史](Archive/20261017-v061-document-baseline/CHANGELOG-before.md)，不追溯改写。
 
-## V0.62：常驻宿主与减少重复工作（本机验收完成，未发布）
+## V0.63：首个公开测试版（准备发布）
+
+WinPool 即将迎来第一个公开测试版，欢迎大家下载使用，也欢迎反馈问题和建议。
+
+- 提供Windows x64便携ZIP及SHA-256校验文件，完整解压后运行；包含配套App、托盘Agent和所需运行库。
+- 汇集前期的存储拓扑、模拟编辑、设备监控与已支持的真实存储操作，以及V0.61／V0.62的实现简化和性能改进。本次只推进版本、更新发布说明并重新编译，不另改产品行为。
+- 开发机验证沿用仍适用的V0.62证据，本轮另做构建、包校验与实际启动抽查。用户已初测认为可靠，明确允许先公开测试；外部系统／设备、长期20 Hz监控、150%／200% DPI仍由用户继续验证，未全部完成。
+
+下载与反馈入口见[Release](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63)及[Issues](https://github.com/GitRuozhi/WinPool/issues)，实际构建、包和发布结果归[Quality](Quality.md)。
+
+## V0.62：常驻宿主与减少重复工作（本机验收完成，未单独公开发布）
 
 - 所有存储读写复用一个Windows PowerShell 5.1宿主；全局Job、精确请求完成／退出证明和Unknown恢复覆盖普通操作与MAX，不重放已发写。
 - 启动共享同批事实；普通后验按整计划字段并集读取，首次立即观察，保留准确absence与保护证据。MAX保留完整证明；终结时释放operation临时事实。完整采集复用同轮关联，撤未消费格式化及.NET System.Management旧链。

@@ -4,7 +4,9 @@
 
 WinPool is a Windows desktop application for viewing storage topology, editing simulated systems, monitoring devices, and performing supported local storage operations through a controlled workflow.
 
-**The source version is V0.62. Implementation and authorized local acceptance are complete and [archived](docs/Archive/20261019-v062-local-completed/README.md); no public release has been made.** The [remaining plan](docs/Plan.md) covers user-provided verification and release. See [Quality](docs/Quality.md) for results and candidate identity; [Directory.Build.props](Directory.Build.props) is the version source.
+**WinPool V0.63 is being prepared as its first public test release.** Everyone is welcome to try it and share feedback. Follow the [V0.63 release page](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63) for the package, and [report a problem or suggestion](https://github.com/GitRuozhi/WinPool/issues).
+
+Implementation and authorized local acceptance for V0.62 are complete and [archived](docs/Archive/20261019-v062-local-completed/README.md). Initial manual testing has been reassuring, but testing on other systems and hardware, continuous 20 Hz monitoring, and 150%/200% display scaling are still in progress. These checks remain on the [plan](docs/Plan.md); the developer has chosen to proceed with public testing while they continue. See [Quality](docs/Quality.md) for the actual coverage and package identity; [Directory.Build.props](Directory.Build.props) is the version source.
 
 ## Using WinPool
 
@@ -25,7 +27,7 @@ Use the complete x64 portable runtime directory with matching App and Agent file
 
 The runtime uses the system Windows PowerShell 5.1; PowerShell 7 and development SDKs are unnecessary for running the portable package. Project compatibility testing is separate from upstream .NET support; Windows 10 Pro 22H2 is not listed in the .NET 10 support matrix.
 
-Candidates provide a ZIP containing `TESTING.md` and a separate SHA-256 checksum file. Extract the complete folder before running. Feedback should include the version, Windows/device environment, reproduction steps, and relevant errors. Candidate preparation and internal acceptance do not constitute a public release.
+The public test package will provide a ZIP containing `TESTING.md` and a separate SHA-256 checksum file on the [release page](https://github.com/GitRuozhi/WinPool/releases/tag/V0.63). Extract the complete folder before running. If something goes wrong or could work better, please [let us know](https://github.com/GitRuozhi/WinPool/issues), including the version, Windows/device environment, reproduction steps, and relevant errors.
 
 On Windows with PowerShell and the SDK specified by `global.json`:
 

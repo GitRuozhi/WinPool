@@ -4,9 +4,9 @@
 
 ## 当前任务与阅读
 
-**2026-10-19：V0.62实施与已授权本机验收已完成并[归档](docs/Archive/20261019-v062-local-completed/README.md)。** [活动Plan](docs/Plan.md)仅保留用户负责的验证及明确授权后的公开发布，不重开已完成W0–W6。最终候选ZIP06产品源码为`bdd8e800`，`3439a1d`仅修测试fixture；证据和未测边界只在[Quality](docs/Quality.md)维护，整体V0.62验收与发布尚未完成。既有开发数据与WDC授权保留；新增设备、推送／tag／公开发布仍需明确指令。
+**2026-10-19：当前源码V0.63，正在准备首个公开测试版。** 用户已明确授权版本增加0.01、提交并推送、重编译及GitHub Release发布。V0.62实施与已授权本机验收已[归档](docs/Archive/20261019-v062-local-completed/README.md)，不重开W0–W6；本轮不改产品行为，版本变化做编译、包校验和实际启动抽查，沿用仍适用的旧证据，不另跑全量门。用户已初测认为可靠，明确允许三类人工验证未全部完成时先发布，不能记为全部验收通过。[活动Plan](docs/Plan.md)保留发布操作及人工验证，具体结果归[Quality](docs/Quality.md)。既有开发数据与WDC授权保留，新增设备仍需授权。
 
-用户2026-10-19明确V0.62验收分工：本执行方继续完成开发及其余已授权本机验证；非本机测试、连续至少8小时20 Hz长时监控、150%／200% DPI由用户负责。用户手动运行一天监控，关闭Codex后手验两档DPI并回报，Agent届时只读核对证据。这三类结果不作为本执行方收口前置，未测仍记“V0.62待用户结果”，不算通过。测试规则仍为稳定后完整检查一次，失败按影响范围补验；具体分工与处理步骤见[剩余Plan](docs/Plan.md)，原D6／D7裁决见[阶段归档](docs/Archive/20261019-v062-local-completed/Plan.md#31-三份审查不能逐字同时满足)，其余批准范围不变。
+用户2026-10-19明确验收分工：非本机测试、连续至少8小时20 Hz长时监控、150%／200% DPI由用户负责。用户拟手动运行一天监控，关闭Codex后手验两档DPI并回报，Agent届时只读核对证据。这三类任务随V0.63继续保留，不阻此次公开测试发布，未测仍记“待用户结果”，不算通过。测试规则仍为稳定后完整检查一次，失败按影响范围补验；具体步骤见[剩余Plan](docs/Plan.md)，原D6／D7裁决见[阶段归档](docs/Archive/20261019-v062-local-completed/Plan.md#31-三份审查不能逐字同时满足)，其余批准范围不变。
 
 用户同日将MAX验收改为同负载绝对时长，不再要求无法由旧证据证明的70%／50%比例；Hardware按W0独立盘与新增池负载分别验收。目标与计时边界以[归档Plan第6节](docs/Archive/20261019-v062-local-completed/Plan.md#6-性能与减负的完成标准)为准，结果与旧证据局限只在Quality维护。
 
@@ -14,7 +14,7 @@
 
 | 需要 | 入口 |
 | --- | --- |
-| 当前计划／已完成阶段 | [V0.62剩余验证与发布](docs/Plan.md)／[本机阶段归档](docs/Archive/20261019-v062-local-completed/README.md)／[Archive](docs/Archive/README.md) |
+| 当前计划／已完成阶段 | [V0.63公开测试与剩余验证](docs/Plan.md)／[本机阶段归档](docs/Archive/20261019-v062-local-completed/README.md)／[Archive](docs/Archive/README.md) |
 | 使用方式 | [中文 README](README.zh-CN.md) |
 | 产品能力与范围 | [Product](docs/Product.md) |
 | 模块、数据、构建、版本 | [Development](docs/Development.md) |
@@ -71,5 +71,5 @@ Design、Reference、Review、Archive 按需查阅；旧正文中的“必须”
 - 移动前核对源／目标绝对路径，之后确认源消失、目标存在。不因证据旧而清理；不动 `Ref/` 等已有用户文件。代码成员的删并须在代码工作获批后进行。
 - 受控资源为 `assets`；OriginArtWork、local-assets、生成物、数据库、日志不提交。构建目录替换见 Development，普通文档整理不运行清理／重建脚本。
 - 单人仓库直接在 `main` 做任务范围内本地提交，不自行建分支／PR；只提交本任务文件。推送需明确请求，推前 fetch 并检查上游为 HEAD 祖先，分叉停止，不强推。累计五个未推送提交提醒用户。tag、Release、上传和部署另需明确请求。
-- 唯一产品版本源为`Directory.Build.props`；当前V0.62／0.6.2.0，已按Plan的W6统一推进，验证与发布状态单独记录。版本规则见Development。
+- 唯一产品版本源为`Directory.Build.props`；当前V0.63／0.6.3.0，验证与发布状态单独记录。版本规则见Development。
 - 纯文档只检查内容、链接、归档和 Git 范围，不执行代码、原生、设备或视觉测试；未运行不能报通过。
