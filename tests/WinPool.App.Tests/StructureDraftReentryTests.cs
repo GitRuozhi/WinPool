@@ -175,8 +175,17 @@ public sealed class StructureDraftReentryTests
         var status = new AgentRealStructureJobResponse(jobId, "frozen-goal", RealOperationState.Succeeded,
             2, [], [], null, change == "unreconciled", SystemId: original.SystemId);
         if (change == "binding") session.Bind(fresh, fresh.Snapshot);
-        if (change is "binding" or "content")
+        if (change == "binding")
             session.Working = EditWorkspace.InsertDraftPool(session.Working, "Newer user draft");
+        if (change == "content")
+        {
+            session.Working = session.Working with
+            {
+                StoragePools = session.Working.StoragePools.Select(pool => EditWorkspace.IsDraftPool(pool.StableId)
+                    ? pool with { FriendlyName = "Newer user draft" } : pool).ToArray()
+            };
+            Assert.True(session.ContentRevision > content);
+        }
         if (change == "job") session.RealStructureResumeJobId = Guid.NewGuid();
         if (change == "unreconciled") session.OutcomeUnknown = true;
         var preservedWorking = session.Working;

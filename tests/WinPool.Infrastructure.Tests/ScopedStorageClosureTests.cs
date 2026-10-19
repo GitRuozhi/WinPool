@@ -225,6 +225,8 @@ public sealed class ScopedStorageClosureTests
 
     private const string MockGraph = """
 $ErrorActionPreference = 'Stop'
+# This isolated closure fixture omits the production prelude and its stderr diagnostics.
+function Write-WinPoolInventoryStage([string]$stage, [string]$class = '', [string]$related = '') { }
 $fixture = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $sourceQueryFailures = [System.Collections.Generic.List[object]]::new()
 $AssociationQueries = [System.Collections.Generic.List[string]]::new()
